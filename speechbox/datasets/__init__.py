@@ -8,6 +8,10 @@ all_datasets = (
     tuple(all_walkers.keys()) +
     tuple(all_parsers.keys())
 )
+all_split_types = (
+    "by-speaker",
+    "by-file",
+)
 
 def get_dataset_parser(dataset, config):
     if dataset not in all_parsers:

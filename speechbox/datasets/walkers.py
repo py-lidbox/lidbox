@@ -5,7 +5,7 @@ import os
 import collections
 import re
 
-from speechbox.system import read_wavfile
+from speechbox.system import read_wavfile, md5sum
 from . import DatasetRecursionError
 
 
@@ -22,7 +22,7 @@ class SpeechDatasetWalker:
         # Metadata for each language
         self.language_definitions = collections.OrderedDict()
         # Language label to speaker id mapping
-        self.label_to_ids = {}
+        self.ignored_speaker_ids_by_label = {}
 
     def join_root(self, *paths):
         return os.path.join(self.dataset_root, *paths)
@@ -46,10 +46,31 @@ class SpeechDatasetWalker:
     def parse_speaker_id(self, wavpath):
         raise NotImplementedError
 
+    def count_files_per_speaker_by_label(self):
+        c = {lang: collections.Counter() for lang in self.language_definitions}
+        for lang, path in iter(self):
+            speaker_id = self.parse_speaker_id(path)
+            c[lang][speaker_id] += 1
+        return c
+
+    def speakers_per_label(self):
+        counts = self.count_files_per_speaker_by_label()
+        return {label: len(files_per_speaker) for label, files_per_speaker in counts.items()}
+
+    def speaker_ids_by_label(self):
+        counts = self.count_files_per_speaker_by_label()
+        return {label: sorted(files_per_speaker.keys()) for label, files_per_speaker in counts.items()}
+
+    def set_speaker_filter(self, speaker_ids_by_label):
+        """
+        Set wavpath filter such that only files matching the speaker id in the given dict will be yielded from subsequent calls to self.walk().
+        """
+        self.ignored_speaker_ids_by_label = {label: set(ids) for label, ids in speaker_ids_by_label.items()}
+
     def speaker_id_is_ignored(self, wavpath, label):
-        if label not in self.label_to_ids:
+        if label not in self.ignored_speaker_ids_by_label:
             return False
-        return self.parse_speaker_id(wavpath) not in self.label_to_ids[label]
+        return self.parse_speaker_id(wavpath) not in self.ignored_speaker_ids_by_label[label]
 
     def label_to_bcp47(self, label):
         """Language mapping to BCP-47 identifiers.
@@ -57,7 +78,7 @@ class SpeechDatasetWalker:
         """
         raise NotImplementedError
 
-    def walk(self, file_extensions=("wav",), check_duplicates=False, check_read=False, followlinks=True, verbose=False):
+    def walk(self, file_extensions=("wav",), check_duplicates=False, check_read=False, followlinks=True, verbosity=0):
         """
         Walk over all files in the dataset and yield (language key, file path) pairs.
         By default, only *.wav files will be returned.
@@ -65,15 +86,9 @@ class SpeechDatasetWalker:
         check_read: every file will be opened with librosa.core.load and skipped if that function throws an exception.
         followlinks: also walk down symbolic links.
         """
-        if verbose:
-            print("Starting walk with walker:", str(self))
-            print("  Yielding audio files with extensions:", ', '.join(file_extensions))
-            print("  Checking for duplicate audio files by hash:", check_duplicates)
-            print("  Checking for invalid audio files by opening them:", check_read)
-            if check_read and self.sampling_rate:
-                print("  Checking that all files have sampling rate:", self.sampling_rate)
         duplicates = collections.defaultdict(list)
         num_invalid = 0
+        num_walked = 0
         def file_ok_can_yield(wavpath, lang):
             if self.speaker_id_is_ignored(wavpath, lang):
                 return False
@@ -81,27 +96,29 @@ class SpeechDatasetWalker:
                 return False
             if check_read:
                 wav, srate = read_wavfile(wavpath, sr=None)
-                if self.sampling_rate and self.sampling_rate != srate:
+                if verbosity and self.sampling_rate and self.sampling_rate != srate:
                     print("Warning: Dataset sampling rate override set to {} but audio file had native rate {}, file was '{}'".format(self.sampling_rate, srate, wavpath))
                 if wav is None:
                     num_invalid += 1
-                    print("Warning: invalid/empty/corrupted audio file '{}', skipping to next file".format(wavpath))
+                    if verbosity:
+                        print("Warning: invalid/empty/corrupted audio file '{}', skipping to next file".format(wavpath))
                     return False
             if check_duplicates:
                 content_hash = md5sum(wavpath)
                 duplicates[content_hash].append(wavpath)
                 if len(duplicates[content_hash]) > 1:
-                    print("Warning: Duplicate audio file '{}', its contents were already seen at least once during this walk".format(wavpath))
-                    print("Audio files with shared MD5 hashes:")
-                    for other_wavpath in duplicates[content_hash]:
-                        print("  ", other_wavpath)
+                    if verbosity:
+                        print("Warning: Duplicate audio file '{}', its contents were already seen at least once during this walk".format(wavpath))
+                        print("Audio files with shared MD5 hashes:")
+                        for other_wavpath in duplicates[content_hash]:
+                            print("  ", other_wavpath)
                     return False
             return True
         for lang in sorted(self.language_definitions.keys()):
             # First walk over all files in all directories specified to contain audio files corresponding to label 'lang'
             langdirs = self.language_definitions[lang].get("langdirs", [])
-            if verbose:
-                print("Label '{}' has {} directories that will now be walked over".format(lang, len(langdirs)))
+            if verbosity > 1:
+                print("Label '{}' has {} directories that will now be fully traversed".format(lang, len(langdirs)))
             for langdir in langdirs:
                 seen_directories = set()
                 for parent, _, files in os.walk(langdir, followlinks=followlinks):
@@ -110,18 +127,21 @@ class SpeechDatasetWalker:
                         raise DatasetRecursionError(this_dir + " already traversed at least once. Does the dataset directory contain symbolic links pointing to parent directories?")
                     seen_directories.add(this_dir)
                     for f in files:
+                        num_walked += 1
                         wavpath = self.join_root(parent, f)
                         if file_ok_can_yield(wavpath, lang):
                             yield lang, wavpath
             # Then yield all directly specified wavpaths
             langfiles = self.language_definitions[lang].get("langfiles", [])
-            if verbose:
+            if verbosity > 1:
                 print("Label '{}' has {} files that will now be yielded".format(lang, len(langfiles)))
             for wavpath in langfiles:
+                num_walked += 1
                 if file_ok_can_yield(wavpath, lang):
                     yield lang, wavpath
-        if verbose:
+        if verbosity > 1:
             print("Walk finished by walker:", str(self))
+            print("  Found {} files in total".format(num_walked))
             if check_duplicates:
                 num_duplicates = sum(len(paths) - 1 for paths in duplicates.values())
                 print("  Found {} duplicate audio files".format(num_duplicates))
@@ -217,27 +237,6 @@ class OGIWalker(SpeechDatasetWalker):
         # This can be verified by running the following shell command in the ogi dataset dir:
         #   find ogi_multilang_dir -name '*.wav' | grep --invert-match --basic-regexp '..call-[[:digit:]]*-.*wav$'
         return os.path.basename(path).split("call-")[1].split("-")[0]
-
-    def count_files_per_speaker_by_label(self):
-        c = {lang: collections.Counter() for lang in self.language_definitions}
-        for lang, path in iter(self):
-            speaker_id = self.parse_speaker_id(path)
-            c[lang][speaker_id] += 1
-        return c
-
-    def speakers_per_label(self):
-        counts = self.count_files_per_speaker_by_label()
-        return {label: len(files_per_speaker) for label, files_per_speaker in counts.items()}
-
-    def speaker_ids_by_label(self):
-        counts = self.count_files_per_speaker_by_label()
-        return {label: sorted(files_per_speaker.keys()) for label, files_per_speaker in counts.items()}
-
-    def set_speaker_filter(self, speaker_ids_by_label):
-        """
-        Set wavpath filter such that only files matching the speaker id in the given dict will be yielded from subsequent calls to self.walk().
-        """
-        self.label_to_ids = {label: set(ids) for label, ids in speaker_ids_by_label.items()}
 
     def get_phone_segmentation_path(self, wavpath):
         head, tail = wavpath.split("ogi_multilang")

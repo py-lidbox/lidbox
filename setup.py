@@ -14,13 +14,16 @@ setuptools.setup(
     licence="MIT",
     python_requires=">=3.5",
     install_requires=[
-        "librosa ~= 0.7.0",
-        "sox ~= 1.3.7",
         "PyYAML ~= 5.1.2",
+        "librosa ~= 0.7.0",
+        "scikit-learn ~= 0.21.3",
+        "sox ~= 1.3.7",
+        "tensorflow ~= 1.13.1",
     ],
     packages=[
         "speechbox",
         "speechbox.datasets",
+        "speechbox.preprocess",
     ],
     entry_points={
         "console_scripts": [

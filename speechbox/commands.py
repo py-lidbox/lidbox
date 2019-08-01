@@ -2,8 +2,9 @@
 Command definitions for all tools.
 """
 import argparse
-import pprint
 import os
+import pprint
+import sys
 
 import yaml
 
@@ -31,7 +32,7 @@ class ExpandAbspath(argparse.Action):
 
 
 class Command:
-    """Base command that only prints its arguments to stdout."""
+    """Base command with common helpers for all subcommands."""
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -63,17 +64,17 @@ class Command:
     def check_src(self):
         ok = True
         if not self.args.src:
-            print("Error: Specify dataset source directory with --src.")
+            print("Error: Specify dataset source directory with --src.", file=sys.stderr)
             ok = False
         elif not os.path.isdir(self.args.src):
-            print("Error: Source directory '{}' does not exist.".format(self.args.src))
+            print("Error: Source directory '{}' does not exist.".format(self.args.src), file=sys.stderr)
             ok = False
         return ok
 
     def check_dst(self):
         ok = True
         if not self.args.dst:
-            print("Error: Specify dataset destination directory with --dst.")
+            print("Error: Specify dataset destination directory with --dst.", file=sys.stderr)
             ok = False
         elif not os.path.isdir(self.args.dst):
             if self.args.create_dirs:
@@ -81,7 +82,7 @@ class Command:
                     print("Creating destination directory '{}'".format(self.args.dst))
                 os.makedirs(self.args.dst)
             else:
-                print("Error: Destination directory '{}' does not exist.".format(self.args.dst))
+                print("Error: Destination directory '{}' does not exist.".format(self.args.dst), file=sys.stderr)
                 ok = False
         return ok
 
@@ -119,6 +120,12 @@ class Dataset(Command):
         parser.add_argument("--resampling-rate",
             type=int,
             help="If given with --parse, all wavfile output will be resampled to this sampling rate.")
+        parser.add_argument("--check",
+            action="store_true",
+            help="Walk over a dataset checking every file. Might take a long time. Implies verbosity=2 during walk.")
+        parser.add_argument("--split",
+            choices=datasets.all_split_types,
+            help="Create a random training-validation-test split for a dataset into --dst.")
         return parser
 
     def walk(self):
@@ -126,12 +133,7 @@ class Dataset(Command):
             print("Walking over dataset '{}'".format(self.args.dataset_key))
         if self.args.dataset_key == "unittest":
             # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
-            if self.args.verbosity > 1:
-                print("Using unittest dataset from 'test' directory at the package root.")
-            from speechbox import __path__
-            speechbox_root = os.path.dirname(__path__[0])
-            self.args.src = os.path.join(speechbox_root, "test", "data_common_voice")
-            del __path__
+            self.args.src = speechbox._get_unittest_data_dir()
         if not self.check_src():
             return 1
         walker_config = {
@@ -139,8 +141,22 @@ class Dataset(Command):
             "sampling_rate_override": self.args.resampling_rate,
         }
         dataset_walker = datasets.get_dataset_walker(self.args.dataset_key, walker_config)
-        for label, wavpath in dataset_walker:
+        for label, wavpath in dataset_walker.walk(verbosity=self.args.verbosity):
             print(wavpath, label)
+
+    def check(self):
+        if self.args.verbosity:
+            print("Checking integrity of dataset '{}'".format(self.args.dataset_key))
+        if self.args.dataset_key == "unittest":
+            self.args.src = speechbox._get_unittest_data_dir()
+        if not self.check_src():
+            return 1
+        walker_config = {
+            "dataset_root": self.args.src,
+        }
+        dataset_walker = datasets.get_dataset_walker(self.args.dataset_key, walker_config)
+        for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=2):
+            pass
 
     def parse(self):
         if self.args.verbosity:
@@ -173,12 +189,26 @@ class Dataset(Command):
         if self.args.verbosity:
             print(num_parsed, "files processed")
 
+    def split(self):
+        if self.args.verbosity:
+            print("Creating a training-validation-test split for dataset '{}'".format(self.args.dataset_key))
+        if not (self.check_src() and self.check_dst()):
+            return 1
+
     def run(self):
         super().run()
         if self.args.walk:
-            self.walk()
+            ret = self.walk()
+            if ret: return ret
         if self.args.parse:
-            self.parse()
+            ret = self.parse()
+            if ret: return ret
+        if self.args.check:
+            ret = self.check()
+            if ret: return ret
+        if self.args.split:
+            ret = self.split()
+            if ret: return ret
 
 
 class Preprocess(Command):
