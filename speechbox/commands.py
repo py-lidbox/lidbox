@@ -60,7 +60,7 @@ class Command:
         self.args = args
         self.state = {}
 
-    def check_src_dst(self):
+    def check_src(self):
         ok = True
         if not self.args.src:
             print("Error: Specify dataset source directory with --src.")
@@ -68,6 +68,10 @@ class Command:
         elif not os.path.isdir(self.args.src):
             print("Error: Source directory '{}' does not exist.".format(self.args.src))
             ok = False
+        return ok
+
+    def check_dst(self):
+        ok = True
         if not self.args.dst:
             print("Error: Specify dataset destination directory with --dst.")
             ok = False
@@ -108,7 +112,7 @@ class Dataset(Command):
             help="Which dataset to use.")
         parser.add_argument("--walk",
             action="store_true",
-            help="Walk over a dataset, printing labels and absolute paths for each sample, one per line.")
+            help="Walk over a dataset, printing wavpath-label pairs.")
         parser.add_argument("--parse",
             action="store_true",
             help="Parse a dataset according to parameters set in the config file, given as '--config-file'.")
@@ -120,11 +124,28 @@ class Dataset(Command):
     def walk(self):
         if self.args.verbosity:
             print("Walking over dataset '{}'".format(self.args.dataset_key))
+        if self.args.dataset_key == "unittest":
+            # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
+            if self.args.verbosity > 1:
+                print("Using unittest dataset from 'test' directory at the package root.")
+            from speechbox import __path__
+            speechbox_root = os.path.dirname(__path__[0])
+            self.args.src = os.path.join(speechbox_root, "test", "data_common_voice")
+            del __path__
+        if not self.check_src():
+            return 1
+        walker_config = {
+            "dataset_root": self.args.src,
+            "sampling_rate_override": self.args.resampling_rate,
+        }
+        dataset_walker = datasets.get_dataset_walker(self.args.dataset_key, walker_config)
+        for label, wavpath in dataset_walker:
+            print(wavpath, label)
 
     def parse(self):
         if self.args.verbosity:
             print("Parsing dataset '{}'".format(self.args.dataset_key))
-        if not self.check_src_dst():
+        if not (self.check_src() and self.check_dst()):
             return 1
         parser_config = {
             "dataset_root": self.args.src,

@@ -371,9 +371,22 @@ class MGB3TestSetWalker(SpeechDatasetWalker):
         })
 
 
+class TestWalker(SpeechDatasetWalker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.language_definitions = collections.OrderedDict({
+            "cmn": {"name": "Mandarin (China)", "langdirs": [self.join_root("chinese")]},
+            "eng": {"name": "English", "langdirs": [self.join_root("english")]},
+            "fas": {"name": "Persian", "langdirs": [self.join_root("persian")]},
+            "fra": {"name": "French", "langdirs": [self.join_root("french")]},
+            "swe": {"name": "Swedish", "langdirs": [self.join_root("swedish")]},
+        })
+
+
 all_walkers = collections.OrderedDict({
     "ogi": OGIWalker,
     "vardial2017": VarDial2017Walker,
     "mgb3-testset": MGB3TestSetWalker,
     "mgb3": VarDial2017Walker,
+    "unittest": TestWalker,
 })
