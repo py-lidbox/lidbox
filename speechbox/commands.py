@@ -1,3 +1,6 @@
+"""
+Command definitions for all tools.
+"""
 import argparse
 import pprint
 import os
@@ -6,6 +9,7 @@ import yaml
 
 import speechbox
 import speechbox.datasets as datasets
+
 
 def create_argparser():
     parser = argparse.ArgumentParser(prog=speechbox.__name__)
@@ -18,6 +22,12 @@ def create_argparser():
         subparser = cmd.create_argparser(subparsers)
         subparser.set_defaults(cmd_class=cmd)
     return parser
+
+
+class ExpandAbspath(argparse.Action):
+    """Simple argparse action to expand path arguments to full paths using os.path.abspath."""
+    def __call__(self, parser, namespace, path, *args, **kwargs):
+        setattr(namespace, self.dest, os.path.abspath(path))
 
 
 class Command:
@@ -36,6 +46,14 @@ class Command:
         parser.add_argument("--create-dirs",
             action="store_true",
             help="Create non-existing directories when needed.")
+        parser.add_argument("--src",
+            type=str,
+            action=ExpandAbspath,
+            help="Source directory, depends on context.")
+        parser.add_argument("--dst",
+            type=str,
+            action=ExpandAbspath,
+            help="Target directory, depends on context.")
         return parser
 
     def __init__(self, args):
@@ -94,12 +112,9 @@ class Dataset(Command):
         parser.add_argument("--parse",
             action="store_true",
             help="Parse a dataset according to parameters set in the config file, given as '--config-file'.")
-        parser.add_argument("--src",
-            type=str,
-            help="Source directory, depends on context.")
-        parser.add_argument("--dst",
-            type=str,
-            help="Target directory, depends on context.")
+        parser.add_argument("--resampling-rate",
+            type=int,
+            help="If given with --parse, all wavfile output will be resampled to this sampling rate.")
         return parser
 
     def walk(self):
@@ -114,13 +129,16 @@ class Dataset(Command):
         parser_config = {
             "dataset_root": self.args.src,
             "output_dir": self.args.dst,
+            "resampling_rate": self.args.resampling_rate,
         }
         parser = datasets.get_dataset_parser(self.args.dataset_key, parser_config)
+        num_parsed = 0
         if not self.args.verbosity:
             for _ in parser.parse():
-                pass
+                num_parsed += 1
         else:
             for output in parser.parse():
+                num_parsed += 1
                 if any(output):
                     status, out, err = output
                     msg = "Warning:"
@@ -131,6 +149,8 @@ class Dataset(Command):
                     if err:
                         msg += " stderr: '{}'".format(err)
                     print(msg)
+        if self.args.verbosity:
+            print(num_parsed, "files processed")
 
     def run(self):
         super().run()

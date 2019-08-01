@@ -8,27 +8,41 @@ import logging
 
 import sox
 
-# silence all sox logging
-sox_logger = logging.getLogger("sox")
-for handler in sox_logger.handlers:
-    sox_logger.removeHandler(handler)
-
 
 class DatasetParser:
+    """Base parser that can transform wavfiles in some directory."""
     def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_rate=None):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.output_count_limit = output_count_limit
         self.resampling_rate = resampling_rate
 
+    def iter_wavfiles_at_root(self):
+        """Yield all wavfiles at self.dataset_root."""
+        with os.scandir(self.dataset_root) as entries:
+            for entry in entries:
+                if not entry.name.startswith('.') and entry.is_file():
+                    wavpath = os.path.join(self.dataset_root, entry.name)
+                    if sox.file_info.file_type(wavpath) == "wav":
+                        yield wavpath
+
     def parse(self):
-        pass
+        t = (sox.transform.Transformer()
+                .set_globals(verbosity=2)
+                .set_input_format(file_type="wav")
+                .set_output_format(file_type="wav"))
+        if self.resampling_rate:
+            t = t.rate(self.resampling_rate)
+        for src_path in self.iter_wavfiles_at_root():
+            dst_path = os.path.join(self.output_dir, os.path.basename(src_path))
+            yield t.build(src_path, dst_path, return_output=True)
 
     def __repr__(self):
         return "<{}: src='{}' dst='{}'>".format(self.__class__.__name__, self.dataset_root, self.output_dir)
 
 
 class CommonVoiceParser(DatasetParser):
+    """mp3 to wav parser for the Mozilla Common Voice dataset."""
     def __init__(self, dataset_root, *args, **kwargs):
         super().__init__(dataset_root, *args, **kwargs)
         with open(os.path.join(self.dataset_root, "validated.tsv")) as f:
@@ -57,5 +71,6 @@ class CommonVoiceParser(DatasetParser):
 
 
 all_parsers = collections.OrderedDict({
+    "dir-of-wavs": DatasetParser,
     "common-voice": CommonVoiceParser,
 })
