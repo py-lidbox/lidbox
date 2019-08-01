@@ -6,7 +6,7 @@ with open("README.md") as f:
 setuptools.setup(
     name="speechbox",
     version="0.0.1",
-    description=readmefile_contents.split("\n", 2)[1],
+    description="Command line toolbox for managing speech-related dataset manipulation and analysis tasks.",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
     author="Matias Lindgren",
@@ -14,10 +14,13 @@ setuptools.setup(
     licence="MIT",
     python_requires=">=3.5",
     install_requires=[
-        "librosa >= 0.7.0",
+        "librosa ~= 0.7.0",
+        "sox ~= 1.3.7",
+        "PyYAML ~= 5.1.2",
     ],
     packages=[
         "speechbox",
+        "speechbox.datasets",
     ],
     entry_points={
         "console_scripts": [
