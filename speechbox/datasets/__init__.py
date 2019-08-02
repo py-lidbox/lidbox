@@ -13,12 +13,16 @@ all_split_types = (
     "by-file",
 )
 
-def get_dataset_parser(dataset, config):
+def get_dataset_parser(dataset, config=None):
+    if config is None:
+        config = {}
     if dataset not in all_parsers:
         raise UnknownDatasetException(str(dataset))
     return all_parsers[dataset](**config)
 
-def get_dataset_walker(dataset, config):
+def get_dataset_walker(dataset, config=None):
+    if config is None:
+        config = {}
     # FIXME hack for mgb3
     # if "test_dir" in config and config["test_dir"] == config["dataset_root"]:
         # dataset = dataset + "-testset"

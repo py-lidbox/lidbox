@@ -103,13 +103,12 @@ def utterances_to_features(utterances, extractor, sequence_length, label_to_inde
 def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None):
     """
     Collect all wavpaths with the given dataset_walker and perform a random training-validation-test split.
-    Returns a 6-tuple of
-      (training_paths,
-       training_labels,
-       validation_paths,
-       validation_labels,
-       test_paths,
-       test_labels)
+    Returns a 3-tuple of (paths, labels) pairs:
+      (
+        (training_paths, training_labels),
+        (validation_paths, validation_labels),
+        (test_paths, test_labels)
+     )
     """
     all_labels, all_paths = tuple(zip(*iter(dataset_walker)))
     # training-test split from whole dataset
@@ -127,19 +126,16 @@ def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05
         test_size=validation_ratio / (1.0 - test_ratio)
     )
     return (
-        training_paths,
-        training_labels,
-        validation_paths,
-        validation_labels,
-        test_paths,
-        test_labels
+        (training_paths, training_labels),
+        (validation_paths, validation_labels),
+        (test_paths, test_labels)
     )
 
 def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None):
     """
     Same as dataset_split_samples, but the training-set split will be disjoint by speaker ID.
     In this case, test_ratio is the ratio of unique speakers in the test set to unique speakers in the training set (and similarily for the validation_ratio).
-    It is assumed that the amount of samples per speaker is more or less equal for all speakers.
+    The amount of samples per speaker should be approximately equal for all speakers to avoid inbalanced amount of samples in the resulting split.
     """
     training_speakers = {}
     test_speakers = {}
@@ -165,10 +161,7 @@ def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test
     dataset_walker.set_speaker_filter(test_speakers)
     test_labels, test_paths = tuple(zip(*iter(dataset_walker)))
     return (
-        training_paths,
-        training_labels,
-        validation_paths,
-        validation_labels,
-        test_paths,
-        test_labels
+        (training_paths, training_labels),
+        (validation_paths, validation_labels),
+        (test_paths, test_labels)
     )

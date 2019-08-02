@@ -3,8 +3,8 @@ Command line entrypoint.
 """
 import sys
 
-import speechbox
 from speechbox import commands
+
 
 def main():
     parser = commands.create_argparser()
@@ -14,4 +14,6 @@ def main():
     args = parser.parse_args()
     # Initialize a Command object from the class specified in args.cmd_class and remove the class from args
     command = args.__dict__.pop("cmd_class")(args)
-    sys.exit(command.run() or 0)
+    ret = command.run() or command.exit()
+    if ret:
+        sys.exit(ret)

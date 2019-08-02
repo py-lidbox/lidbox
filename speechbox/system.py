@@ -3,6 +3,7 @@ import hashlib
 
 import librosa
 import tensorflow as tf
+import sox
 
 
 def read_wavfile(path, **librosa_kwargs):
@@ -17,6 +18,9 @@ def write_wav(wav, path):
 
 def get_samplerate(path, **librosa_kwargs):
     return librosa.core.get_samplerate(path, **librosa_kwargs)
+
+def get_audio_type(path):
+    return sox.file_info.file_type(path)
 
 def md5sum(path):
     with open(path, "rb") as f:
