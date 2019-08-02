@@ -94,6 +94,9 @@ class SpeechDatasetWalker:
             if not os.path.exists(wavpath):
                 return False
             if check_read:
+                audio_type = get_audio_type(wavpath)
+                if verbosity and not wavpath.endswith(audio_type):
+                    print("Warning: the file extension of file '{}' does not match its contents of type '{}'".format(wavpath, audio_type))
                 wav, srate = read_wavfile(wavpath, sr=None)
                 if verbosity and self.sampling_rate and self.sampling_rate != srate:
                     print("Warning: Dataset sampling rate override set to {} but audio file had native rate {}, file was '{}'".format(self.sampling_rate, srate, wavpath))
@@ -114,7 +117,7 @@ class SpeechDatasetWalker:
                     return False
             if self.speaker_id_is_ignored(wavpath, label):
                 return False
-            if not any(get_audio_type(wavpath) == ext for ext in file_extensions):
+            if not any(wavpath.endswith(ext) for ext in file_extensions):
                 return False
             return True
         if verbosity > 1:
