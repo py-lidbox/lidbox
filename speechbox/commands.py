@@ -2,6 +2,8 @@
 Command definitions for all tools.
 """
 import argparse
+import collections
+import itertools
 import json
 import os
 import pprint
@@ -12,6 +14,7 @@ import yaml
 import speechbox
 import speechbox.datasets as datasets
 import speechbox.preprocess.transformations as transformations
+import speechbox.system as system
 
 
 def create_argparser():
@@ -147,7 +150,7 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "check", "split")
+    tasks = ("walk", "parse", "split", "check")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -191,6 +194,25 @@ class Dataset(Command):
         if "split" in self.state:
             if self.args.verbosity:
                 print("Dataset split defined in self.state, checking all files by split")
+                print("Checking that the dataset splits are disjoint by file contents")
+            split = self.state["split"]
+            for a, b in itertools.combinations(split.keys(), r=2):
+                print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
+                # Group all filepaths by hashes on the file contents
+                duplicates = collections.defaultdict(list)
+                for path in itertools.chain(split[a]["paths"], split[b]["paths"]):
+                    duplicates[system.md5sum(path)].append(path)
+                # Filter out all singleton groups
+                duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
+                if duplicates:
+                    print("error: datasets not disjoint, following files have equal content hashes:")
+                    for paths in duplicates:
+                        for path in paths:
+                            print(path)
+                else:
+                    print("ok")
+            if self.args.verbosity:
+                print("Checking all audio files in the dataset")
             dataset_walker = datasets.get_dataset_walker(self.args.dataset_id)
             for split_name, split in self.state["split"].items():
                 paths, labels = split["paths"], split["labels"]
