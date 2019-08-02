@@ -11,10 +11,10 @@ def partition_into_sequences(data, sequence_length):
     If the data is not divisible by the sequence length, pad the last partition with zeros.
     >>> import numpy as np
     >>> a = np.random.normal(0, 1, (11, 3))
-    >>> b = a.copy()
-    >>> a = partition_into_sequences(a, 2)
-    >>> assert np.linalg.norm(a) == np.linalg.norm(b), "Invalid sequence partition"
-    >>> assert b.shape[0] <= a.shape[0]*a.shape[1], "Invalid sequence partition"
+    >>> p = partition_into_sequences(a, 2)
+    >>> assert np.linalg.norm(a) == np.linalg.norm(p), "Invalid sequence partition"
+    >>> assert a.shape[1] == p.shape[2], "Invalid sequence partition"
+    >>> assert a.shape[0] <= p.shape[0]*p.shape[1], "Invalid sequence partition"
     """
     assert data.ndim == 2, "Unexpected dimensions for data to partition: {}, expected 2".format(data.ndim)
     num_sequences = (data.shape[0] + sequence_length - 1) // sequence_length
@@ -23,13 +23,10 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def sequence_to_example(sequence, label, onehot_label):
+def sequence_to_example(sequence, onehot_label):
     """
-    Encode a single utterance sequence and its label as a TensorFlow SequenceExample.
+    Encode a single sequence and its label as a TensorFlow SequenceExample.
     """
-    def string_to_bytes_feature(s):
-        bytes_list = tf.train.BytesList(value=[s.encode("utf-8")])
-        return tf.train.Feature(bytes_list=bytes_list)
     def float_vec_to_float_features(v):
         return tf.train.Feature(float_list=tf.train.FloatList(value=v))
     def sequence_to_floatlist_features(seq):
@@ -37,8 +34,7 @@ def sequence_to_example(sequence, label, onehot_label):
         return tf.train.FeatureList(feature=float_features)
     # Time-independent context for time-dependent sequence
     context_definition = {
-        "label": string_to_bytes_feature(label),
-        "target": float_vec_to_float_features(onehot_label),
+        "target": float_vec_to_float_features(onehot_label_vec),
     }
     context = tf.train.Features(feature=context_definition)
     # Sequence frames as a feature list
@@ -48,19 +44,18 @@ def sequence_to_example(sequence, label, onehot_label):
     feature_lists = tf.train.FeatureLists(feature_list=feature_list_definition)
     return tf.train.SequenceExample(context=context, feature_lists=feature_lists)
 
-def sequence_example_to_model_input(seq_example, num_labels, num_features):
+def sequence_example_to_model_input(seq_example_string, num_labels, num_features):
     """
-    Decode a single sequence example as an (input, target) pair to be fed into a model being trained.
+    Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
     """
     context_definition = {
-        "label": tf.FixedLenFeature(shape=[], dtype=tf.string),
         "target": tf.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
     }
     sequence_definition = {
         "inputs": tf.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
     }
     context, sequence = tf.io.parse_single_sequence_example(
-        seq_example,
+        seq_example_string,
         context_features=context_definition,
         sequence_features=sequence_definition
     )
@@ -69,8 +64,9 @@ def sequence_example_to_model_input(seq_example, num_labels, num_features):
 def speech_dataset_to_utterances(dataset_walker, utterance_length_ms, utterance_offset_ms):
     """
     Iterate over dataset_walker yielding utterances of specified, fixed length.
+    This can be used to transform a dataset containing audio files of arbitrary length into fixed length chunks.
     """
-    label_to_wav = {lang: np.empty((0,)) for lang in dataset_walker.language_definitions}
+    label_to_wav = {label: np.empty((0,)) for label in dataset_walker.label_definitions}
     for label, wavpath in dataset_walker:
         wav, rate = dataset_walker.load(wavpath)
         wav, _ = remove_silence((wav, rate))

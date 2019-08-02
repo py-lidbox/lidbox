@@ -49,10 +49,10 @@ def load_features_as_dataset(tfrecord_paths, model_config):
     return dataset, features_meta
 
 def write_utterance(utterance, basedir):
-    lang_label, (wav, rate) = utterance
+    label, (wav, rate) = utterance
     filename = hashlib.md5(bytes(wav)).hexdigest() + '.npy'
     with open(os.path.join(basedir, filename), "wb") as out_file:
-        np.save(out_file, (lang_label, (wav, rate)), allow_pickle=True, fix_imports=False)
+        np.save(out_file, (label, (wav, rate)), allow_pickle=True, fix_imports=False)
 
 def load_utterance(path):
     with open(path, "rb") as np_file:
