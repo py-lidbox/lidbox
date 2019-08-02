@@ -376,15 +376,25 @@ class MGB3TestSetWalker(SpeechDatasetWalker):
 
 
 class TestWalker(SpeechDatasetWalker):
+    dataset_tree = {
+        "cmn": [["chinese"]],
+        "eng": [["english"]],
+        "fas": [["persian"]],
+        "fra": [["french"]],
+        "swe": [["swedish"]],
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.label_definitions = collections.OrderedDict({
-            "cmn": {"name": "Mandarin (China)", "sample_dirs": [self.join_root("chinese")]},
-            "eng": {"name": "English", "sample_dirs": [self.join_root("english")]},
-            "fas": {"name": "Persian", "sample_dirs": [self.join_root("persian")]},
-            "fra": {"name": "French", "sample_dirs": [self.join_root("french")]},
-            "swe": {"name": "Swedish", "sample_dirs": [self.join_root("swedish")]},
+            "cmn": {"name": "Mandarin (China)"},
+            "eng": {"name": "English"},
+            "fas": {"name": "Persian"},
+            "fra": {"name": "French"},
+            "swe": {"name": "Swedish"},
         })
+        if "dataset_root" in kwargs:
+            self.parse_directory_tree()
 
 
 all_walkers = collections.OrderedDict({
