@@ -49,6 +49,9 @@ class Command:
         parser.add_argument("--create-dirs",
             action="store_true",
             help="Create non-existing directories when needed.")
+        parser.add_argument("--run-cProfile",
+            action="store_true",
+            help="Do profiling on all commands and write results into a file in the working directory.")
         parser.add_argument("--src",
             type=str,
             action=ExpandAbspath,
