@@ -20,12 +20,14 @@ setuptools.setup(
         "sox ~= 1.3.7",
         "webrtcvad ~= 2.0.10",
         "numpy < 1.17",
-        "tensorflow == 2.0.0-beta1",
+        # "tensorflow == 2.0.0-beta1",
+        "tensorflow-gpu == 2.0.0-beta1",
     ],
     packages=[
         "speechbox",
         "speechbox.dataset",
         "speechbox.preprocess",
+        "speechbox.models",
     ],
     entry_points={
         "console_scripts": [

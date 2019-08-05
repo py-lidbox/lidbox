@@ -14,6 +14,7 @@ import speechbox.dataset as dataset
 import speechbox.preprocess.features as features
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
+import speechbox.models as models
 
 
 def create_argparser():
@@ -378,10 +379,72 @@ class Train(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
+        parser.add_argument("--load-model",
+            action="store_true",
+            help="Load pre-trained model from cache directory.")
+        parser.add_argument("--save-model",
+            action="store_true",
+            help="Save model to the cache directory, overwriting any existing models with the same name.")
+        parser.add_argument("--model-id",
+            type=str,
+            help="Use this value as the model name instead of the one in the experiment yaml-file.")
         return parser
+
+    def train(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for training")
+        if not self.state_data_ok():
+            return 1
+        data = self.state["data"]
+        model_config = self.experiment_config["model"]
+        if args.verbosity > 1:
+            print("\nModel config is:")
+            pprint.pprint(model_config)
+            print()
+        model = self.state["model"]
+        # Load training set consisting of pre-extracted features
+        training_set, training_set_meta = system.load_features_as_dataset(
+            # List of all .tfrecord files containing all training set samples
+            [data["training"]["features"]],
+            model_config
+        )
+        # Same for the validation set
+        validation_set, _ = system.load_features_as_dataset(
+            [data["validation"]["features"]],
+            model_config
+        )
+        model.prepare(training_set_meta, model_config)
+        if args.verbosity:
+            print("\nStarting training\n")
+        model.fit(training_set, validation_set, model_config)
+        if args.verbosity:
+            print("\nTraining finished\n")
 
     def run(self):
         super().run()
+        args = self.args
+        self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
+        if args.load_model:
+            if args.verbosity:
+                print("Loading model '{}' from the cache directory".format(self.model_id))
+            self.state["model"] = models.KerasWrapper.from_disk(args.cache_dir, self.model_id)
+        else:
+            if args.verbosity:
+                print("Creating new model '{}'".format(self.model_id))
+            self.state["model"] = models.KerasWrapper(self.model_id)
+        return self.train()
+
+    def exit(self):
+        args = self.args
+        if args.save_model:
+            if "model" not in self.state:
+                print("Error: no model to save")
+                return 1
+            saved_path = self.state["model"].to_disk(args.cache_dir)
+            if args.verbosity:
+                print("Wrote model as '{}'".format(saved_path))
+        super().exit()
 
 
 class Evaluate(Command):
@@ -394,6 +457,7 @@ class Evaluate(Command):
 
     def run(self):
         super().run()
+        return self.run_tasks()
 
 
 all_commands = (

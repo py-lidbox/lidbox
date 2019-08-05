@@ -58,10 +58,10 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
     """
     context_definition = {
-        "target": tf.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
+        "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
     }
     sequence_definition = {
-        "inputs": tf.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
+        "inputs": tf.io.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
     }
     context, sequence = tf.io.parse_single_sequence_example(
         seq_example_string,
@@ -74,7 +74,11 @@ def write_features(sequence_features, target_path):
     target_path += ".tfrecord"
     # Peek the dimensions from the first sample
     sequence, onehot_label = next(sequence_features)
-    features_meta = {"num_features": sequence.shape[1], "num_labels": len(onehot_label)}
+    features_meta = {
+        "sequence_length": sequence.shape[0],
+        "num_features": sequence.shape[1],
+        "num_labels": len(onehot_label)
+    }
     with open(target_path + ".meta.json", 'w') as meta_file:
         json.dump(features_meta, meta_file)
     # Put back the first sample
