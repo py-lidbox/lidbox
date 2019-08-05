@@ -1,5 +1,5 @@
 """
-Speech-related data analysis tools.
+Toolbox containing various speech data analysis tools.
 """
 import os
 

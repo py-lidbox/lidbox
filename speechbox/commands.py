@@ -18,7 +18,7 @@ import speechbox.system as system
 
 
 def create_argparser():
-    parser = argparse.ArgumentParser(prog=speechbox.__name__)
+    parser = argparse.ArgumentParser(prog=speechbox.__name__, description=speechbox.__doc__)
     subparsers = parser.add_subparsers(
         title="tools",
         description="subcommands for different tasks",
