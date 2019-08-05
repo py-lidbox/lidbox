@@ -1,5 +1,6 @@
 """File IO."""
 import hashlib
+import itertools
 import json
 
 import librosa
@@ -69,22 +70,28 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     )
     return sequence["inputs"], context["target"]
 
-def write_features(sequence_features, target_path, features_meta):
+def write_features(sequence_features, target_path):
     target_path += ".tfrecord"
+    # Peek the dimensions from the first sample
+    sequence, onehot_label = next(sequence_features)
+    features_meta = {"num_features": sequence.shape[1], "num_labels": len(onehot_label)}
+    with open(target_path + ".meta.json", 'w') as meta_file:
+        json.dump(features_meta, meta_file)
+    # Put back the first sample
+    sequence_features = itertools.chain([(sequence, onehot_label)], sequence_features)
+    # Write all samples
     with tf.io.TFRecordWriter(target_path, options="GZIP") as record_writer:
         for sequence, onehot_label in sequence_features:
             sequence_example = sequence_to_example(sequence, onehot_label)
             record_writer.write(sequence_example.SerializeToString())
-    with open(target_path + ".meta.json", "w") as meta_file:
-        json.dump(features_meta, meta_file)
     return target_path
 
 def load_features_as_dataset(tfrecord_paths, model_config):
     with open(tfrecord_paths[0] + ".meta.json") as f:
         features_meta = json.load(f)
+    num_labels, num_features = features_meta["num_labels"], features_meta["num_features"]
     dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
-    #TODO set data dimensions elegantly from somewhere
-    dataset = dataset.map(lambda se: sequence_example_to_model_input(se, features_meta["num_labels"], features_meta["num_features"]))
+    dataset = dataset.map(lambda se: sequence_example_to_model_input(se, num_labels, num_features))
     if model_config.get("dataset_shuffle_size", 0):
         dataset = dataset.shuffle(model_config["dataset_shuffle_size"])
     dataset = dataset.repeat()
