@@ -11,13 +11,13 @@ extractors:
 model:
     name: debug-lstm
     batch_size: 64
-    dataset_shuffle_size: 30
+    dataset_shuffle_size: 300
     epochs: 5
     loss: categorical_crossentropy
     metrics:
         - accuracy
-    num_cells: 4
+    num_cells: 8
     optimizer: adam
-    steps_per_epoch: 50
-    validation_steps: 10
+    steps_per_epoch: 200
+    validation_steps: 20
     verbose: 1

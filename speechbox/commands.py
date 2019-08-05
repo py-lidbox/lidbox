@@ -55,7 +55,7 @@ class Command:
         parser.add_argument("--verbosity", "-v",
             action="count",
             default=0,
-            help="Increase verbosity of output to stdout.")
+            help="Increases verbosity of output for each -v supplied (up to 3).")
         parser.add_argument("--run-cProfile",
             action="store_true",
             help="Do profiling on all commands and write results into a file in the working directory.")
