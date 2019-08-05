@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setuptools.setup(
     name="speechbox",
-    version="0.0.1",
+    version="0.1.0",
     description="Command line toolbox for managing speech-related dataset manipulation and analysis tasks.",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",

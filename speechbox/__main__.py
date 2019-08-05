@@ -3,6 +3,7 @@ Command line entrypoint.
 """
 import sys
 
+import speechbox
 from speechbox import commands
 
 
