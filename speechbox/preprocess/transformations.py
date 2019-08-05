@@ -1,8 +1,11 @@
 """
 Transformations on datasets.
 """
-import tensorflow as tf
+import numpy as np
 import sklearn.model_selection
+
+import speechbox.system as system
+import speechbox.preprocess.features as features
 
 
 def partition_into_sequences(data, sequence_length):
@@ -23,58 +26,21 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def sequence_to_example(sequence, onehot_label):
+def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress=0):
     """
-    Encode a single sequence and its label as a TensorFlow SequenceExample.
+    Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.
     """
-    def float_vec_to_float_features(v):
-        return tf.train.Feature(float_list=tf.train.FloatList(value=v))
-    def sequence_to_floatlist_features(seq):
-        float_features = (tf.train.Feature(float_list=tf.train.FloatList(value=frame)) for frame in seq)
-        return tf.train.FeatureList(feature=float_features)
-    # Time-independent context for time-dependent sequence
-    context_definition = {
-        "target": float_vec_to_float_features(onehot_label_vec),
-    }
-    context = tf.train.Features(feature=context_definition)
-    # Sequence frames as a feature list
-    feature_list_definition = {
-        "inputs": sequence_to_floatlist_features(sequence),
-    }
-    feature_lists = tf.train.FeatureLists(feature_list=feature_list_definition)
-    return tf.train.SequenceExample(context=context, feature_lists=feature_lists)
-
-def sequence_example_to_model_input(seq_example_string, num_labels, num_features):
-    """
-    Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
-    """
-    context_definition = {
-        "target": tf.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
-    }
-    sequence_definition = {
-        "inputs": tf.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
-    }
-    context, sequence = tf.io.parse_single_sequence_example(
-        seq_example_string,
-        context_features=context_definition,
-        sequence_features=sequence_definition
-    )
-    return sequence["inputs"], context["target"]
-
-def speech_dataset_to_utterances(dataset_walker, utterance_length_ms, utterance_offset_ms):
-    """
-    Iterate over dataset_walker yielding utterances of specified, fixed length.
-    This can be used to transform a dataset containing audio files of arbitrary length into fixed length chunks.
-    """
-    label_to_wav = {label: np.empty((0,)) for label in dataset_walker.label_definitions}
-    for label, wavpath in dataset_walker:
-        wav, rate = dataset_walker.load(wavpath)
-        wav, _ = remove_silence((wav, rate))
+    # Working memory for incomplete utterances
+    label_to_wav = {label: np.empty((0,)) for label in set(labels)}
+    for i, (label, wavpath) in enumerate(zip(labels, paths), start=1):
+        wav, rate = system.read_wavfile(wavpath)
+        if apply_vad:
+            wav, _ = features.remove_silence((wav, rate))
         wav = np.concatenate((label_to_wav[label], wav))
-        utterance_boundary = int(utterance_length_ms / 1000 * rate)
-        utterance_offset = int(utterance_offset_ms / 1000 * rate)
-        assert utterance_boundary > 0, "Invalid boundary, {}, for utterance".format(utterance_boundary)
-        assert utterance_offset > 0, "Invalid offset, {}, for utterance".format(utterance_offset)
+        utterance_boundary = int(rate * utterance_length_ms * 1e-3)
+        utterance_offset = int(rate * utterance_offset_ms * 1e-3)
+        assert utterance_boundary > 0, "Invalid boundary, {}, for utterance from file '{}'".format(utterance_boundary, wavpath)
+        assert utterance_offset > 0, "Invalid offset, {}, for utterance from file '{}'".format(utterance_offset, wavpath)
         # Split wav starting from index 0 into utterances of specified length and yield each utterance
         while wav.size > utterance_boundary:
             # Speech signal is long enough to produce an utterance, yield it
@@ -83,18 +49,25 @@ def speech_dataset_to_utterances(dataset_walker, utterance_length_ms, utterance_
             wav = wav[utterance_offset:]
         # Put rest back to wait for the next signal chunk
         label_to_wav[label] = wav
+        if print_progress and i % print_progress == 0:
+            print(i, "done", flush=True)
 
-def utterances_to_features(utterances, extractor, sequence_length, label_to_index):
+def utterances_to_features(utterances, label_to_index, extractors, sequence_length):
     """
-    Iterate over utterances, extracting features from each utterance with a given extractor and yield the features as sequences and corresponding labels.
+    Iterate over utterances, extracting features from each utterance with given extractors and yield the features as sequences and corresponding labels.
     """
+    assert len(extractors) > 0, "No extractors defined"
     for label, utterance in utterances:
-        feats = features.extract_features(utterance, extractor)
+        # Apply first extractor
+        extractor = extractors[0].copy()
+        feats = features.extract_features(utterance, extractor.pop("name"), extractor)
+        # If there are more extractors, apply them sequentially and append results to features
+        #TODO extractors[1:], figuring out how to merge dimensions might get tricky
         sequences = partition_into_sequences(feats, sequence_length)
         for sequence in sequences:
             onehot = np.zeros(len(label_to_index), dtype=np.float32)
             onehot[label_to_index[label]] = 1.0
-            yield sequence, label, onehot
+            yield sequence, onehot
 
 def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None):
     """

@@ -1,0 +1,6 @@
+utterance_length_ms: 3000
+utterance_offset_ms: 1000
+sequence_length: 16
+extractors:
+    - name: mfcc-deltas-012
+      n_mfcc: 13

@@ -1,12 +1,17 @@
 """File IO."""
 import hashlib
+import json
 
 import librosa
 import tensorflow as tf
 import sox
+import yaml
 
 
 def read_wavfile(path, **librosa_kwargs):
+    if "sr" not in librosa_kwargs:
+        # Detect sampling rate if not specified
+        librosa_kwargs["sr"] = None
     try:
         return librosa.core.load(path, **librosa_kwargs)
     except EOFError:
@@ -26,11 +31,49 @@ def md5sum(path):
     with open(path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()
 
+def sequence_to_example(sequence, onehot_label_vec):
+    """
+    Encode a single sequence and its label as a TensorFlow SequenceExample.
+    """
+    def float_vec_to_float_features(v):
+        return tf.train.Feature(float_list=tf.train.FloatList(value=v))
+    def sequence_to_floatlist_features(seq):
+        float_features = (tf.train.Feature(float_list=tf.train.FloatList(value=frame)) for frame in seq)
+        return tf.train.FeatureList(feature=float_features)
+    # Time-independent context for time-dependent sequence
+    context_definition = {
+        "target": float_vec_to_float_features(onehot_label_vec),
+    }
+    context = tf.train.Features(feature=context_definition)
+    # Sequence frames as a feature list
+    feature_list_definition = {
+        "inputs": sequence_to_floatlist_features(sequence),
+    }
+    feature_lists = tf.train.FeatureLists(feature_list=feature_list_definition)
+    return tf.train.SequenceExample(context=context, feature_lists=feature_lists)
+
+def sequence_example_to_model_input(seq_example_string, num_labels, num_features):
+    """
+    Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
+    """
+    context_definition = {
+        "target": tf.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
+    }
+    sequence_definition = {
+        "inputs": tf.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
+    }
+    context, sequence = tf.io.parse_single_sequence_example(
+        seq_example_string,
+        context_features=context_definition,
+        sequence_features=sequence_definition
+    )
+    return sequence["inputs"], context["target"]
+
 def write_features(sequence_features, target_path, features_meta):
     target_path += ".tfrecord"
     with tf.io.TFRecordWriter(target_path, options="GZIP") as record_writer:
-        for sequence in sequence_features:
-            sequence_example = sequence_to_example(*sequence)
+        for sequence, onehot_label in sequence_features:
+            sequence_example = sequence_to_example(sequence, onehot_label)
             record_writer.write(sequence_example.SerializeToString())
     with open(target_path + ".meta.json", "w") as meta_file:
         json.dump(features_meta, meta_file)
@@ -62,6 +105,10 @@ def load_utterance(path):
 def load_utterances(basedir):
     for path in os.listdir(basedir):
         yield load_utterance(os.path.join(basedir, path))
+
+def load_yaml(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
 
 def count_dataset(tfrecord_paths):
     """

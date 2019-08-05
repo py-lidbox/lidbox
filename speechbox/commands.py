@@ -9,8 +9,6 @@ import os
 import pprint
 import sys
 
-import yaml
-
 import speechbox
 import speechbox.dataset as dataset
 import speechbox.preprocess.features as features
@@ -40,12 +38,15 @@ class ExpandAbspath(argparse.Action):
 class Command:
     """Base command with common helpers for all subcommands."""
 
+    tasks = tuple()
+
     @classmethod
     def create_argparser(cls, subparsers):
         parser = subparsers.add_parser(cls.__name__.lower(), description=cls.__doc__)
-        parser.add_argument("--config-file",
+        parser.add_argument("cache_dir",
             type=str,
-            help="Path to the speechbox configuration yaml-file.")
+            action=ExpandAbspath,
+            help="Speechbox cache for storing intermediate output such as extracted features.")
         parser.add_argument("--verbosity", "-v",
             action="count",
             default=0,
@@ -61,10 +62,6 @@ class Command:
             type=str,
             action=ExpandAbspath,
             help="Target directory, depends on context.")
-        parser.add_argument("--cache-dir",
-            type=str,
-            action=ExpandAbspath,
-            help="Use this directory as a cache to store intermediate output and program state.")
         parser.add_argument("--load-state",
             action="store_true",
             help="Load command state from the cache directory.")
@@ -126,19 +123,18 @@ class Command:
             print("Running tool '{}' with arguments:".format(self.__class__.__name__.lower()))
             pprint.pprint(vars(args))
             print()
-        if args.cache_dir and not (args.load_state or args.save_state):
-            print("Warning: neither --load-state nor --save-state was given, --cache-dir does nothing in this case.", file=sys.stderr)
         if args.load_state:
             self.load_state()
-        if args.config_file:
-            if args.verbosity:
-                print("Parsing config file '{}'".format(args.config_file))
-            with open(args.config_file) as f:
-                self.state["config"] = yaml.safe_load(f)
-            if args.verbosity > 1:
-                print("Config file contents:")
-                pprint.pprint(self.state["config"])
-                print()
+
+    def run_tasks(self):
+        given_tasks = [getattr(self, task_name) for task_name in self.__class__.tasks if getattr(self.args, task_name)]
+        if not given_tasks:
+            print("Error: No tasks given, doing nothing", file=sys.stderr)
+            return 2
+        for task in given_tasks:
+            ret = task()
+            if ret:
+                return ret
 
     def exit(self):
         if self.args.save_state:
@@ -170,7 +166,7 @@ class Dataset(Command):
             help="Walk over a dataset checking every file. Might take a long time since every file will be opened.")
         parser.add_argument("--split",
             choices=dataset.all_split_types,
-            help="Create a random training-validation-test split for a dataset into --dst.")
+            help="Create a random training-validation-test split for a dataset. Use --save-state to store paths into the cache_dir in state.json.")
         return parser
 
     def walk(self):
@@ -191,16 +187,16 @@ class Dataset(Command):
         args = self.args
         if args.verbosity:
             print("Checking integrity of dataset '{}'".format(args.dataset_id))
-        if "split" in self.state:
+        if "data" in self.state:
             if args.verbosity:
-                print("Dataset split defined in self.state, checking all files by split")
-                print("Checking that the dataset splits are disjoint by file contents")
-            split = self.state["split"]
-            for a, b in itertools.combinations(split.keys(), r=2):
+                print("Dataset files defined in self.state, checking all files by group")
+                print("Checking that the dataset data groups are disjoint by file contents")
+            datagroups = self.state["data"]
+            for a, b in itertools.combinations(datagroups.keys(), r=2):
                 print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
                 # Group all filepaths by hashes on the file contents
                 duplicates = collections.defaultdict(list)
-                for path in itertools.chain(split[a]["paths"], split[b]["paths"]):
+                for path in itertools.chain(datagroups[a]["paths"], datagroups[b]["paths"]):
                     duplicates[system.md5sum(path)].append(path)
                 # Filter out all singleton groups
                 duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
@@ -214,16 +210,16 @@ class Dataset(Command):
             if args.verbosity:
                 print("Checking all audio files in the dataset")
             dataset_walker = dataset.get_dataset_walker(args.dataset_id)
-            for split_name, split in self.state["split"].items():
-                paths, labels = split["paths"], split["labels"]
+            for datagroup_name, datagroup in self.state["data"].items():
+                paths, labels = datagroup["paths"], datagroup["labels"]
                 if args.verbosity:
-                    print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(split_name, len(paths), len(labels), len(set(labels))))
+                    print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(datagroup_name, len(paths), len(labels), len(set(labels))))
                 dataset_walker.overwrite_target_paths(paths, labels)
                 for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
                     pass
         else:
             if args.verbosity:
-                print("Dataset split not defined in self.state, checking dataset from its root directory '{}'".format(args.src))
+                print("Dataset datagroups not defined in self.state, checking dataset from its root directory '{}'".format(args.src))
             if not args_src_ok():
                 return 1
             walker_config = {
@@ -275,12 +271,13 @@ class Dataset(Command):
             "dataset_root": args.src,
         }
         dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+        self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
         if args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
         else:
             splitter = transformations.dataset_split_samples
         training_set, validation_set, test_set = splitter(dataset_walker)
-        self.state["split"] = {
+        self.state["datagroups"] = {
             "training": {
                 "paths": training_set[0],
                 "labels": training_set[1]
@@ -301,32 +298,68 @@ class Dataset(Command):
         if args.dataset_id == "unittest" and not args.src:
             # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
             args.src = speechbox._get_unittest_data_dir()
-        for attr in self.__class__.tasks:
-            if getattr(args, attr):
-                ret = getattr(self, attr)()
-                if ret:
-                    return ret
-
+        return self.run_tasks()
 
 
 class Preprocess(Command):
     """Feature extraction."""
 
+    tasks = ("extract_features",)
+
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
+        parser.add_argument("experiment_config",
+            type=str,
+            action=ExpandAbspath,
+            help="Path to a yaml-file containing the experiment configuration, e.g. hyperparameters, feature extractors etc.")
         parser.add_argument("--extract-features",
-            choices=features.all_extractors.keys(),
-            help="Which feature extractor to apply on the dataset.")
+            action="store_true",
+            help="Perform feature extraction on whole dataset.")
         return parser
+
+    def extract_features(self):
+        if "datagroups" not in self.state:
+            print("Error: datagroups not defined, cannot extract features. Create a dataset split to define dataset paths, see e.g. 'speechbox dataset --help'.", file=sys.stderr)
+            return 1
+        args = self.args
+        config = self.state["experiment_config"]
+        label_to_index = self.state["label_to_index"]
+        if args.verbosity:
+            print("Starting feature extraction")
+        for datagroup_name, datagroup in self.state["datagroups"].items():
+            if args.verbosity:
+                print("Datagroup '{}' has {} audio files".format(datagroup_name, len(datagroup["paths"])))
+            labels, paths = datagroup["labels"], datagroup["paths"]
+            utterances = transformations.speech_dataset_to_utterances(
+                labels, paths,
+                utterance_length_ms=config["utterance_length_ms"],
+                utterance_offset_ms=config["utterance_offset_ms"],
+                apply_vad=config.get("apply_vad", False)
+            )
+            features = transformations.utterances_to_features(
+                utterances,
+                label_to_index=label_to_index,
+                extractors=config["extractors"],
+                sequence_length=config["sequence_length"]
+            )
+            target_path = os.path.join(args.cache_dir, datagroup_name)
+            features_meta = {"num_labels": len(label_to_index), "num_features": 39}
+            wrote_path = system.write_features(features, target_path, features_meta)
+            if args.verbosity:
+                print("Wrote '{}' features to '{}'".format(datagroup_name, wrote_path))
 
     def run(self):
         super().run()
-        args = self.args
-        if args.extract_features:
-            extractor = args.extract_features
-            wavpath = args.state["split"]["training"]["paths"][0]
-            pprint.pprint(features.extract_features(wavpath, extractor))
+        assert "experiment_config" not in self.state, "Preprocess.state unexpectedly already contains an 'experiment_config' key with '{}'. It should not yet contain anything.".format(repr(self.state["experiment_config"]))
+        if self.args.verbosity:
+            print("Loading experiment config from '{}'".format(self.args.experiment_config))
+        self.state["experiment_config"] = system.load_yaml(self.args.experiment_config)
+        if self.args.verbosity > 1:
+            print("\nExperiment config is:")
+            pprint.pprint(self.state["experiment_config"])
+            print()
+        return self.run_tasks()
 
 
 class Train(Command):

@@ -24,23 +24,21 @@ def remove_silence(wav):
     speech_indexes.extend((data.size % frame_width) * [False])
     return data[speech_indexes], fs
 
-def extract_features(utterance_wav, extractor):
-    assert isinstance(utterance_wav, tuple) and len(utterance_wav) == 2, "Expected utterance as a (signal, sample rate) tuple, but got type '{}'".format(type(utterance_wav))
-    features_func = all_extractors[extractor]["callable"]
-    num_features = all_extractors[extractor]["num_features"]
-    features = features_func(utterance_wav)
+def extract_features(utterance_wav, extractor, config):
+    assert isinstance(utterance_wav, tuple) and len(utterance_wav) == 2, "Expected utterance as a (signal, sample_rate) tuple, but got type '{}'".format(type(utterance_wav))
+    extractor_func = all_extractors[extractor]
+    features = extractor_func(utterance_wav, **config)
     assert features.ndim == 2, "Unexpected dimension {} for features, expected 2".format(features.ndim)
-    assert features.shape[1] == num_features, "Unexpected number of features {}, expected {}".format(features.shape[1], num_features)
     return features
 
-def mfcc_deltas_012(utterance):
+def mfcc_deltas_012(utterance, n_mfcc):
     """
     MFCCs, normalize each coef by L2 norm, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
     Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
     """
     signal, rate = utterance
     # Extract MFCCs
-    mfccs = librosa.feature.mfcc(y=signal, sr=rate, n_mfcc=13) #FIXME n_mfcc
+    mfccs = librosa.feature.mfcc(y=signal, sr=rate, n_mfcc=n_mfcc)
     # Normalize each coefficient such that the L2 norm for each coefficient over all frames is equal to 1
     mfccs = librosa.util.normalize(mfccs, norm=2.0, axis=0)
     # Compute deltas and delta-deltas and interleave them for every frame
@@ -53,9 +51,6 @@ def mfcc_deltas_012(utterance):
     return features.T
 
 
-all_extractors = collections.OrderedDict({
-    "mfcc-deltas-012": {
-        "callable": mfcc_deltas_012,
-        "num_features": 3 * 13,
-    },
-})
+all_extractors = collections.OrderedDict([
+    ("mfcc-deltas-012", mfcc_deltas_012),
+])
