@@ -13,6 +13,7 @@ import yaml
 
 import speechbox
 import speechbox.dataset as dataset
+import speechbox.preprocess.features as features
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
 
@@ -314,11 +315,18 @@ class Preprocess(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("-p")
+        parser.add_argument("--extract-features",
+            choices=features.all_extractors.keys(),
+            help="Which feature extractor to apply on the dataset.")
         return parser
 
     def run(self):
         super().run()
+        args = self.args
+        if args.extract_features:
+            extractor = args.extract_features
+            wavpath = args.state["split"]["training"]["paths"][0]
+            pprint.pprint(features.extract_features(wavpath, extractor))
 
 
 class Train(Command):
@@ -327,7 +335,6 @@ class Train(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("-t")
         return parser
 
     def run(self):
@@ -340,7 +347,6 @@ class Evaluate(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("-e")
         return parser
 
     def run(self):

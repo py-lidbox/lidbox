@@ -25,9 +25,9 @@ def remove_silence(wav):
     return data[speech_indexes], fs
 
 def extract_features(utterance_wav, extractor):
-    assert isinstance(utterance_wav, tuple), "Expected utterance as a (signal, rate) tuple, but got type '{}'".format(type(utterance_wav))
-    features_func = extractor_definitions[extractor]["callable"]
-    num_features = extractor_definitions[extractor]["num_features"]
+    assert isinstance(utterance_wav, tuple) and len(utterance_wav) == 2, "Expected utterance as a (signal, sample rate) tuple, but got type '{}'".format(type(utterance_wav))
+    features_func = all_extractors[extractor]["callable"]
+    num_features = all_extractors[extractor]["num_features"]
     features = features_func(utterance_wav)
     assert features.ndim == 2, "Unexpected dimension {} for features, expected 2".format(features.ndim)
     assert features.shape[1] == num_features, "Unexpected number of features {}, expected {}".format(features.shape[1], num_features)
@@ -53,8 +53,8 @@ def mfcc_deltas_012(utterance):
     return features.T
 
 
-extractor_definitions = collections.OrderedDict({
-    "mfcc_deltas_012": {
+all_extractors = collections.OrderedDict({
+    "mfcc-deltas-012": {
         "callable": mfcc_deltas_012,
         "num_features": 3 * 13,
     },
