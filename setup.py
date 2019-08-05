@@ -18,7 +18,9 @@ setuptools.setup(
         "librosa ~= 0.7.0",
         "scikit-learn ~= 0.21.3",
         "sox ~= 1.3.7",
-        "tensorflow ~= 1.13.1",
+        "webrtcvad ~= 2.0.10",
+        "numpy < 1.17",
+        "tensorflow == 2.0.0-beta1",
     ],
     packages=[
         "speechbox",
