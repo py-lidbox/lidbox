@@ -49,9 +49,6 @@ class Command:
             action="count",
             default=0,
             help="Increase verbosity of output to stdout.")
-        parser.add_argument("--create-dirs",
-            action="store_true",
-            help="Create non-existing directories when needed.")
         parser.add_argument("--run-cProfile",
             action="store_true",
             help="Do profiling on all commands and write results into a file in the working directory.")
@@ -63,14 +60,16 @@ class Command:
             type=str,
             action=ExpandAbspath,
             help="Target directory, depends on context.")
+        parser.add_argument("--cache-dir",
+            type=str,
+            action=ExpandAbspath,
+            help="Use this directory as a cache to store intermediate output and program state.")
         parser.add_argument("--load-state",
-            type=str,
-            action=ExpandAbspath,
-            help="Load command state from this json file (or directory).")
+            action="store_true",
+            help="Load command state from the cache directory.")
         parser.add_argument("--save-state",
-            type=str,
-            action=ExpandAbspath,
-            help="Save command state to this json file (or directory).")
+            action="store_true",
+            help="Save command state to the cache directory.")
         return parser
 
     def __init__(self, args):
@@ -78,66 +77,64 @@ class Command:
         self.state = {}
 
     def args_src_ok(self):
+        args = self.args
         ok = True
-        if not self.args.src:
+        if not args.src:
             print("Error: Specify dataset source directory with --src.", file=sys.stderr)
             ok = False
-        elif not os.path.isdir(self.args.src):
-            print("Error: Source directory '{}' does not exist.".format(self.args.src), file=sys.stderr)
+        elif not os.path.isdir(args.src):
+            print("Error: Source directory '{}' does not exist.".format(args.src), file=sys.stderr)
             ok = False
         return ok
 
     def args_dst_ok(self):
+        args = self.args
         ok = True
-        if not self.args.dst:
+        if not args.dst:
             print("Error: Specify dataset destination directory with --dst.", file=sys.stderr)
             ok = False
-        elif not os.path.isdir(self.args.dst):
-            if self.args.create_dirs:
-                if self.args.verbosity:
-                    print("Creating destination directory '{}'".format(self.args.dst))
-                os.makedirs(self.args.dst)
-            else:
-                print("Error: Destination directory '{}' does not exist.".format(self.args.dst), file=sys.stderr)
-                ok = False
+        elif not os.path.isdir(args.dst):
+            if args.verbosity:
+                print("Creating destination directory '{}'".format(args.dst))
+            os.makedirs(args.dst)
         return ok
 
     def load_state(self):
-        if self.args.load_state.endswith(".json"):
-            state_json = self.args.load_state
-        else:
-            state_json = os.path.join(self.args.load_state, "state.json")
-        if self.args.verbosity:
+        args = self.args
+        state_json = os.path.join(args.cache_dir, "state.json")
+        if args.verbosity:
             print("Loading state from '{}'".format(state_json))
         with open(state_json) as f:
             self.state = json.load(f)
 
     def save_state(self):
-        if self.args.save_state.endswith(".json"):
-            state_json = self.args.save_state
-        else:
-            state_json = os.path.join(self.args.save_state, "state.json")
-        if self.args.verbosity:
+        args = self.args
+        if not os.path.isdir(args.cache_dir):
+            if args.verbosity:
+                print("Creating cache directory '{}'".format(args.cache_dir))
+            os.makedirs(args.cache_dir)
+        state_json = os.path.join(args.cache_dir, "state.json")
+        if args.verbosity:
             print("Saving state to '{}'".format(state_json))
         with open(state_json, "w") as f:
             json.dump(self.state, f)
 
     def run(self):
-        if self.args.verbosity > 1:
+        args = self.args
+        if args.verbosity > 1:
             print("Running tool '{}' with arguments:".format(self.__class__.__name__.lower()))
-            pprint.pprint(vars(self.args))
+            pprint.pprint(vars(args))
             print()
-        if self.args.load_state:
+        if args.cache_dir and not (args.load_state or args.save_state):
+            print("Warning: neither --load-state nor --save-state was given, --cache-dir does nothing in this case.", file=sys.stderr)
+        if args.load_state:
             self.load_state()
-        if self.args.dataset_id == "unittest":
-            # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
-            self.args.src = speechbox._get_unittest_data_dir()
-        if self.args.config_file:
-            if self.args.verbosity:
-                print("Parsing config file '{}'".format(self.args.config_file))
-            with open(self.args.config_file) as f:
+        if args.config_file:
+            if args.verbosity:
+                print("Parsing config file '{}'".format(args.config_file))
+            with open(args.config_file) as f:
                 self.state["config"] = yaml.safe_load(f)
-            if self.args.verbosity > 1:
+            if args.verbosity > 1:
                 print("Config file contents:")
                 pprint.pprint(self.state["config"])
                 print()
@@ -176,23 +173,25 @@ class Dataset(Command):
         return parser
 
     def walk(self):
-        if self.args.verbosity:
-            print("Walking over dataset '{}'".format(self.args.dataset_id))
-        if not self.args_src_ok():
+        args = self.args
+        if args.verbosity:
+            print("Walking over dataset '{}'".format(args.dataset_id))
+        if not args_src_ok():
             return 1
         walker_config = {
-            "dataset_root": self.args.src,
-            "sampling_rate_override": self.args.resampling_rate,
+            "dataset_root": args.src,
+            "sampling_rate_override": args.resampling_rate,
         }
-        dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
-        for label, wavpath in dataset_walker.walk(verbosity=self.args.verbosity):
+        dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+        for label, wavpath in dataset_walker.walk(verbosity=args.verbosity):
             print(wavpath, label)
 
     def check(self):
-        if self.args.verbosity:
-            print("Checking integrity of dataset '{}'".format(self.args.dataset_id))
+        args = self.args
+        if args.verbosity:
+            print("Checking integrity of dataset '{}'".format(args.dataset_id))
         if "split" in self.state:
-            if self.args.verbosity:
+            if args.verbosity:
                 print("Dataset split defined in self.state, checking all files by split")
                 print("Checking that the dataset splits are disjoint by file contents")
             split = self.state["split"]
@@ -211,41 +210,42 @@ class Dataset(Command):
                             print(path)
                 else:
                     print("ok")
-            if self.args.verbosity:
+            if args.verbosity:
                 print("Checking all audio files in the dataset")
-            dataset_walker = dataset.get_dataset_walker(self.args.dataset_id)
+            dataset_walker = dataset.get_dataset_walker(args.dataset_id)
             for split_name, split in self.state["split"].items():
                 paths, labels = split["paths"], split["labels"]
-                if self.args.verbosity:
+                if args.verbosity:
                     print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(split_name, len(paths), len(labels), len(set(labels))))
                 dataset_walker.overwrite_target_paths(paths, labels)
-                for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=self.args.verbosity):
+                for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
                     pass
         else:
-            if self.args.verbosity:
-                print("Dataset split not defined in self.state, checking dataset from its root directory '{}'".format(self.args.src))
-            if not self.args_src_ok():
+            if args.verbosity:
+                print("Dataset split not defined in self.state, checking dataset from its root directory '{}'".format(args.src))
+            if not args_src_ok():
                 return 1
             walker_config = {
-                "dataset_root": self.args.src,
+                "dataset_root": args.src,
             }
-            dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
-            for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=self.args.verbosity):
+            dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+            for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
                 pass
 
     def parse(self):
-        if self.args.verbosity:
-            print("Parsing dataset '{}'".format(self.args.dataset_id))
-        if not (self.args_src_ok() and self.args_dst_ok()):
+        args = self.args
+        if args.verbosity:
+            print("Parsing dataset '{}'".format(args.dataset_id))
+        if not (args_src_ok() and args_dst_ok()):
             return 1
         parser_config = {
-            "dataset_root": self.args.src,
-            "output_dir": self.args.dst,
-            "resampling_rate": self.args.resampling_rate,
+            "dataset_root": args.src,
+            "output_dir": args.dst,
+            "resampling_rate": args.resampling_rate,
         }
-        parser = dataset.get_dataset_parser(self.args.dataset_id, parser_config)
+        parser = dataset.get_dataset_parser(args.dataset_id, parser_config)
         num_parsed = 0
-        if not self.args.verbosity:
+        if not args.verbosity:
             for _ in parser.parse():
                 num_parsed += 1
         else:
@@ -261,19 +261,20 @@ class Dataset(Command):
                     if err:
                         msg += " stderr: '{}'".format(err)
                     print(msg)
-        if self.args.verbosity:
+        if args.verbosity:
             print(num_parsed, "files processed")
 
     def split(self):
-        if self.args.verbosity:
-            print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(self.args.dataset_id, self.args.split))
-        if not self.args_src_ok():
+        args = self.args
+        if args.verbosity:
+            print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(args.dataset_id, args.split))
+        if not args_src_ok():
             return 1
         walker_config = {
-            "dataset_root": self.args.src,
+            "dataset_root": args.src,
         }
-        dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
-        if self.args.split == "by-speaker":
+        dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+        if args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
         else:
             splitter = transformations.dataset_split_samples
@@ -295,8 +296,12 @@ class Dataset(Command):
 
     def run(self):
         super().run()
+        args = self.args
+        if args.dataset_id == "unittest" and not args.src:
+            # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
+            args.src = speechbox._get_unittest_data_dir()
         for attr in self.__class__.tasks:
-            if getattr(self.args, attr):
+            if getattr(args, attr):
                 ret = getattr(self, attr)()
                 if ret:
                     return ret
