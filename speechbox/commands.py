@@ -47,6 +47,10 @@ class Command:
             type=str,
             action=ExpandAbspath,
             help="Speechbox cache for storing intermediate output such as extracted features.")
+        parser.add_argument("experiment_config",
+            type=str,
+            action=ExpandAbspath,
+            help="Path to a yaml-file containing the experiment configuration, e.g. hyperparameters, feature extractors etc.")
         parser.add_argument("--verbosity", "-v",
             action="count",
             default=0,
@@ -72,6 +76,8 @@ class Command:
 
     def __init__(self, args):
         self.args = args
+        self.dataset_id = None
+        self.experiment_config = {}
         self.state = {}
 
     def args_src_ok(self):
@@ -95,6 +101,18 @@ class Command:
             if args.verbosity:
                 print("Creating destination directory '{}'".format(args.dst))
             os.makedirs(args.dst)
+        return ok
+
+    def state_data_ok(self):
+        ok = True
+        if "data" not in self.state:
+            error_msg = (
+                "Error: self.state does not have a 'data' key containing filepaths and labels, cannot extract features."
+                " Either load an existing dataset definition from the cache with '--load-state' or create a new dataset split."
+                "\nSee e.g. 'speechbox dataset --help'."
+            )
+            print(error_msg, file=sys.stderr)
+            ok = False
         return ok
 
     def load_state(self):
@@ -123,8 +141,20 @@ class Command:
             print("Running tool '{}' with arguments:".format(self.__class__.__name__.lower()))
             pprint.pprint(vars(args))
             print()
+        if args.verbosity:
+            print("Loading experiment config from '{}'".format(args.experiment_config))
+        self.experiment_config = system.load_yaml(args.experiment_config)
+        if args.verbosity > 1:
+            print("Experiment config is:")
+            pprint.pprint(self.experiment_config)
+            print()
+        self.dataset_id = self.experiment_config["dataset_id"]
         if args.load_state:
             self.load_state()
+        if args.verbosity > 1:
+            print("Running with initial state:")
+            pprint.pprint(self.state, depth=3)
+            print()
 
     def run_tasks(self):
         given_tasks = [getattr(self, task_name) for task_name in self.__class__.tasks if getattr(self.args, task_name)]
@@ -149,9 +179,6 @@ class Dataset(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("dataset_id",
-            choices=dataset.all_datasets,
-            help="Which dataset to use.")
         parser.add_argument("--walk",
             action="store_true",
             help="Walk over a dataset, printing wavpath-label pairs.")
@@ -172,21 +199,21 @@ class Dataset(Command):
     def walk(self):
         args = self.args
         if args.verbosity:
-            print("Walking over dataset '{}'".format(args.dataset_id))
-        if not args_src_ok():
+            print("Walking over dataset '{}'".format(self.dataset_id))
+        if not self.args_src_ok():
             return 1
         walker_config = {
             "dataset_root": args.src,
             "sampling_rate_override": args.resampling_rate,
         }
-        dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+        dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         for label, wavpath in dataset_walker.walk(verbosity=args.verbosity):
             print(wavpath, label)
 
     def check(self):
         args = self.args
         if args.verbosity:
-            print("Checking integrity of dataset '{}'".format(args.dataset_id))
+            print("Checking integrity of dataset '{}'".format(self.dataset_id))
         if "data" in self.state:
             if args.verbosity:
                 print("Dataset files defined in self.state, checking all files by group")
@@ -209,7 +236,7 @@ class Dataset(Command):
                     print("ok")
             if args.verbosity:
                 print("Checking all audio files in the dataset")
-            dataset_walker = dataset.get_dataset_walker(args.dataset_id)
+            dataset_walker = dataset.get_dataset_walker(self.dataset_id)
             for datagroup_name, datagroup in self.state["data"].items():
                 paths, labels = datagroup["paths"], datagroup["labels"]
                 if args.verbosity:
@@ -220,27 +247,27 @@ class Dataset(Command):
         else:
             if args.verbosity:
                 print("Dataset datagroups not defined in self.state, checking dataset from its root directory '{}'".format(args.src))
-            if not args_src_ok():
+            if not self.args_src_ok():
                 return 1
             walker_config = {
                 "dataset_root": args.src,
             }
-            dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+            dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
             for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
                 pass
 
     def parse(self):
         args = self.args
         if args.verbosity:
-            print("Parsing dataset '{}'".format(args.dataset_id))
-        if not (args_src_ok() and args_dst_ok()):
+            print("Parsing dataset '{}'".format(self.dataset_id))
+        if not (self.args_src_ok() and self.args_dst_ok()):
             return 1
         parser_config = {
             "dataset_root": args.src,
             "output_dir": args.dst,
             "resampling_rate": args.resampling_rate,
         }
-        parser = dataset.get_dataset_parser(args.dataset_id, parser_config)
+        parser = dataset.get_dataset_parser(self.dataset_id, parser_config)
         num_parsed = 0
         if not args.verbosity:
             for _ in parser.parse():
@@ -264,20 +291,20 @@ class Dataset(Command):
     def split(self):
         args = self.args
         if args.verbosity:
-            print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(args.dataset_id, args.split))
-        if not args_src_ok():
+            print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(self.dataset_id, args.split))
+        if not self.args_src_ok():
             return 1
         walker_config = {
             "dataset_root": args.src,
         }
-        dataset_walker = dataset.get_dataset_walker(args.dataset_id, walker_config)
+        dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
         if args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
         else:
             splitter = transformations.dataset_split_samples
-        training_set, validation_set, test_set = splitter(dataset_walker)
-        self.state["datagroups"] = {
+        training_set, validation_set, test_set = splitter(dataset_walker, verbosity=args.verbosity)
+        self.state["data"] = {
             "training": {
                 "paths": training_set[0],
                 "labels": training_set[1]
@@ -294,10 +321,6 @@ class Dataset(Command):
 
     def run(self):
         super().run()
-        args = self.args
-        if args.dataset_id == "unittest" and not args.src:
-            # Special case, there is a mini-subset of the Mozilla Common Voice dataset in the source tree of this package
-            args.src = speechbox._get_unittest_data_dir()
         return self.run_tasks()
 
 
@@ -309,25 +332,20 @@ class Preprocess(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("experiment_config",
-            type=str,
-            action=ExpandAbspath,
-            help="Path to a yaml-file containing the experiment configuration, e.g. hyperparameters, feature extractors etc.")
         parser.add_argument("--extract-features",
             action="store_true",
             help="Perform feature extraction on whole dataset.")
         return parser
 
     def extract_features(self):
-        if "datagroups" not in self.state:
-            print("Error: datagroups not defined, cannot extract features. Create a dataset split to define dataset paths, see e.g. 'speechbox dataset --help'.", file=sys.stderr)
-            return 1
         args = self.args
-        config = self.state["experiment_config"]
-        label_to_index = self.state["label_to_index"]
         if args.verbosity:
             print("Starting feature extraction")
-        for datagroup_name, datagroup in self.state["datagroups"].items():
+        if not self.state_data_ok():
+            return 1
+        config = self.experiment_config
+        label_to_index = self.state["label_to_index"]
+        for datagroup_name, datagroup in self.state["data"].items():
             if args.verbosity:
                 print("Datagroup '{}' has {} audio files".format(datagroup_name, len(datagroup["paths"])))
             labels, paths = datagroup["labels"], datagroup["paths"]
@@ -344,21 +362,13 @@ class Preprocess(Command):
                 sequence_length=config["sequence_length"]
             )
             target_path = os.path.join(args.cache_dir, datagroup_name)
-            features_meta = {"num_labels": len(label_to_index), "num_features": 39}
-            wrote_path = system.write_features(features, target_path, features_meta)
+            wrote_path = system.write_features(features, target_path)
+            datagroup["features"] = wrote_path
             if args.verbosity:
                 print("Wrote '{}' features to '{}'".format(datagroup_name, wrote_path))
 
     def run(self):
         super().run()
-        assert "experiment_config" not in self.state, "Preprocess.state unexpectedly already contains an 'experiment_config' key with '{}'. It should not yet contain anything.".format(repr(self.state["experiment_config"]))
-        if self.args.verbosity:
-            print("Loading experiment config from '{}'".format(self.args.experiment_config))
-        self.state["experiment_config"] = system.load_yaml(self.args.experiment_config)
-        if self.args.verbosity > 1:
-            print("\nExperiment config is:")
-            pprint.pprint(self.state["experiment_config"])
-            print()
         return self.run_tasks()
 
 

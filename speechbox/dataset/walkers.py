@@ -125,7 +125,7 @@ class SpeechDatasetWalker:
         for label in sorted(self.label_definitions.keys()):
             # First walk over all files in all directories specified to contain audio files labeled 'label'
             sample_dirs = self.label_definitions[label].get("sample_dirs", [])
-            if verbosity > 1:
+            if verbosity > 2:
                 if sample_dirs:
                     print("Label '{}' has {} directories that will now be fully traversed to find all samples".format(label, len(sample_dirs)))
                 else:
@@ -144,7 +144,7 @@ class SpeechDatasetWalker:
                             yield label, wavpath
             # Then yield all directly specified wavpaths
             sample_files = self.label_definitions[label].get("sample_files", [])
-            if verbosity > 1:
+            if verbosity > 2:
                 if sample_files:
                     print("Label '{}' has {} samples defined as filepaths".format(label, len(sample_files)))
                 else:
