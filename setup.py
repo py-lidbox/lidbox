@@ -22,7 +22,7 @@ setuptools.setup(
     ],
     packages=[
         "speechbox",
-        "speechbox.datasets",
+        "speechbox.dataset",
         "speechbox.preprocess",
     ],
     entry_points={

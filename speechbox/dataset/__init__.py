@@ -1,8 +1,8 @@
 class UnknownDatasetException(Exception): pass
 class DatasetRecursionError(RecursionError): pass
 
-from speechbox.datasets.walkers import all_walkers
-from speechbox.datasets.parsers import all_parsers
+from speechbox.dataset.walkers import all_walkers
+from speechbox.dataset.parsers import all_parsers
 
 all_datasets = (
     tuple(all_walkers.keys()) +

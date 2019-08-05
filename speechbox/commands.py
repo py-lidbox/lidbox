@@ -12,7 +12,7 @@ import sys
 import yaml
 
 import speechbox
-import speechbox.datasets as datasets
+import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
 
@@ -156,7 +156,7 @@ class Dataset(Command):
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
         parser.add_argument("dataset_id",
-            choices=datasets.all_datasets,
+            choices=dataset.all_datasets,
             help="Which dataset to use.")
         parser.add_argument("--walk",
             action="store_true",
@@ -171,7 +171,7 @@ class Dataset(Command):
             action="store_true",
             help="Walk over a dataset checking every file. Might take a long time since every file will be opened.")
         parser.add_argument("--split",
-            choices=datasets.all_split_types,
+            choices=dataset.all_split_types,
             help="Create a random training-validation-test split for a dataset into --dst.")
         return parser
 
@@ -184,7 +184,7 @@ class Dataset(Command):
             "dataset_root": self.args.src,
             "sampling_rate_override": self.args.resampling_rate,
         }
-        dataset_walker = datasets.get_dataset_walker(self.args.dataset_id, walker_config)
+        dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
         for label, wavpath in dataset_walker.walk(verbosity=self.args.verbosity):
             print(wavpath, label)
 
@@ -213,7 +213,7 @@ class Dataset(Command):
                     print("ok")
             if self.args.verbosity:
                 print("Checking all audio files in the dataset")
-            dataset_walker = datasets.get_dataset_walker(self.args.dataset_id)
+            dataset_walker = dataset.get_dataset_walker(self.args.dataset_id)
             for split_name, split in self.state["split"].items():
                 paths, labels = split["paths"], split["labels"]
                 if self.args.verbosity:
@@ -229,7 +229,7 @@ class Dataset(Command):
             walker_config = {
                 "dataset_root": self.args.src,
             }
-            dataset_walker = datasets.get_dataset_walker(self.args.dataset_id, walker_config)
+            dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
             for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=self.args.verbosity):
                 pass
 
@@ -243,7 +243,7 @@ class Dataset(Command):
             "output_dir": self.args.dst,
             "resampling_rate": self.args.resampling_rate,
         }
-        parser = datasets.get_dataset_parser(self.args.dataset_id, parser_config)
+        parser = dataset.get_dataset_parser(self.args.dataset_id, parser_config)
         num_parsed = 0
         if not self.args.verbosity:
             for _ in parser.parse():
@@ -272,7 +272,7 @@ class Dataset(Command):
         walker_config = {
             "dataset_root": self.args.src,
         }
-        dataset_walker = datasets.get_dataset_walker(self.args.dataset_id, walker_config)
+        dataset_walker = dataset.get_dataset_walker(self.args.dataset_id, walker_config)
         if self.args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
         else:
