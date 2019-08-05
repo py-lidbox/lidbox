@@ -450,10 +450,35 @@ class Train(Command):
 class Evaluate(Command):
     """Prediction and evaluation using trained models."""
 
+    tasks = ("evaluate_test_set",)
+
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
+        parser.add_argument("--model-id",
+            type=str,
+            help="Use this value as the model name instead of the one in the experiment yaml-file.")
+        parser.add_argument("--evaluate-test-set",
+            action="store_true",
+            help="Evaluate model on test set")
         return parser
+
+    def evaluate_test_set(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for evaluation")
+        if not self.state_data_ok():
+            return 1
+        self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
+        if args.verbosity:
+            print("Loading model '{}' from the cache directory".format(self.model_id))
+        model = models.KerasWrapper.from_disk(args.cache_dir, self.model_id)
+        model_config = self.experiment_config["model"]
+        test_set, _ = system.load_features_as_dataset(
+            [self.state["data"]["test"]["features"]],
+            model_config
+        )
+        model.evaluate(test_set, model_config)
 
     def run(self):
         super().run()

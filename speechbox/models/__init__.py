@@ -7,9 +7,13 @@ import numpy as np
 class KerasWrapper:
 
     @classmethod
+    def get_model_filepath(cls, basedir, model_id):
+        return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
+
+    @classmethod
     def from_disk(cls, basedir, model_id):
         m = cls(model_id)
-        m.model = tf.keras.models.load_model(os.path.join(basedir, model_id))
+        m.model = tf.keras.models.load_model(cls.get_model_filepath(basedir, model_id))
         return m
 
     def __init__(self, model_id):
@@ -17,7 +21,7 @@ class KerasWrapper:
         self.model = None
 
     def to_disk(self, basedir):
-        model_path = os.path.join(basedir, self.__class__.__name__.lower() + '-' + self.model_id)
+        model_path = self.get_model_filepath(basedir, self.model_id)
         self.model.save(model_path, overwrite=True)
         return model_path
 
@@ -43,6 +47,13 @@ class KerasWrapper:
             epochs=model_config["epochs"],
             steps_per_epoch=model_config["steps_per_epoch"],
             validation_steps=model_config["validation_steps"],
+            verbose=model_config.get("verbose", 2)
+        )
+
+    def evaluate(self, test_set, model_config):
+        return self.model.evaluate(
+            test_set,
+            steps=model_config["validation_steps"],
             verbose=model_config.get("verbose", 2)
         )
 
