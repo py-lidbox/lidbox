@@ -50,7 +50,7 @@ def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_o
         # Put rest back to wait for the next signal chunk
         label_to_wav[label] = wav
         if print_progress and i % print_progress == 0:
-            print(i, "done", flush=True)
+            print(i, "done")
 
 def utterances_to_features(utterances, label_to_index, extractors, sequence_length):
     """

@@ -1,5 +1,5 @@
 # speechbox
-Command line toolbox for managing speech-related dataset manipulation and analysis tasks.
+Command line toolbox for managing speech classification related dataset manipulation and analysis tasks.
 
 Install with pip:
 ```bash

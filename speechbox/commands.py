@@ -116,6 +116,7 @@ class Command:
             ok = False
         return ok
 
+    #TODO gzip state json
     def load_state(self):
         args = self.args
         state_json = os.path.join(args.cache_dir, "state.json")
@@ -124,6 +125,7 @@ class Command:
         with open(state_json) as f:
             self.state = json.load(f)
 
+    #TODO gzip state json
     def save_state(self):
         args = self.args
         if not os.path.isdir(args.cache_dir):
@@ -175,26 +177,33 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "split", "check")
+    tasks = ("walk", "parse", "split", "check_split")
 
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
         parser.add_argument("--walk",
             action="store_true",
-            help="Walk over a dataset, printing wavpath-label pairs.")
+            help="Walk over a dataset with a dataset walker, gathering audio file paths and labels. By default, all paths and labels are written into experiment state under key 'all'.")
+        parser.add_argument("--output",
+            type=str,
+            action=ExpandAbspath,
+            help="Write all (wavpath, label) pairs returned by the walk to this file. Columns are separated by a single space.")
         parser.add_argument("--parse",
             action="store_true",
-            help="Parse a dataset according to parameters set in the config file, given as '--config-file'.")
+            help="TODO")
         parser.add_argument("--resampling-rate",
             type=int,
             help="If given with --parse, all wavfile output will be resampled to this sampling rate.")
         parser.add_argument("--check",
             action="store_true",
-            help="Walk over a dataset checking every file. Might take a long time since every file will be opened.")
+            help="Check that every file in the walk is unique and contains audio. Might take a long time since every file will be opened briefly with sox and/or librosa.")
         parser.add_argument("--split",
             choices=dataset.all_split_types,
-            help="Create a random training-validation-test split for a dataset. Use --save-state to store paths into the cache_dir in state.json.")
+            help="Create a random training-validation-test split for a dataset and store the splits as datagroups.")
+        parser.add_argument("--check-split",
+            action="store_true",
+            help="Check that all datagroups are disjoint.")
         return parser
 
     def walk(self):
@@ -208,54 +217,67 @@ class Dataset(Command):
             "sampling_rate_override": args.resampling_rate,
         }
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
-        for label, wavpath in dataset_walker.walk(verbosity=args.verbosity):
-            print(wavpath, label)
-
-    def check(self):
-        args = self.args
-        if args.verbosity:
-            print("Checking integrity of dataset '{}'".format(self.dataset_id))
-        if "data" in self.state:
+        if args.check:
             if args.verbosity:
-                print("Dataset files defined in self.state, checking all files by group")
-                print("Checking that the dataset data groups are disjoint by file contents")
-            datagroups = self.state["data"]
-            for a, b in itertools.combinations(datagroups.keys(), r=2):
-                print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
-                # Group all filepaths by hashes on the file contents
-                duplicates = collections.defaultdict(list)
-                for path in itertools.chain(datagroups[a]["paths"], datagroups[b]["paths"]):
-                    duplicates[system.md5sum(path)].append(path)
-                # Filter out all singleton groups
-                duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
-                if duplicates:
-                    print("error: datasets not disjoint, following files have equal content hashes:")
-                    for paths in duplicates:
-                        for path in paths:
-                            print(path)
-                else:
-                    print("ok")
-            if args.verbosity:
-                print("Checking all audio files in the dataset")
-            dataset_walker = dataset.get_dataset_walker(self.dataset_id)
-            for datagroup_name, datagroup in self.state["data"].items():
-                paths, labels = datagroup["paths"], datagroup["labels"]
-                if args.verbosity:
-                    print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(datagroup_name, len(paths), len(labels), len(set(labels))))
-                dataset_walker.overwrite_target_paths(paths, labels)
-                for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
-                    pass
+                print("'--check' given, invalid files will be ignored during the walk")
+            dataset_iter = dataset_walker.walk(check_read=True, check_duplicates=True, verbosity=args.verbosity)
         else:
             if args.verbosity:
-                print("Dataset datagroups not defined in self.state, checking dataset from its root directory '{}'".format(args.src))
-            if not self.args_src_ok():
-                return 1
-            walker_config = {
-                "dataset_root": args.src,
-            }
-            dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
-            for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
-                pass
+                print("'--check' not given, possible invalid files will be included during the walk")
+            dataset_iter = dataset_walker.walk(verbosity=args.verbosity)
+        if args.output:
+            if args.verbosity:
+                print("Will write all (wavfile, label) pairs to '{}'".format(args.output))
+            with open(args.output, 'w') as out_f:
+                for label, wavpath in dataset_iter:
+                    print(wavpath, label, sep=' ', file=out_f)
+        else:
+            data = self.state.get("data", {})
+            if args.verbosity and "all" in data:
+                print("Warning: overwriting existing paths in self.state for dataset '{}'".format(self.dataset_id))
+            # Gather all
+            labels, paths = [], []
+            for label, path in dataset_iter:
+                labels.append(label)
+                paths.append(path)
+            self.state["data"] = dict(data, all={"labels": labels, "paths": paths})
+
+    def check_split(self):
+        args = self.args
+        if args.verbosity:
+            print("Checking that all datagroups are disjoint")
+        if not self.state_data_ok():
+            return 1
+        datagroups = self.state["data"]
+        if len(datagroups) == 1 and args.verbosity:
+            print("Only one datagroup found: '{}', doing nothing".format(list(datagroups.keys())[0]))
+            return 1
+        for a, b in itertools.combinations(datagroups.keys(), r=2):
+            print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
+            # Group all filepaths by hashes on the file contents
+            duplicates = collections.defaultdict(list)
+            for path in itertools.chain(datagroups[a]["paths"], datagroups[b]["paths"]):
+                duplicates[system.md5sum(path)].append(path)
+            # Filter out all singleton groups
+            duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
+            if duplicates:
+                print("error: datasets not disjoint, following files have equal content hashes:")
+                for paths in duplicates:
+                    for path in paths:
+                        print(path)
+            else:
+                print("ok")
+
+        # if args.verbosity:
+        #     print("Checking all audio files in the dataset")
+        # dataset_walker = dataset.get_dataset_walker(self.dataset_id)
+        # for datagroup_name, datagroup in self.state["data"].items():
+        #     paths, labels = datagroup["paths"], datagroup["labels"]
+        #     if args.verbosity:
+        #         print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(datagroup_name, len(paths), len(labels), len(set(labels))))
+        #     dataset_walker.overwrite_target_paths(paths, labels)
+        #     for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
+        #         pass
 
     def parse(self):
         args = self.args
@@ -293,11 +315,24 @@ class Dataset(Command):
         args = self.args
         if args.verbosity:
             print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(self.dataset_id, args.split))
-        if not self.args_src_ok():
-            return 1
-        walker_config = {
-            "dataset_root": args.src,
-        }
+        if "all" in self.state.get("data", {}):
+            if args.verbosity:
+                print("Using existing dataset paths from self.state['data']")
+                if args.src:
+                    print("Ignoring dataset source directory '{}'".format(args.src))
+            data = self.state["data"]["all"]
+            walker_config = {
+                "paths": data["paths"],
+                "labels": data["labels"],
+            }
+        else:
+            if args.verbosity:
+                print("Dataset paths not found in self.state['data'], walking over whole dataset to gather paths")
+            if not self.args_src_ok():
+                return 1
+            walker_config = {
+                "dataset_root": args.src,
+            }
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
         if args.split == "by-speaker":
@@ -305,7 +340,7 @@ class Dataset(Command):
         else:
             splitter = transformations.dataset_split_samples
         training_set, validation_set, test_set = splitter(dataset_walker, verbosity=args.verbosity)
-        self.state["data"] = {
+        split = {
             "training": {
                 "paths": training_set[0],
                 "labels": training_set[1]
@@ -319,6 +354,10 @@ class Dataset(Command):
                 "labels": test_set[1]
             }
         }
+        # Merge split into self.state["data"], such that keys in split take priority and overwrite existing keys
+        self.state["data"] = dict(self.state.get("data", {}), **split)
+        if "all" in self.state["data"]:
+            del self.state["data"]["all"]
 
     def run(self):
         super().run()

@@ -14,9 +14,20 @@ class SpeechDatasetWalker:
     Instances of this class are iterable, yielding (label, wavpath) pairs for every file in some dataset, given the root directory of the dataset.
     The tree structure of a particular dataset is defined in the self.label_definitions dict in a subclass of this class.
     """
-    def __init__(self, dataset_root=None, sampling_rate_override=None):
-        # Where to start an os.walk from
-        # If None, then the paths should be set with overwrite_target_paths
+    def __init__(self, dataset_root=None, paths=None, labels=None, sampling_rate_override=None):
+        if dataset_root is None:
+            error_msg = (
+                "If dataset_root is None, a SpeechDatasetWalker must get its paths and labels predefined,"
+                " otherwise there is no paths to walk over"
+            )
+            assert paths and labels, error_msg
+        else:
+            error_msg = (
+                "If dataset_root is not None, then a SpeechDatasetWalker should not get its paths and labels predefined,"
+                " because they will be produced by walking over all directories starting at the dataset_root"
+            )
+            assert paths is None and labels is None, error_msg
+        # Where to start an os.walk from (unless paths and labels explicitly given)
         self.dataset_root = dataset_root
         # If not None, an integer denoting the re-sampling rate to be applied to every wav-file
         self.sampling_rate = sampling_rate_override
@@ -45,7 +56,13 @@ class SpeechDatasetWalker:
         return {label: i for i, label in enumerate(sorted(self.label_definitions))}
 
     def parse_speaker_id(self, wavpath):
-        raise NotImplementedError
+        """
+        Different datasets and corpuses denote different speakers in different ways.
+        Implement this method in a subclass for a specific corpus.
+        See e.g. OGIWalker.parse_speaker_id for an example when the speaker id can be deduced from the audio file path.
+        """
+        error_msg = "'{}' does not have a parse_speaker_id method, it must be implemented in order to distinguish between speakers".format(self.__class__)
+        raise NotImplementedError(error_msg)
 
     def count_files_per_speaker_by_label(self):
         c = {label: collections.Counter() for label in self.label_definitions}
@@ -79,42 +96,57 @@ class SpeechDatasetWalker:
         """
         raise NotImplementedError
 
-    def walk(self, file_extensions=("wav",), check_duplicates=False, check_read=False, followlinks=True, verbosity=0):
+    # This function is inherently very messy since it is used to parse clean versions out of very messy speech corpus directories.
+    # If there's some inefficient checks that should be run for every file when the corpus is traversed the first time, those checks belong in this function.
+    def walk(self, check_duplicates=False, check_read=False, followlinks=True, verbosity=0):
         """
         Walk over all files in the dataset and yield (label, filepath) pairs.
-        By default, only *.wav files will be returned.
+        Reads the contents of all audio files in all directories but does not write anything.
+        Only files ending with .wav, containing valid WAVE headers will be returned.
+
         check_duplicates: an MD5 hash will be computed for every file, and if more than 1 files with matching hashes are found, all subsequent files with matching hashes are skipped.
-        check_read: every file will be opened with librosa.core.load and skipped if that function throws an exception.
+        check_read: every file will try to be opened and its contents checked.
         followlinks: also walk down symbolic links.
+        verbosity: choose from 0, 1, 2
         """
+        file_extensions=("wav",)
         duplicates = collections.defaultdict(list)
-        num_invalid = 0
+        invalid_files = []
         num_walked = 0
         def audiofile_ok(wavpath, label):
+            # First perform validity checks to make sure wavpath contains an audio file
             if not os.path.exists(wavpath):
+                if verbosity:
+                    print("Warning: {} was supposed to yield file '{}' but it does not exist".format(repr(self), wavpath))
                 return False
             if check_read:
-                audio_type = get_audio_type(wavpath)
-                if verbosity and not wavpath.endswith(audio_type):
-                    print("Warning: the file extension of file '{}' does not match its contents of type '{}'".format(wavpath, audio_type))
+                # First try to read wavpath as a wav-file
                 wav, srate = read_wavfile(wavpath, sr=None)
                 if verbosity and self.sampling_rate and self.sampling_rate != srate:
-                    print("Warning: Dataset sampling rate override set to {} but audio file had native rate {}, file was '{}'".format(self.sampling_rate, srate, wavpath))
+                    print("Warning: Dataset sampling rate override set to {} but audio file had native rate {}:".format(self.sampling_rate))
+                    print(" ", wavpath)
+                # If the read failed, stop checking this file
                 if wav is None:
-                    num_invalid += 1
-                    if verbosity:
-                        print("Warning: invalid/empty/corrupted audio file '{}', skipping to next file".format(wavpath))
+                    invalid_files.append(wavpath)
+                    if verbosity > 2:
+                        print("Warning: invalid/empty/corrupted audio file:")
+                        print(" ", wavpath)
                     return False
+                # If the read succeeded, check that the audio file extension matches the contents
+                audio_type = get_audio_type(wavpath)
+                if verbosity and not (audio_type and wavpath.endswith(audio_type)):
+                    print("Warning: file extension does not match contents of type '{}':".format(audio_type))
+                    print(" ", wavpath)
             if check_duplicates:
                 content_hash = md5sum(wavpath)
                 duplicates[content_hash].append(wavpath)
                 if len(duplicates[content_hash]) > 1:
-                    if verbosity:
-                        print("Warning: Duplicate audio file '{}', its contents were already seen at least once during this walk".format(wavpath))
-                        print("Audio files with shared MD5 hashes:")
+                    if verbosity > 2:
+                        print("Warning: different files but contents are exactly equal:")
                         for other_wavpath in duplicates[content_hash]:
-                            print("  ", other_wavpath)
+                            print(" ", other_wavpath)
                     return False
+            # Validity checks done, now check the filters for this audio file
             if self.speaker_id_is_ignored(wavpath, label):
                 return False
             if not any(wavpath.endswith(ext) for ext in file_extensions):
@@ -127,9 +159,9 @@ class SpeechDatasetWalker:
             sample_dirs = self.label_definitions[label].get("sample_dirs", [])
             if verbosity > 2:
                 if sample_dirs:
-                    print("Label '{}' has {} directories that will now be fully traversed to find all samples".format(label, len(sample_dirs)))
+                    print("Label '{}' has {} directories that will now be fully traversed in search for audio files".format(label, len(sample_dirs)))
                 else:
-                    print("Label '{}' has no directories containing samples".format(label))
+                    print("Label '{}' has no directories specified that should be traversed".format(label))
             for sample_dir in sample_dirs:
                 seen_directories = set()
                 for parent, _, files in os.walk(sample_dir, followlinks=followlinks):
@@ -144,11 +176,8 @@ class SpeechDatasetWalker:
                             yield label, wavpath
             # Then yield all directly specified wavpaths
             sample_files = self.label_definitions[label].get("sample_files", [])
-            if verbosity > 2:
-                if sample_files:
-                    print("Label '{}' has {} samples defined as filepaths".format(label, len(sample_files)))
-                else:
-                    print("Label '{}' has no samples defined as filepaths".format(label))
+            if verbosity > 2 and sample_files:
+                print("Label '{}' has {} paths to audio files pre-defined, they will now be returned one by one".format(label, len(sample_files)))
             for wavpath in sample_files:
                 num_walked += 1
                 if audiofile_ok(wavpath, label):
@@ -156,12 +185,25 @@ class SpeechDatasetWalker:
         if verbosity > 1:
             print("Walk finished by walker:", str(self))
         if verbosity:
-            print("  Found {} audio files in total".format(num_walked))
+            print("Found {} audio files in total".format(num_walked))
             if check_duplicates:
-                num_duplicates = sum(len(paths) - 1 for paths in duplicates.values())
-                print("  Found {} duplicate audio files".format(num_duplicates))
+                duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
+                print("Found {} duplicate audio files".format(len(duplicates)))
+                if verbosity > 1:
+                    print("Groups of files that all have the same MD5 hash of their contents:")
+                    print("-- Duplicate file groups begin --")
+                    for paths in duplicates:
+                        for p in paths:
+                            print(p)
+                        print()
+                    print("-- Duplicate file groups end --")
             if check_read:
-                print("  Found {} invalid/empty/corrupted audio files".format(num_invalid))
+                print("Found {} invalid/empty/corrupted audio files".format(len(invalid_files)))
+                if verbosity > 1:
+                    print("-- Invalid files begin --")
+                    for f in invalid_files:
+                        print(f)
+                    print("-- Invalid files end --")
 
     def parse_directory_tree(self):
         for label, definition in self.label_definitions.items():
@@ -225,8 +267,11 @@ class OGIWalker(SpeechDatasetWalker):
             "tam": {"name": "Tamil"},
             "vie": {"name": "Vietnamese"},
         })
-        if "dataset_root" in kwargs:
+        #FIXME this is getting out of hand, maybe use a factory classmethod instead
+        if kwargs.get("dataset_root"):
             self.parse_directory_tree()
+        else:
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
         self.bcp47_mappings = {
             "cmn": "zh", # Chinese, Mandarin (Simplified, China)
             "eng": "en-US",
@@ -396,8 +441,10 @@ class TestWalker(SpeechDatasetWalker):
             "fra": {"name": "French"},
             "swe": {"name": "Swedish"},
         })
-        if "dataset_root" in kwargs:
+        if kwargs.get("dataset_root"):
             self.parse_directory_tree()
+        else:
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
 
 
 all_walkers = collections.OrderedDict({

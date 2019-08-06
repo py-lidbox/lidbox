@@ -26,7 +26,10 @@ def get_samplerate(path, **librosa_kwargs):
     return librosa.core.get_samplerate(path, **librosa_kwargs)
 
 def get_audio_type(path):
-    return sox.file_info.file_type(path)
+    try:
+        return sox.file_info.file_type(path)
+    except sox.core.SoxiError:
+        return None
 
 def md5sum(path):
     with open(path, "rb") as f:
