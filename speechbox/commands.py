@@ -136,7 +136,7 @@ class Command:
         if args.verbosity:
             print("Saving state to '{}'".format(state_json))
         with open(state_json, "w") as f:
-            json.dump(self.state, f)
+            json.dump(self.state, f, sort_keys=True, indent=2)
 
     def run(self):
         args = self.args
@@ -223,7 +223,7 @@ class Dataset(Command):
             dataset_iter = dataset_walker.walk(check_read=True, check_duplicates=True, verbosity=args.verbosity)
         else:
             if args.verbosity:
-                print("'--check' not given, possible invalid files will be included during the walk")
+                print("'--check' not given, walk will be much faster but invalid files will not be ignored")
             dataset_iter = dataset_walker.walk(verbosity=args.verbosity)
         if args.output:
             if args.verbosity:
@@ -240,7 +240,13 @@ class Dataset(Command):
             for label, path in dataset_iter:
                 labels.append(label)
                 paths.append(path)
-            self.state["data"] = dict(data, all={"labels": labels, "paths": paths})
+            walk_data = {
+                "label_to_index": dataset_walker.make_label_to_index_dict(),
+                "labels": labels,
+                "paths": paths
+            }
+            # Merge to state under key 'all'
+            self.state["data"] = dict(data, all=walk_data)
 
     def check_split(self):
         args = self.args
@@ -317,7 +323,7 @@ class Dataset(Command):
             print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(self.dataset_id, args.split))
         if "all" in self.state.get("data", {}):
             if args.verbosity:
-                print("Using existing dataset paths from self.state['data']")
+                print("Using existing dataset paths from current state, possibly loaded from the cache")
                 if args.src:
                     print("Ignoring dataset source directory '{}'".format(args.src))
             data = self.state["data"]["all"]
@@ -393,7 +399,8 @@ class Preprocess(Command):
                 labels, paths,
                 utterance_length_ms=config["utterance_length_ms"],
                 utterance_offset_ms=config["utterance_offset_ms"],
-                apply_vad=config.get("apply_vad", False)
+                apply_vad=config.get("apply_vad", False),
+                print_progress=config.get("print_progress", 0)
             )
             features = transformations.utterances_to_features(
                 utterances,
@@ -506,7 +513,9 @@ class Evaluate(Command):
         args = self.args
         if args.verbosity:
             print("Preparing model for evaluation")
-        if not self.state_data_ok():
+        if "test" not in self.state.get("data", {}):
+            if args.verbosity:
+                print("Error: test set paths not found, you need to use '--load-state'")
             return 1
         self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
         if args.verbosity:

@@ -1,5 +1,6 @@
 """File IO."""
 import hashlib
+import functools
 import itertools
 import json
 
@@ -31,6 +32,7 @@ def get_audio_type(path):
     except sox.core.SoxiError:
         return None
 
+@functools.lru_cache(maxsize=2**16)
 def md5sum(path):
     with open(path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()

@@ -1,5 +1,11 @@
 #!/usr/bin/env sh
 set -e
+
+if [ -z $(command -v speechbox) ]; then
+	echo "You need to install the speechbox package first"
+	exit 1
+fi
+
 cache_dir=./cache/example_experiment
 experiment_config=./experiment.example.yaml
 speech_corpus_root=./test/data_common_voice
