@@ -388,13 +388,21 @@ class Dataset(Command):
                 return 1
             output_dir = os.path.join(kaldi_dir, datagroup_name)
             self.make_named_dir(output_dir)
-            with open(os.path.join(output_dir, "wav.scp"), 'w') as wav_scp, \
-                 open(os.path.join(output_dir, "utt2spk"), 'w') as utt2spk:
-                for _, wavpath in dataset_walker.walk(verbosity=args.verbosity):
-                    file_id = dataset_walker.get_file_id(wavpath)
-                    speaker_id = dataset_walker.parse_speaker_id(wavpath)
-                    print(file_id, wavpath, file=wav_scp)
-                    print(file_id, speaker_id, file=utt2spk)
+            wav_scp, utt2spk = [], []
+            for _, wavpath in dataset_walker.walk(verbosity=args.verbosity):
+                file_id = str(dataset_walker.get_file_id(wavpath))
+                speaker_id = str(dataset_walker.parse_speaker_id(wavpath))
+                wav_scp.append((file_id, wavpath))
+                # Add speaker- prefix to make sure no sorting script tries to automatically switch to numerical sort
+                utt2spk.append((file_id, "speaker-" + speaker_id))
+            wav_scp.sort()
+            utt2spk.sort()
+            with open(os.path.join(output_dir, "wav.scp"), 'w') as wav_scp_f:
+                for line in wav_scp:
+                    print(*line, file=wav_scp_f)
+            with open(os.path.join(output_dir, "utt2spk"), 'w') as utt2spk_f:
+                for line in utt2spk:
+                    print(*line, file=utt2spk_f)
             with open(os.path.join(output_dir, "mfcc.conf"), 'w') as mfcc_conf:
                 print("--use-energy=false", file=mfcc_conf)
                 print("--sample-frequency={:d}".format(dataset_walker.sample_frequency or 16000), file=mfcc_conf)
