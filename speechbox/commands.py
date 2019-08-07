@@ -395,9 +395,7 @@ class Dataset(Command):
                     speaker_id = dataset_walker.parse_speaker_id(wavpath)
                     print(file_id, wavpath, file=wav_scp)
                     print(file_id, speaker_id, file=utt2spk)
-            conf_dir = os.path.join(output_dir, "conf")
-            self.make_named_dir(conf_dir)
-            with open(os.path.join(conf_dir, "mfcc.conf"), 'w') as mfcc_conf:
+            with open(os.path.join(output_dir, "mfcc.conf"), 'w') as mfcc_conf:
                 print("--use-energy=false", file=mfcc_conf)
                 print("--sample-frequency={:d}".format(dataset_walker.sample_frequency or 16000), file=mfcc_conf)
 
