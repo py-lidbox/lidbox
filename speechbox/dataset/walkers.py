@@ -223,6 +223,59 @@ class SpeechDatasetWalker:
 
 
 class OGIWalker(SpeechDatasetWalker):
+    """
+    Walker for corpus:
+    Cole, Ronald, and Yeshwant Muthusamy. OGI Multilanguage Corpus LDC94S17. Web Download. Philadelphia: Linguistic Data Consortium, 1994.
+    Available from https://catalog.ldc.upenn.edu.
+    """
+    dataset_tree = {
+        "cmn": [["wav", "mandarin"]],
+        "deu": [["wav", "german"]],
+        "eng": [["wav", "english"]],
+        "fas": [["wav", "farsi"]],
+        "fra": [["wav", "french"]],
+        "hin": [["wav", "hindi"]],
+        "jpn": [["wav", "japanese"]],
+        "kor": [["wav", "korean"]],
+        "spa": [["wav", "spanish"]],
+        "tam": [["wav", "tamil"]],
+        "vie": [["wav", "vietnam"]],
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.label_definitions = collections.OrderedDict([
+            ("cmn", {"name": "Mandarin Chinese"}),
+            ("deu", {"name": "German"}),
+            ("eng", {"name": "English"}),
+            ("fas", {"name": "Persian/Farsi"}),
+            ("fra", {"name": "French"}),
+            ("hin", {"name": "Hindi"}),
+            ("jpn", {"name": "Japanese"}),
+            ("kor", {"name": "Korean"}),
+            ("spa", {"name": "Spanish"}),
+            ("tam", {"name": "Tamil"}),
+            ("vie", {"name": "Vietnam"}),
+        ])
+        #FIXME this is getting out of hand, maybe use a factory classmethod instead
+        if kwargs.get("dataset_root"):
+            self.parse_directory_tree()
+        else:
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
+
+    def parse_speaker_id(self, path):
+        """
+        All filenames should be of form <langcode><callnumber><type>.wav,
+        where lengths are:
+            langcode: 2
+            callnumber: 3
+            type: 3
+        """
+        return os.path.basename(path)[2:5]
+
+
+class OGIWalker2(SpeechDatasetWalker):
+    """Legacy thing"""
     dataset_tree = {
         "eng": [
             ("cd01", "speech", "english")
@@ -268,7 +321,6 @@ class OGIWalker(SpeechDatasetWalker):
             "tam": {"name": "Tamil"},
             "vie": {"name": "Vietnamese"},
         })
-        #FIXME this is getting out of hand, maybe use a factory classmethod instead
         if kwargs.get("dataset_root"):
             self.parse_directory_tree()
         else:
