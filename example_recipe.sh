@@ -6,6 +6,11 @@ if [ -z $(command -v speechbox) ]; then
 	exit 1
 fi
 
+# Disable buffering to flush all output as soon it becomes available
+if [ -z $PYTHONUNBUFFERED ]; then
+	export PYTHONUNBUFFERED=1
+fi
+
 cache_dir=./cache/example_experiment
 experiment_config=./experiment.example.yaml
 speech_corpus_root=./test/data_common_voice
