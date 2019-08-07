@@ -3,19 +3,17 @@ Command definitions for all tools.
 """
 import argparse
 import collections
-import gzip
 import itertools
-import json
 import os
 import pprint
 import sys
 
 import speechbox
 import speechbox.dataset as dataset
+import speechbox.models as models
 import speechbox.preprocess.features as features
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
-import speechbox.models as models
 
 
 def create_argparser():
@@ -129,8 +127,7 @@ class Command:
         state_path = os.path.join(args.cache_dir, "state.json.gz")
         if args.verbosity:
             print("Loading state from '{}'".format(state_path))
-        with gzip.open(state_path, mode="rt", encoding="utf-8") as f:
-            self.state = json.load(f)
+        self.state = system.load_gzip_json(state_path)
 
     def save_state(self):
         args = self.args
@@ -138,9 +135,7 @@ class Command:
         state_path = os.path.join(args.cache_dir, "state.json.gz")
         if args.verbosity:
             print("Saving state to '{}'".format(state_path))
-        with gzip.open(state_path, "wb") as json_gz:
-            json_bytes = json.dumps(self.state, sort_keys=True, indent=2).encode('utf-8')
-            json_gz.write(json_bytes)
+        system.dump_gzip_json(self.state, state_path)
 
     def run(self):
         args = self.args

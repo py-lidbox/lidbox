@@ -1,12 +1,13 @@
 """File IO."""
-import hashlib
 import functools
+import gzip
+import hashlib
 import itertools
 import json
 
 import librosa
-import tensorflow as tf
 import sox
+import tensorflow as tf
 import yaml
 
 
@@ -36,6 +37,14 @@ def get_audio_type(path):
 def md5sum(path):
     with open(path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()
+
+def load_gzip_json(path):
+    with gzip.open(path, mode="rt", encoding="utf-8") as f:
+        return json.load(f)
+
+def dump_gzip_json(data, path):
+    with gzip.open(path, "wb") as f:
+        f.write(json.dumps(data, sort_keys=True, indent=2).encode('utf-8'))
 
 def sequence_to_example(sequence, onehot_label_vec):
     """
