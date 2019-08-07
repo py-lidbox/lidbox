@@ -188,16 +188,17 @@ class SpeechDatasetWalker:
             print("Found {} audio files in total".format(num_walked))
             if check_duplicates:
                 duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
-                print("Found {} duplicate audio files".format(len(duplicates)))
-                if verbosity > 1:
-                    print("Groups of files that all have the same MD5 hash of their contents:")
-                    print("-- Duplicate file groups begin --")
-                    for paths in duplicates:
-                        for p in paths:
-                            print(p)
-                        print()
-                    print("-- Duplicate file groups end --")
-            if check_read:
+                if duplicates:
+                    print("Found {} duplicate audio files".format(len(duplicates)))
+                    if verbosity > 1:
+                        print("Groups of files that all have the same MD5 hash of their contents:")
+                        print("-- Duplicate file groups begin --")
+                        for paths in duplicates:
+                            for p in paths:
+                                print(p)
+                            print()
+                        print("-- Duplicate file groups end --")
+            if check_read and invalid_files:
                 print("Found {} invalid/empty/corrupted audio files".format(len(invalid_files)))
                 if verbosity > 1:
                     print("-- Invalid files begin --")
