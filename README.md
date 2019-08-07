@@ -6,6 +6,8 @@ The slightly more sane alternative to a legacy shell script spaghetti of hard-co
 
 ## Quickstart
 
+Make sure you have [`sox`](http://sox.sourceforge.net/) installed and on your path.
+
 Install with pip (you might want to use a clean virtual environment):
 ```bash
 pip install https://github.com/matiaslindgren/speechbox/archive/master.zip
