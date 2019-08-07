@@ -3,6 +3,7 @@ Command definitions for all tools.
 """
 import argparse
 import collections
+import gzip
 import itertools
 import json
 import os
@@ -98,10 +99,8 @@ class Command:
         if not args.dst:
             print("Error: Specify dataset destination directory with --dst.", file=sys.stderr)
             ok = False
-        elif not os.path.isdir(args.dst):
-            if args.verbosity:
-                print("Creating destination directory '{}'".format(args.dst))
-            os.makedirs(args.dst)
+        else:
+            self.make_named_dir(args.dst, "destination")
         return ok
 
     def state_data_ok(self):
@@ -116,27 +115,32 @@ class Command:
             ok = False
         return ok
 
-    #TODO gzip state json
+    def make_named_dir(self, path, name=None):
+        if not os.path.isdir(path):
+            if self.args.verbosity:
+                if name:
+                    print("Creating {} directory '{}'".format(name, path))
+                else:
+                    print("Creating directory '{}'".format(path))
+            os.makedirs(path)
+
     def load_state(self):
         args = self.args
-        state_json = os.path.join(args.cache_dir, "state.json")
+        state_path = os.path.join(args.cache_dir, "state.json.gz")
         if args.verbosity:
-            print("Loading state from '{}'".format(state_json))
-        with open(state_json) as f:
+            print("Loading state from '{}'".format(state_path))
+        with gzip.open(state_path, mode="rt", encoding="utf-8") as f:
             self.state = json.load(f)
 
-    #TODO gzip state json
     def save_state(self):
         args = self.args
-        if not os.path.isdir(args.cache_dir):
-            if args.verbosity:
-                print("Creating cache directory '{}'".format(args.cache_dir))
-            os.makedirs(args.cache_dir)
-        state_json = os.path.join(args.cache_dir, "state.json")
+        self.make_named_dir(args.cache_dir, "cache")
+        state_path = os.path.join(args.cache_dir, "state.json.gz")
         if args.verbosity:
-            print("Saving state to '{}'".format(state_json))
-        with open(state_json, "w") as f:
-            json.dump(self.state, f, sort_keys=True, indent=2)
+            print("Saving state to '{}'".format(state_path))
+        with gzip.open(state_path, "wb") as json_gz:
+            json_bytes = json.dumps(self.state, sort_keys=True, indent=2).encode('utf-8')
+            json_gz.write(json_bytes)
 
     def run(self):
         args = self.args
@@ -177,7 +181,7 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "split", "check_split")
+    tasks = ("walk", "parse", "split", "check_split", "to_kaldi")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -204,6 +208,10 @@ class Dataset(Command):
         parser.add_argument("--check-split",
             action="store_true",
             help="Check that all datagroups are disjoint.")
+        parser.add_argument("--to-kaldi",
+            type=str,
+            action=ExpandAbspath,
+            help="Write dataset paths and current state as valid input for the Kaldi toolkit into the given directory. Creates wav.scp and utt2spk.")
         return parser
 
     def walk(self):
@@ -214,7 +222,7 @@ class Dataset(Command):
             return 1
         walker_config = {
             "dataset_root": args.src,
-            "sampling_rate_override": args.resampling_rate,
+            "sample_frequency": args.resampling_rate,
         }
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         if args.check:
@@ -294,7 +302,7 @@ class Dataset(Command):
         parser_config = {
             "dataset_root": args.src,
             "output_dir": args.dst,
-            "resampling_rate": args.resampling_rate,
+            "resampling_rate": args.sample_frequency,
         }
         parser = dataset.get_dataset_parser(self.dataset_id, parser_config)
         num_parsed = 0
@@ -364,6 +372,34 @@ class Dataset(Command):
         self.state["data"] = dict(self.state.get("data", {}), **split)
         if "all" in self.state["data"]:
             del self.state["data"]["all"]
+
+    def to_kaldi(self):
+        args = self.args
+        kaldi_dir = args.to_kaldi
+        self.make_named_dir(kaldi_dir, "kaldi output")
+        for datagroup_name, datagroup in self.state["data"].items():
+            paths, labels = datagroup["paths"], datagroup["labels"]
+            if args.verbosity:
+                print("'{}', containing {} paths".format(datagroup_name, len(paths)))
+            dataset_walker = dataset.get_dataset_walker(self.dataset_id, {"paths": paths, "labels": labels})
+            if not hasattr(dataset_walker, "parse_speaker_id"):
+                if args.verbosity:
+                    print("Error: Dataset walker '{}' does not support parsing speaker ids from audio file paths, cannot create 'utt2spk'. Define a parse_speaker_id for the walker class.".format(str(dataset_walker)))
+                return 1
+            output_dir = os.path.join(kaldi_dir, datagroup_name)
+            self.make_named_dir(output_dir)
+            with open(os.path.join(output_dir, "wav.scp"), 'w') as wav_scp, \
+                 open(os.path.join(output_dir, "utt2spk"), 'w') as utt2spk:
+                for _, wavpath in dataset_walker.walk(verbosity=args.verbosity):
+                    file_id = dataset_walker.get_file_id(wavpath)
+                    speaker_id = dataset_walker.parse_speaker_id(wavpath)
+                    print(file_id, wavpath, file=wav_scp)
+                    print(file_id, speaker_id, file=utt2spk)
+            conf_dir = os.path.join(output_dir, "conf")
+            self.make_named_dir(conf_dir)
+            with open(os.path.join(conf_dir, "mfcc.conf"), 'w') as mfcc_conf:
+                print("--use-energy=false", file=mfcc_conf)
+                print("--sample-frequency={:d}".format(dataset_walker.sample_frequency or 16000), file=mfcc_conf)
 
     def run(self):
         super().run()

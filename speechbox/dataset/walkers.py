@@ -14,7 +14,7 @@ class SpeechDatasetWalker:
     Instances of this class are iterable, yielding (label, wavpath) pairs for every file in some dataset, given the root directory of the dataset.
     The tree structure of a particular dataset is defined in the self.label_definitions dict in a subclass of this class.
     """
-    def __init__(self, dataset_root=None, paths=None, labels=None, sampling_rate_override=None):
+    def __init__(self, dataset_root=None, paths=None, labels=None, sample_frequency=None):
         if dataset_root is None:
             error_msg = (
                 "If dataset_root is None, a SpeechDatasetWalker must get its paths and labels predefined,"
@@ -29,8 +29,8 @@ class SpeechDatasetWalker:
             assert paths is None and labels is None, error_msg
         # Where to start an os.walk from (unless paths and labels explicitly given)
         self.dataset_root = dataset_root
-        # If not None, an integer denoting the re-sampling rate to be applied to every wav-file
-        self.sampling_rate = sampling_rate_override
+        # If not None, an integer denoting the expected sample frequency/rate in Hz
+        self.sample_frequency = sample_frequency
         # Metadata for each label
         self.label_definitions = collections.OrderedDict()
         # Label to speaker id mapping
@@ -50,19 +50,19 @@ class SpeechDatasetWalker:
             self.label_definitions[label]["sample_files"].append(path)
 
     def load(self, wavpath):
-        return read_wavfile(wavpath, sr=self.sampling_rate)
+        return read_wavfile(wavpath, sr=self.sample_frequency)
+
+    def get_file_id(self, wavpath):
+        return os.path.basename(wavpath).split(".wav")[0]
 
     def make_label_to_index_dict(self):
         return {label: i for i, label in enumerate(sorted(self.label_definitions))}
 
-    def parse_speaker_id(self, wavpath):
-        """
-        Different datasets and corpuses denote different speakers in different ways.
-        Implement this method in a subclass for a specific corpus.
-        See e.g. OGIWalker.parse_speaker_id for an example when the speaker id can be deduced from the audio file path.
-        """
-        error_msg = "'{}' does not have a parse_speaker_id method, it must be implemented in order to distinguish between speakers".format(self.__class__)
-        raise NotImplementedError(error_msg)
+    # Different datasets and corpuses denote different speakers in different ways.
+    # Implement this method in a subclass for a specific corpus.
+    # See e.g. OGIWalker.parse_speaker_id for an example when the speaker id can be deduced from the audio file path.
+    # def parse_speaker_id(self, wavpath):
+        # pass
 
     def count_files_per_speaker_by_label(self):
         c = {label: collections.Counter() for label in self.label_definitions}
@@ -122,8 +122,8 @@ class SpeechDatasetWalker:
             if check_read:
                 # First try to read wavpath as a wav-file
                 wav, srate = read_wavfile(wavpath, sr=None)
-                if verbosity and self.sampling_rate and self.sampling_rate != srate:
-                    print("Warning: Dataset sampling rate override set to {} but audio file had native rate {}:".format(self.sampling_rate))
+                if verbosity and self.sample_frequency and self.sample_frequency != srate:
+                    print("Warning: Expected sampling rate set to {} but audio file seems to have native rate {}:".format(self.sample_frequency, srate))
                     print(" ", wavpath)
                 # If the read failed, stop checking this file
                 if wav is None:
