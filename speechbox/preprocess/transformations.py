@@ -72,32 +72,29 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
 def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
     """
     Collect all wavpaths with the given dataset_walker and perform a random training-validation-test split.
-    Returns a 3-tuple of (paths, labels) pairs:
-      (
-        (training_paths, training_labels),
-        (validation_paths, validation_labels),
-        (test_paths, test_labels)
-     )
+    Returns a 3-tuple of (paths, labels, checksums) pairs for each split.
     """
-    all_labels, all_paths = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
+    all_labels, all_paths, all_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
     # training-test split from whole dataset
-    training_paths, test_paths, training_labels, test_labels = sklearn.model_selection.train_test_split(
+    training_paths, test_paths, training_labels, test_labels, training_checksums, test_checksums = sklearn.model_selection.train_test_split(
         all_paths,
         all_labels,
+        all_checksums,
         random_state=random_state,
         test_size=test_ratio
     )
     # training-validation split from training set
-    training_paths, validation_paths, training_labels, validation_labels = sklearn.model_selection.train_test_split(
+    split = sklearn.model_selection.train_test_split(
         training_paths,
         training_labels,
+        training_checksums,
         random_state=random_state,
         test_size=validation_ratio / (1.0 - test_ratio)
     )
     return (
-        (training_paths, training_labels),
-        (validation_paths, validation_labels),
-        (test_paths, test_labels)
+        (split[0], split[2], split[4]),
+        (split[1], split[3], split[5]),
+        (test_paths, test_labels, test_checksums)
     )
 
 def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
@@ -118,19 +115,20 @@ def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test
         test_speakers[label] = test_split
     # Set dataset_walker to return only files by training-set speaker IDs
     dataset_walker.set_speaker_filter(training_speakers)
-    training_labels, training_paths = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
+    training_labels, training_paths, training_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
     # Perform training-validation split by sample, i.e. one speaker may or may not have samples in both sets
-    training_paths, validation_paths, training_labels, validation_labels = sklearn.model_selection.train_test_split(
+    split = sklearn.model_selection.train_test_split(
         training_paths,
         training_labels,
+        training_checksums,
         random_state=random_state,
         test_size=validation_ratio / (1.0 - test_ratio)
     )
     # Set dataset_walker to return only files by test-set speaker IDs
     dataset_walker.set_speaker_filter(test_speakers)
-    test_labels, test_paths = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
+    test_labels, test_paths, test_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
     return (
-        (training_paths, training_labels),
-        (validation_paths, validation_labels),
-        (test_paths, test_labels)
+        (split[0], split[2], split[4]),
+        (split[1], split[3], split[5]),
+        (test_paths, test_labels, test_checksums)
     )

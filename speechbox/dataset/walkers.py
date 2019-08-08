@@ -14,19 +14,19 @@ class SpeechDatasetWalker:
     Instances of this class are iterable, yielding (label, wavpath) pairs for every file in some dataset, given the root directory of the dataset.
     The tree structure of a particular dataset is defined in the self.label_definitions dict in a subclass of this class.
     """
-    def __init__(self, dataset_root=None, paths=None, labels=None, sample_frequency=None):
+    def __init__(self, dataset_root=None, paths=None, labels=None, checksums=None, sample_frequency=None):
         if dataset_root is None:
             error_msg = (
-                "If dataset_root is None, a SpeechDatasetWalker must get its paths and labels predefined,"
+                "If dataset_root is None, a SpeechDatasetWalker must get its paths, labels, and checksums predefined,"
                 " otherwise there is no paths to walk over"
             )
-            assert paths and labels, error_msg
+            assert paths and labels and checksums, error_msg
         else:
             error_msg = (
-                "If dataset_root is not None, then a SpeechDatasetWalker should not get its paths and labels predefined,"
+                "If dataset_root is not None, then a SpeechDatasetWalker should not get its paths, labels, or checksums predefined,"
                 " because they will be produced by walking over all directories starting at the dataset_root"
             )
-            assert paths is None and labels is None, error_msg
+            assert paths is None and labels is None and checksums is None, error_msg
         # Where to start an os.walk from (unless paths and labels explicitly given)
         self.dataset_root = dataset_root
         # If not None, an integer denoting the expected sample frequency/rate in Hz
@@ -39,15 +39,17 @@ class SpeechDatasetWalker:
     def join_root(self, *paths):
         return os.path.join(self.dataset_root, *paths)
 
-    def overwrite_target_paths(self, paths, labels):
+    def overwrite_target_paths(self, paths, labels, checksums):
         """Overwrite dataset directory traversal list by absolute paths that should be walked over instead."""
         # Clear all current paths and directories
         for label_def in self.label_definitions.values():
             label_def["sample_dirs"] = []
             label_def["sample_files"] = []
+            label_def["sample_file_checksums"] = []
         # Set all given wavpaths
-        for label, path in zip(labels, paths):
+        for label, path, checksums in zip(labels, paths, checksums):
             self.label_definitions[label]["sample_files"].append(path)
+            self.label_definitions[label]["sample_file_checksums"].append(checksum)
 
     def load(self, wavpath):
         return read_wavfile(wavpath, sr=self.sample_frequency)
@@ -66,7 +68,7 @@ class SpeechDatasetWalker:
 
     def count_files_per_speaker_by_label(self):
         c = {label: collections.Counter() for label in self.label_definitions}
-        for label, path in iter(self):
+        for label, path, _ in iter(self):
             speaker_id = self.parse_speaker_id(path)
             c[label][speaker_id] += 1
         return c
@@ -173,7 +175,7 @@ class SpeechDatasetWalker:
                         num_walked += 1
                         wavpath = self.join_root(parent, f)
                         if audiofile_ok(wavpath, label):
-                            yield label, wavpath
+                            yield label, wavpath, md5sum(wavpath)
             # Then yield all directly specified wavpaths
             sample_files = self.label_definitions[label].get("sample_files", [])
             if verbosity > 2 and sample_files:
@@ -181,7 +183,7 @@ class SpeechDatasetWalker:
             for wavpath in sample_files:
                 num_walked += 1
                 if audiofile_ok(wavpath, label):
-                    yield label, wavpath
+                    yield label, wavpath, md5sum(wavpath)
         if verbosity > 1:
             print("Walk finished by walker:", str(self))
         if verbosity:
@@ -261,7 +263,7 @@ class OGIWalker(SpeechDatasetWalker):
         if kwargs.get("dataset_root"):
             self.parse_directory_tree()
         else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
     def parse_speaker_id(self, path):
         """
@@ -324,7 +326,7 @@ class OGIWalker2(SpeechDatasetWalker):
         if kwargs.get("dataset_root"):
             self.parse_directory_tree()
         else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
         self.bcp47_mappings = {
             "cmn": "zh", # Chinese, Mandarin (Simplified, China)
             "eng": "en-US",
@@ -497,11 +499,12 @@ class TestWalker(SpeechDatasetWalker):
         if kwargs.get("dataset_root"):
             self.parse_directory_tree()
         else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"])
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
 
 all_walkers = collections.OrderedDict({
     "ogi": OGIWalker,
+    "ogi-legacy": OGIWalker2,
     "vardial2017": VarDial2017Walker,
     "mgb3-testset": MGB3TestSetWalker,
     "mgb3": VarDial2017Walker,

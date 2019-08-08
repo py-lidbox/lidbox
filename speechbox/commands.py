@@ -103,13 +103,20 @@ class Command:
 
     def state_data_ok(self):
         ok = True
-        if "data" not in self.state:
+        if not self.has_state() or "data" not in self.state:
             error_msg = (
                 "Error: self.state does not have a 'data' key containing filepaths and labels, cannot extract features."
                 " Either load an existing dataset definition from the cache with '--load-state' or create a new dataset split."
                 "\nSee e.g. 'speechbox dataset --help'."
             )
             print(error_msg, file=sys.stderr)
+            ok = False
+        return ok
+
+    def has_state(self):
+        ok = True
+        if not self.state and self.args.verbosity:
+            print("Error: No current state loaded, you need to use '--load-state' to load existing state from some cache directory.", file=sys.stderr)
             ok = False
         return ok
 
@@ -176,7 +183,7 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "split", "check_split", "to_kaldi")
+    tasks = ("walk", "parse", "split", "check_split", "check_integrity", "to_kaldi", "compare_state")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -187,7 +194,7 @@ class Dataset(Command):
         parser.add_argument("--output",
             type=str,
             action=ExpandAbspath,
-            help="Write all (wavpath, label) pairs returned by the walk to this file. Columns are separated by a single space.")
+            help="Write all (MD5-checksum, wavpath, label) pairs returned by the walk to this file. Columns are separated by a single space.")
         parser.add_argument("--parse",
             action="store_true",
             help="TODO")
@@ -203,6 +210,13 @@ class Dataset(Command):
         parser.add_argument("--check-split",
             action="store_true",
             help="Check that all datagroups are disjoint.")
+        parser.add_argument("--check-integrity",
+            action="store_true",
+            help="Recompute MD5 checksum values for every file and compare the new values to the existing, cached values.")
+        parser.add_argument("--compare-state",
+            type=str,
+            action=ExpandAbspath,
+            help="Compare state in this directory to the current state.")
         parser.add_argument("--to-kaldi",
             type=str,
             action=ExpandAbspath,
@@ -230,23 +244,25 @@ class Dataset(Command):
             dataset_iter = dataset_walker.walk(verbosity=args.verbosity)
         if args.output:
             if args.verbosity:
-                print("Will write all (wavfile, label) pairs to '{}'".format(args.output))
+                print("Will write all (checksum, wavfile, label) pairs to '{}'".format(args.output))
             with open(args.output, 'w') as out_f:
-                for label, wavpath in dataset_iter:
-                    print(wavpath, label, sep=' ', file=out_f)
+                for label, wavpath, checksum in dataset_iter:
+                    print(checksum, wavpath, label, sep=' ', file=out_f)
         else:
             data = self.state.get("data", {})
             if args.verbosity and "all" in data:
                 print("Warning: overwriting existing paths in self.state for dataset '{}'".format(self.dataset_id))
             # Gather all
-            labels, paths = [], []
-            for label, path in dataset_iter:
+            labels, paths, checksums = [], [], []
+            for label, path, checksum in dataset_iter:
                 labels.append(label)
                 paths.append(path)
+                checksums.append(system.md5sum(path))
             walk_data = {
                 "label_to_index": dataset_walker.make_label_to_index_dict(),
                 "labels": labels,
-                "paths": paths
+                "paths": paths,
+                "checksums": checksums,
             }
             # Merge to state under key 'all'
             self.state["data"] = dict(data, all=walk_data)
@@ -263,30 +279,21 @@ class Dataset(Command):
             return 1
         for a, b in itertools.combinations(datagroups.keys(), r=2):
             print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
-            # Group all filepaths by hashes on the file contents
+            # Group all filepaths by MD5 checksums of file contents
             duplicates = collections.defaultdict(list)
-            for path in itertools.chain(datagroups[a]["paths"], datagroups[b]["paths"]):
-                duplicates[system.md5sum(path)].append(path)
-            # Filter out all singleton groups
+            a_paths = zip(datagroup[a]["checksums"], datagroup[a]["paths"])
+            b_paths = zip(datagroup[b]["checksums"], datagroup[b]["paths"])
+            for checksum, path in itertools.chain(a_paths, b_paths):
+                duplicates[checksum].append(path)
+            # Filter out all non-singleton groups
             duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
             if duplicates:
-                print("error: datasets not disjoint, following files have equal content hashes:")
+                print("error: Datagroups are not disjoint, following files have equal checksums:")
                 for paths in duplicates:
                     for path in paths:
                         print(path)
             else:
                 print("ok")
-
-        # if args.verbosity:
-        #     print("Checking all audio files in the dataset")
-        # dataset_walker = dataset.get_dataset_walker(self.dataset_id)
-        # for datagroup_name, datagroup in self.state["data"].items():
-        #     paths, labels = datagroup["paths"], datagroup["labels"]
-        #     if args.verbosity:
-        #         print("'{}', containing {} paths and {} labels, of which {} labels are unique".format(datagroup_name, len(paths), len(labels), len(set(labels))))
-        #     dataset_walker.overwrite_target_paths(paths, labels)
-        #     for _ in dataset_walker.walk(check_duplicates=True, check_read=True, verbosity=args.verbosity):
-        #         pass
 
     def parse(self):
         args = self.args
@@ -333,6 +340,7 @@ class Dataset(Command):
             walker_config = {
                 "paths": data["paths"],
                 "labels": data["labels"],
+                "checksums": data["checksums"],
             }
         else:
             if args.verbosity:
@@ -343,6 +351,7 @@ class Dataset(Command):
                 "dataset_root": args.src,
             }
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
+        # The label-to-index mapping is common for all datagroups in the split
         self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
         if args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
@@ -352,15 +361,18 @@ class Dataset(Command):
         split = {
             "training": {
                 "paths": training_set[0],
-                "labels": training_set[1]
+                "labels": training_set[1],
+                "checksums": training_set[2],
             },
             "validation": {
                 "paths": validation_set[0],
-                "labels": validation_set[1]
+                "labels": validation_set[1],
+                "checksums": validation_set[2],
             },
             "test": {
                 "paths": test_set[0],
-                "labels": test_set[1]
+                "labels": test_set[1],
+                "checksums": test_set[2],
             }
         }
         # Merge split into self.state["data"], such that keys in split take priority and overwrite existing keys
@@ -384,7 +396,7 @@ class Dataset(Command):
             output_dir = os.path.join(kaldi_dir, datagroup_name)
             self.make_named_dir(output_dir)
             wav_scp, utt2spk = [], []
-            for _, wavpath in dataset_walker.walk(verbosity=args.verbosity):
+            for _, wavpath, _ in dataset_walker.walk(verbosity=args.verbosity):
                 file_id = str(dataset_walker.get_file_id(wavpath))
                 speaker_id = str(dataset_walker.parse_speaker_id(wavpath))
                 wav_scp.append((file_id, wavpath))
@@ -401,6 +413,55 @@ class Dataset(Command):
             with open(os.path.join(output_dir, "mfcc.conf"), 'w') as mfcc_conf:
                 print("--use-energy=false", file=mfcc_conf)
                 print("--sample-frequency={:d}".format(dataset_walker.sample_frequency or 16000), file=mfcc_conf)
+
+    def compare_state(self):
+        args = self.args
+        other_path = os.path.join(args.compare_state, "state.json.gz")
+        if args.verbosity:
+            print("Loading other state from '{}'".format(other_path))
+        other_state = system.load_gzip_json(other_path)
+        if not self.has_state():
+            return 1
+        if args.verbosity > 1:
+            print("Other state is:")
+            pprint.pprint(other_state, depth=3)
+            print()
+        duplicates = collections.defaultdict(list)
+        for datagroup in itertools.chain(other_state["data"].values(), self.state["data"].values()):
+            for checksum, path in zip(datagroup["checksums"], datagroup["paths"]):
+                duplicates[checksum].append(path)
+        # Filter out all non-singleton groups
+        duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
+        if duplicates:
+            print("These files have exactly equal contents:")
+            for paths in duplicates:
+                for p in paths:
+                    print(p)
+                print()
+        else:
+            print("Did not find any files with exactly equal contents")
+
+    def check_integrity(self):
+        if not self.has_state():
+            return 1
+        args = self.args
+        if args.verbosity:
+            print("Checking integrity of all files by recomputing MD5 checksums.")
+        mismatches = collections.defaultdict(list)
+        for datagroup_name, datagroup in self.state["data"].items():
+            for checksum, path in zip(datagroup["checksums"], datagroup["paths"]):
+                new_checksum = system.md5sum(path)
+                if checksum != new_checksum:
+                    mismatches[datagroup_name].append((checksum, new_checksum, path))
+        num_mismatching = sum(len(m) for m in mismatches.values())
+        if num_mismatching:
+            print("Found {} files with mismatching MD5 checksums:".format(num_mismatching))
+            for datagroup_name, mismatch_list in mismatches.items():
+                print("Datagroup '{}', {} files:".format(datagroup_name, len(mismatch_list)))
+                for old, new, path in mismatch_list:
+                    print("{} {} {}".format(old, new, path))
+        else:
+            print("No files have mismatching checksums")
 
     def run(self):
         super().run()
