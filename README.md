@@ -8,9 +8,11 @@ The slightly more sane alternative to a legacy shell script spaghetti of hard-co
 
 Make sure you have [`sox`](http://sox.sourceforge.net/) installed and on your path.
 
-Install with pip (you might want to use a clean virtual environment):
+Installing with pip (you might want to use a clean virtual environment):
 ```bash
-pip install https://github.com/matiaslindgren/speechbox/archive/master.zip
+git clone --depth 1 https://github.com/matiaslindgren/speechbox.git
+cd speechbox
+pip install --editable .
 ```
 Run the example recipe to check everything is working:
 ```bash
