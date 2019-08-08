@@ -1,5 +1,5 @@
 """
-Speech dataset walkers that can iterate over datasets.
+Iterator classes for extracting paths, labels, and other metadata from speech corpora and datasets.
 """
 import os
 import collections
@@ -102,14 +102,14 @@ class SpeechDatasetWalker:
     # If there's some inefficient checks that should be run for every file when the corpus is traversed the first time, those checks belong in this function.
     def walk(self, check_duplicates=False, check_read=False, followlinks=True, verbosity=0):
         """
-        Walk over all files in the dataset and yield (label, filepath) pairs.
+        Walk over all files in the dataset and yield (label, filepath, md5sum) pairs.
         Reads the contents of all audio files in all directories but does not write anything.
         Only files ending with .wav, containing valid WAVE headers will be returned.
 
         check_duplicates: an MD5 hash will be computed for every file, and if more than 1 files with matching hashes are found, all subsequent files with matching hashes are skipped.
         check_read: every file will try to be opened and its contents checked.
         followlinks: also walk down symbolic links.
-        verbosity: choose from 0, 1, 2
+        verbosity: from 0 up
         """
         file_extensions=("wav",)
         duplicates = collections.defaultdict(list)
