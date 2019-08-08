@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 
+from audioread.exceptions import NoBackendError
 import librosa
 import sox
 import tensorflow as tf
@@ -17,7 +18,7 @@ def read_wavfile(path, **librosa_kwargs):
         librosa_kwargs["sr"] = None
     try:
         return librosa.core.load(path, **librosa_kwargs)
-    except EOFError:
+    except (EOFError, NoBackendError):
         return None, 0
 
 def write_wav(wav, path):

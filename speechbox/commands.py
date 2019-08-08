@@ -120,6 +120,26 @@ class Command:
             ok = False
         return ok
 
+    def split_is_valid(self, original, split):
+        """
+        Check that all values from 'original' exist in 'split' and all values in 'split' are from 'original'.
+        """
+        ok = True
+        train, val, test = split["training"], split["validation"], split["test"]
+        for key in ("paths", "labels", "checksums"):
+            val_original = set(original[key])
+            val_splitted = set(train[key]) | set(val[key]) | set(test[key])
+            if val_original != val_splitted:
+                ok = False
+                print("Error: key '{}' has an invalid split, some information was probably lost during the split.")
+                print("Values in the original data but not in the split:")
+                for o in val_original - val_splitted:
+                    print(o)
+                print("Values in the split but not in the original data:")
+                for s in val_splitted - val_original:
+                    print(s)
+        return ok
+
     def make_named_dir(self, path, name=None):
         if not os.path.isdir(path):
             if self.args.verbosity:
@@ -266,6 +286,7 @@ class Dataset(Command):
             }
             # Merge to state under key 'all'
             self.state["data"] = dict(data, all=walk_data)
+            self.state["source_directory"] = args.src
 
     def check_split(self):
         args = self.args
@@ -281,8 +302,8 @@ class Dataset(Command):
             print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
             # Group all filepaths by MD5 checksums of file contents
             duplicates = collections.defaultdict(list)
-            a_paths = zip(datagroup[a]["checksums"], datagroup[a]["paths"])
-            b_paths = zip(datagroup[b]["checksums"], datagroup[b]["paths"])
+            a_paths = zip(datagroups[a]["checksums"], datagroups[a]["paths"])
+            b_paths = zip(datagroups[b]["checksums"], datagroups[b]["paths"])
             for checksum, path in itertools.chain(a_paths, b_paths):
                 duplicates[checksum].append(path)
             # Filter out all non-singleton groups
@@ -378,6 +399,9 @@ class Dataset(Command):
         # Merge split into self.state["data"], such that keys in split take priority and overwrite existing keys
         self.state["data"] = dict(self.state.get("data", {}), **split)
         if "all" in self.state["data"]:
+            # Sanity check that we did not lose any information during the split
+            if not self.split_is_valid(self.state["data"]["all"], split):
+                return 1
             del self.state["data"]["all"]
 
     def to_kaldi(self):
@@ -611,9 +635,9 @@ class Evaluate(Command):
         args = self.args
         if args.verbosity:
             print("Preparing model for evaluation")
-        if "test" not in self.state.get("data", {}):
+        if not self.has_state() or "test" not in self.state["data"]:
             if args.verbosity:
-                print("Error: test set paths not found, you need to use '--load-state'")
+                print("Error: test set paths not found")
             return 1
         self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
         if args.verbosity:

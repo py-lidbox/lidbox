@@ -47,7 +47,7 @@ class SpeechDatasetWalker:
             label_def["sample_files"] = []
             label_def["sample_file_checksums"] = []
         # Set all given wavpaths
-        for label, path, checksums in zip(labels, paths, checksums):
+        for label, path, checksum in zip(labels, paths, checksums):
             self.label_definitions[label]["sample_files"].append(path)
             self.label_definitions[label]["sample_file_checksums"].append(checksum)
 
