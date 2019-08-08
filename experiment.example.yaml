@@ -13,7 +13,7 @@ model:
     name: debug-lstm
     batch_size: 32
     dataset_shuffle_size: 300
-    epochs: 5
+    epochs: 25
     loss: categorical_crossentropy
     metrics:
         - accuracy
