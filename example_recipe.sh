@@ -17,7 +17,7 @@ speech_corpus_root=./test/data_common_voice
 
 printf "Reading all audio files from mini speech corpus in ${speech_corpus_root}\n\n"
 speechbox dataset $cache_dir $experiment_config \
-	--verbosity --verbosity \
+	--verbosity \
 	--src $speech_corpus_root \
 	--walk \
 	--check \
@@ -27,7 +27,7 @@ speechbox dataset $cache_dir $experiment_config \
 
 printf "\nCreating random training-validation-test split\n\n"
 speechbox dataset $cache_dir $experiment_config \
-	--verbosity --verbosity \
+	--verbosity \
 	--load-state \
 	--split by-file \
 	--check-split \
@@ -38,7 +38,7 @@ speechbox dataset $cache_dir $experiment_config \
 
 printf "\nExtracting features\n\n"
 speechbox preprocess $cache_dir $experiment_config \
-	--verbosity --verbosity \
+	--verbosity \
 	--load-state \
 	--extract-features \
 	--save-state
@@ -47,7 +47,7 @@ speechbox preprocess $cache_dir $experiment_config \
 
 printf "\nTraining simple LSTM model\n\n"
 speechbox train $cache_dir $experiment_config \
-	--verbosity --verbosity \
+	--verbosity \
 	--load-state \
 	--model-id my-simple-lstm \
 	--save-model
