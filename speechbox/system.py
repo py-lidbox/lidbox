@@ -152,3 +152,11 @@ def count_dataset(tfrecord_paths):
             # Iterator exhausted
             pass
     return num_elements
+
+def apply_sox_transformer(src_paths, dst_paths, config):
+    t = sox.Transformer()
+    if "norm" in config:
+        t = t.norm(config["norm"])
+    for src, dst in zip(src_paths, dst_paths):
+        if t.build(src, dst):
+            yield dst

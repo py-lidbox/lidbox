@@ -203,7 +203,7 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "split", "check_split", "check_integrity", "to_kaldi", "compare_state")
+    tasks = ("walk", "parse", "split", "check_split", "check_integrity", "to_kaldi", "compare_state", "augment")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -241,6 +241,9 @@ class Dataset(Command):
             type=str,
             action=ExpandAbspath,
             help="Write dataset paths and current state as valid input for the Kaldi toolkit into the given directory. Creates wav.scp and utt2spk.")
+        parser.add_argument("--augment",
+            action="store_true",
+            help="Apply augmentation on all paths in dataset and write output into directory given by '--dst'. Augmentation config is defined in the experiment config under sox_transform.")
         return parser
 
     def walk(self):
@@ -478,14 +481,43 @@ class Dataset(Command):
                 if checksum != new_checksum:
                     mismatches[datagroup_name].append((checksum, new_checksum, path))
         num_mismatching = sum(len(m) for m in mismatches.values())
-        if num_mismatching:
-            print("Found {} files with mismatching MD5 checksums:".format(num_mismatching))
-            for datagroup_name, mismatch_list in mismatches.items():
-                print("Datagroup '{}', {} files:".format(datagroup_name, len(mismatch_list)))
-                for old, new, path in mismatch_list:
-                    print("{} {} {}".format(old, new, path))
-        else:
-            print("No files have mismatching checksums")
+        print("Found {} files with mismatching MD5 checksums.".format(num_mismatching))
+        for datagroup_name, mismatch_list in mismatches.items():
+            print("Datagroup '{}', {} files:".format(datagroup_name, len(mismatch_list)))
+            print("old", "new", "path")
+            for old, new, path in mismatch_list:
+                print("{} {} {}".format(old, new, path))
+
+    def augment(self):
+        if not self.args_dst_ok() or not self.has_state():
+            return 1
+        if "source_directory" not in self.state:
+            print("Error: no source directory in cache, run --walk and --save-state on some dataset in directory specified by --src to gather all paths into the cache.", file=sys.stderr)
+            return 1
+        args = self.args
+        prefix = self.state["source_directory"]
+        if args.verbosity:
+            print("Augmenting dataset from '{}' into '{}' with parameters:".format(prefix, args.dst))
+        sox_config = self.experiment_config["sox_transform"]
+        if args.verbosity:
+            pprint.pprint(sox_config)
+        src_paths = list(itertools.chain(*(d["paths"] for d in self.state["data"].values())))
+        # Retain directory structure after prefix of original paths when writing to the target directory
+        dst_paths = [p.replace(prefix, args.dst) for p in src_paths]
+        for path in dst_paths:
+            self.make_named_dir(os.path.dirname(path))
+        augmented_paths = []
+        print_progress = self.experiment_config.get("print_progress", 1000)
+        if args.verbosity:
+            print("Starting augmentation")
+        for i, path in enumerate(system.apply_sox_transformer(src_paths, dst_paths, sox_config), start=1):
+            augmented_paths.append(path)
+            if i % print_progress == 0:
+                print(i, "files done")
+        if args.verbosity:
+            if len(augmented_paths) != len(src_paths):
+                print("Error: failed to apply transformation.")
+            print("Out of {} input paths, {} were augmented.".format(len(src_paths), len(augmented_paths)))
 
     def run(self):
         super().run()
