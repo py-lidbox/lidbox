@@ -15,7 +15,7 @@ cache_dir=./cache/example_experiment
 experiment_config=./experiment.example.yaml
 speech_corpus_root=./test/data_common_voice
 
-printf "Reading all audio files from speech corpus in ${speech_corpus_root}\n\n"
+printf "Reading all audio files from mini speech corpus in ${speech_corpus_root}\n\n"
 speechbox dataset $cache_dir $experiment_config \
 	--verbosity --verbosity \
 	--src $speech_corpus_root \
