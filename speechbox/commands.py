@@ -39,6 +39,7 @@ class Command:
     """Base command with common helpers for all subcommands."""
 
     tasks = tuple()
+    valid_datagroup_keys = ("paths", "labels", "checksums")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -126,7 +127,7 @@ class Command:
         """
         ok = True
         train, val, test = split["training"], split["validation"], split["test"]
-        for key in ("paths", "labels", "checksums"):
+        for key in self.valid_datagroup_keys:
             val_original = set(original[key])
             val_splitted = set(train[key]) | set(val[key]) | set(test[key])
             if val_original != val_splitted:
@@ -163,6 +164,13 @@ class Command:
         if args.verbosity:
             print("Saving state to '{}'".format(state_path))
         system.dump_gzip_json(self.state, state_path)
+
+    def merge_datagroups_from_state(self):
+        data = self.state["data"]
+        return {
+            key: list(itertools.chain(*(datagroup[key] for datagroup in data.values())))
+            for key in self.valid_datagroup_keys
+        }
 
     def run(self):
         args = self.args
@@ -250,12 +258,19 @@ class Dataset(Command):
         args = self.args
         if args.verbosity:
             print("Walking over dataset '{}'".format(self.dataset_id))
-        if not self.args_src_ok():
-            return 1
-        walker_config = {
-            "dataset_root": args.src,
-            "sample_frequency": args.resampling_rate,
-        }
+        if self.state:
+            if args.verbosity:
+                print("Using paths from state, gathered during some previous walk")
+            walker_config = self.merge_datagroups_from_state()
+        else:
+            if args.verbosity:
+                print("Gathering paths from directory '{}'.".format(args.src))
+            if not self.args_src_ok():
+                return 1
+            walker_config = {
+                "dataset_root": args.src,
+            }
+        walker_config["sample_frequency"] = args.resampling_rate
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         if args.check:
             if args.verbosity:
@@ -360,12 +375,7 @@ class Dataset(Command):
                 print("Using existing dataset paths from current state, possibly loaded from the cache")
                 if args.src:
                     print("Ignoring dataset source directory '{}'".format(args.src))
-            data = self.state["data"]["all"]
-            walker_config = {
-                "paths": data["paths"],
-                "labels": data["labels"],
-                "checksums": data["checksums"],
-            }
+            walker_config = self.merge_datagroups_from_state()
         else:
             if args.verbosity:
                 print("Dataset paths not found in self.state['data'], walking over whole dataset to gather paths")
@@ -412,10 +422,10 @@ class Dataset(Command):
         kaldi_dir = args.to_kaldi
         self.make_named_dir(kaldi_dir, "kaldi output")
         for datagroup_name, datagroup in self.state["data"].items():
-            paths, labels = datagroup["paths"], datagroup["labels"]
+            paths, labels, checksums = datagroup["paths"], datagroup["labels"], datagroup["checksums"]
             if args.verbosity:
                 print("'{}', containing {} paths".format(datagroup_name, len(paths)))
-            dataset_walker = dataset.get_dataset_walker(self.dataset_id, {"paths": paths, "labels": labels})
+            dataset_walker = dataset.get_dataset_walker(self.dataset_id, {"paths": paths, "labels": labels, "checksums": checksums})
             if not hasattr(dataset_walker, "parse_speaker_id"):
                 if args.verbosity:
                     print("Error: Dataset walker '{}' does not support parsing speaker ids from audio file paths, cannot create 'utt2spk'. Define a parse_speaker_id for the walker class.".format(str(dataset_walker)))
