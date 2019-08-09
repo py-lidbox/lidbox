@@ -273,7 +273,7 @@ class OGIWalker(SpeechDatasetWalker):
             callnumber: 3
             type: 3
         """
-        return os.path.basename(path)[2:5]
+        return os.path.basename(path)[:5]
 
 
 class OGIWalker2(SpeechDatasetWalker):
