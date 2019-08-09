@@ -517,12 +517,12 @@ class Dataset(Command):
         for path in dst_paths:
             self.make_named_dir(os.path.dirname(path))
         augmented_paths = []
-        print_progress = self.experiment_config.get("print_progress", 1000)
+        print_progress = self.experiment_config.get("print_progress", 0)
         if args.verbosity:
             print("Starting augmentation")
         for i, path in enumerate(system.apply_sox_transformer(src_paths, dst_paths, sox_config), start=1):
             augmented_paths.append(path)
-            if i % print_progress == 0:
+            if print_progress and i % print_progress == 0:
                 print(i, "files done")
         if args.verbosity:
             if len(augmented_paths) != len(src_paths):
