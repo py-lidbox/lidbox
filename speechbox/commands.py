@@ -185,6 +185,10 @@ class Command:
             print("Experiment config is:")
             pprint.pprint(self.experiment_config)
             print()
+        if "src" in self.experiment_config:
+            if args.src and args.verbosity:
+                print("Dataset source directory given in experiment config yaml as '{}', the directory given with --src: '{}' will be ignored.".format(self.experiment_config["src"], args.src))
+            args.src = self.experiment_config["src"]
         self.dataset_id = self.experiment_config["dataset_id"]
         if args.load_state:
             self.load_state()
@@ -635,15 +639,24 @@ class Train(Command):
     def run(self):
         super().run()
         args = self.args
-        self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
+        model_config = self.experiment_config["model"]
+        self.model_id = args.model_id if args.model_id else model_config["name"]
+        if "tensorboard_logdir" in model_config:
+            tensorboard_logdir = os.path.abspath(model_config["tensorboard_logdir"])
+        else:
+            tensorboard_logdir = os.path.join(self.cache_dir, "tensorboard-logs")
         if args.load_model:
             if args.verbosity:
                 print("Loading model '{}' from the cache directory".format(self.model_id))
-            self.state["model"] = models.KerasWrapper.from_disk(args.cache_dir, self.model_id)
+            self.state["model"] = models.KerasWrapper.from_disk(args.cache_dir, self.model_id, tensorboard_logdir)
         else:
             if args.verbosity:
                 print("Creating new model '{}'".format(self.model_id))
-            self.state["model"] = models.KerasWrapper(self.model_id)
+            self.state["model"] = models.KerasWrapper(
+                self.model_id,
+                tensorboard_logdir,
+                early_stopping=model_config.get("early_stopping")
+            )
         return self.train()
 
     def exit(self):

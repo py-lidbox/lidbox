@@ -1,7 +1,8 @@
+from datetime import datetime
 import os
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
 
 class KerasWrapper:
@@ -10,15 +11,24 @@ class KerasWrapper:
     def get_model_filepath(cls, basedir, model_id):
         return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
 
+    #TODO checkpoints, weights, everything from disk so that epochs are resumable
     @classmethod
-    def from_disk(cls, basedir, model_id):
-        m = cls(model_id)
+    def from_disk(cls, basedir, model_id, *init_args, **init_kwargs):
+        m = cls(model_id, *init_args, **init_kwargs)
         m.model = tf.keras.models.load_model(cls.get_model_filepath(basedir, model_id))
         return m
 
-    def __init__(self, model_id):
+    def __init__(self, model_id, log_dir=None, early_stopping=None):
         self.model_id = model_id
         self.model = None
+        self.callbacks = []
+        if log_dir:
+            utcnow_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            log_dir_today = os.path.join(log_dir, utcnow_str)
+            self.callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=log_dir_today))
+        #TODO
+        if early_stopping:
+            self.callbacks.append(tf.keras.callbacks.EarlyStopping(**early_stopping))
 
     def to_disk(self, basedir):
         model_path = self.get_model_filepath(basedir, self.model_id)
@@ -47,7 +57,8 @@ class KerasWrapper:
             epochs=model_config["epochs"],
             steps_per_epoch=model_config["steps_per_epoch"],
             validation_steps=model_config["validation_steps"],
-            verbose=model_config.get("verbose", 2)
+            verbose=model_config.get("verbose", 2),
+            callbacks=self.callbacks,
         )
 
     def evaluate(self, test_set, model_config):
