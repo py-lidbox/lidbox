@@ -498,6 +498,7 @@ class Dataset(Command):
             for old, new, path in mismatch_list:
                 print("{} {} {}".format(old, new, path))
 
+    #TODO this is more like 'transform dataset from --src to --dst' since it does not add the output paths into self.state
     def augment(self):
         if not self.args_dst_ok() or not self.has_state():
             return 1
