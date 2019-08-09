@@ -1,4 +1,4 @@
-from datetime import datetime
+from io import StringIO
 import os
 
 import numpy as np
@@ -11,24 +11,16 @@ class KerasWrapper:
     def get_model_filepath(cls, basedir, model_id):
         return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
 
-    #TODO checkpoints, weights, everything from disk so that epochs are resumable
-    @classmethod
-    def from_disk(cls, basedir, model_id, *init_args, **init_kwargs):
-        m = cls(model_id, *init_args, **init_kwargs)
-        m.model = tf.keras.models.load_model(cls.get_model_filepath(basedir, model_id))
-        return m
-
-    def __init__(self, model_id, log_dir=None, early_stopping=None):
+    def __init__(self, model_id, tensorboard=None, early_stopping=None, checkpoints=None):
         self.model_id = model_id
         self.model = None
         self.callbacks = []
-        if log_dir:
-            utcnow_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-            log_dir_today = os.path.join(log_dir, utcnow_str)
-            self.callbacks.append(tf.keras.callbacks.TensorBoard(log_dir=log_dir_today))
-        #TODO
+        if tensorboard:
+            self.callbacks.append(tf.keras.callbacks.TensorBoard(**tensorboard))
         if early_stopping:
             self.callbacks.append(tf.keras.callbacks.EarlyStopping(**early_stopping))
+        if checkpoints:
+            self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
 
     def to_disk(self, basedir):
         model_path = self.get_model_filepath(basedir, self.model_id)
@@ -77,3 +69,11 @@ class KerasWrapper:
         cm = tf.confusion_matrix(real_labels, predicted_labels)
         with tf.Session() as session:
             return cm.eval(session=session)
+
+    def __str__(self):
+        string_stream = StringIO()
+        def print_to_stream(*args, **kwargs):
+            kwargs["file"] = string_stream
+            print(*args, **kwargs)
+        self.model.summary(print_fn=print_to_stream)
+        return string_stream.getvalue()

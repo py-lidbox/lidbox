@@ -1,6 +1,7 @@
 """
 Command definitions for all tools.
 """
+from datetime import datetime
 import argparse
 import collections
 import itertools
@@ -594,12 +595,9 @@ class Train(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("--load-model",
+        parser.add_argument("--no-save-model",
             action="store_true",
-            help="Load pre-trained model from cache directory.")
-        parser.add_argument("--save-model",
-            action="store_true",
-            help="Save model to the cache directory, overwriting any existing models with the same name.")
+            help="Do not save model state, such as epoch checkpoints, into the cache directory.")
         parser.add_argument("--model-id",
             type=str,
             help="Use this value as the model name instead of the one in the experiment yaml-file.")
@@ -631,50 +629,63 @@ class Train(Command):
         )
         model.prepare(training_set_meta, model_config)
         if args.verbosity:
-            print("\nStarting training\n")
+            print("\nStarting training with model:\n")
+            print(str(model))
+            print()
         model.fit(training_set, validation_set, model_config)
         if args.verbosity:
             print("\nTraining finished\n")
+
+    def create_model(self, model_id, model_config):
+        args = self.args
+        now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        model_cache_dir = os.path.join(args.cache_dir, model_id)
+        tensorboard_dir = os.path.join(model_cache_dir, "tensorboard", "log", now_str)
+        self.make_named_dir(tensorboard_dir, "tensorboard")
+        default_tensorboard_config = {
+            "log_dir": tensorboard_dir,
+            "write_graph": False,
+        }
+        tensorboard_config = dict(default_tensorboard_config, **model_config.get("tensorboard", {}))
+        checkpoint_dir = os.path.join(model_cache_dir, "checkpoints")
+        self.make_named_dir(checkpoint_dir, "checkpoints")
+        checkpoint_format = "epoch{epoch:02d}_loss{val_loss:.2f}.hdf5"
+        default_checkpoints_config = {
+            "filepath": os.path.join(checkpoint_dir, checkpoint_format),
+            "load_weights_on_restart": True,
+            # Save models only when the validation loss is minimum, i.e. 'best'
+            "mode": "min",
+            "monitor": "val_loss",
+            "save_best_only": True,
+            "verbose": 0,
+        }
+        checkpoints_config = dict(default_checkpoints_config, **model_config.get("checkpoints", {}))
+        callbacks_kwargs = {
+            "checkpoints": checkpoints_config,
+            "early_stopping": model_config.get("early_stopping"),
+            "tensorboard": tensorboard_config,
+        }
+        if args.verbosity > 1:
+            print("KerasWrapper parameters will be set to:")
+            pprint.pprint(callbacks_kwargs)
+            print()
+        return models.KerasWrapper(model_id, **callbacks_kwargs)
 
     def run(self):
         super().run()
         args = self.args
         model_config = self.experiment_config["model"]
         self.model_id = args.model_id if args.model_id else model_config["name"]
-        if "tensorboard_logdir" in model_config:
-            tensorboard_logdir = os.path.abspath(model_config["tensorboard_logdir"])
-        else:
-            tensorboard_logdir = os.path.join(self.cache_dir, "tensorboard-logs")
-        if args.load_model:
-            if args.verbosity:
-                print("Loading model '{}' from the cache directory".format(self.model_id))
-            self.state["model"] = models.KerasWrapper.from_disk(args.cache_dir, self.model_id, tensorboard_logdir)
-        else:
-            if args.verbosity:
-                print("Creating new model '{}'".format(self.model_id))
-            self.state["model"] = models.KerasWrapper(
-                self.model_id,
-                tensorboard_logdir,
-                early_stopping=model_config.get("early_stopping")
-            )
+        if args.verbosity:
+            print("Creating model '{}'".format(self.model_id))
+        self.state["model"] = self.create_model(self.model_id, model_config)
         return self.train()
-
-    def exit(self):
-        args = self.args
-        if args.save_model:
-            if "model" not in self.state:
-                print("Error: no model to save")
-                return 1
-            saved_path = self.state["model"].to_disk(args.cache_dir)
-            if args.verbosity:
-                print("Wrote model as '{}'".format(saved_path))
-        super().exit()
 
 
 class Evaluate(Command):
     """Prediction and evaluation using trained models."""
 
-    tasks = ("evaluate_test_set",)
+    tasks = ("evaluate_test_set", "predict")
 
     @classmethod
     def create_argparser(cls, subparsers):

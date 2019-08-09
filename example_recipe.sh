@@ -50,6 +50,6 @@ speechbox train $cache_dir $experiment_config \
 	--verbosity \
 	--load-state \
 	--model-id my-simple-lstm \
-	--save-model
 
 # A simple keras model has been trained on the features extracted during the previous step and saved into the cache directory
+# If training is resumed now, the weights should be loaded automatically from the cache directory
