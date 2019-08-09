@@ -152,7 +152,7 @@ class Command:
 
     def load_state(self):
         args = self.args
-        state_path = os.path.join(args.cache_dir, "state.json.gz")
+        state_path = os.path.join(args.cache_dir, "speechbox_state.json.gz")
         if args.verbosity:
             print("Loading state from '{}'".format(state_path))
         self.state = system.load_gzip_json(state_path)
@@ -160,7 +160,7 @@ class Command:
     def save_state(self):
         args = self.args
         self.make_named_dir(args.cache_dir, "cache")
-        state_path = os.path.join(args.cache_dir, "state.json.gz")
+        state_path = os.path.join(args.cache_dir, "speechbox_state.json.gz")
         if args.verbosity:
             print("Saving state to '{}'".format(state_path))
         system.dump_gzip_json(self.state, state_path)
