@@ -646,12 +646,13 @@ class Model(Command):
             if args.verbosity > 1:
                 print("Not training, will not use keras callbacks")
             callbacks_kwargs = {"device_str": model_config.get("eval_device")}
+        else:
+            self.make_named_dir(tensorboard_dir, "tensorboard")
+            self.make_named_dir(checkpoint_dir, "checkpoints")
         if args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
             print()
-            self.make_named_dir(tensorboard_dir, "tensorboard")
-            self.make_named_dir(checkpoint_dir, "checkpoints")
         return models.KerasWrapper(model_id, **callbacks_kwargs)
 
     @staticmethod
