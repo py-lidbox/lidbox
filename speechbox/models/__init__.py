@@ -84,7 +84,6 @@ class KerasWrapper:
 
     @with_device
     def predict(self, utterances):
-        print("predicting", utterances.shape)
         return self.model.predict(utterances)
 
     def evaluate_confusion_matrix(self, utterances, real_labels):

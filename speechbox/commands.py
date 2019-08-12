@@ -757,13 +757,14 @@ class Model(Command):
                 utterances.append((path, features))
             elif args.verbosity:
                 print("Unable to extract features for (possibly too short) sample: '{}'".format(path))
-        label_to_index = self.state["label_to_index"]
-        index_to_label = {i: label for label, i in label_to_index.items()}
+        index_to_label = {i: label for label, i in self.state["label_to_index"].items()}
         for path, features in utterances:
             features = np.array(features)
             prediction = model.predict(features)
-            print(path, prediction)
-            # print("'{}': {} with probability {:.2f}".format(path, index_to_label[max_idx], pred))
+            sequence_means = prediction.mean(axis=0)
+            label_index = sequence_means.argmax()
+            label, prob = index_to_label[label_index], sequence_means[label_index]
+            print("'{}' with probability {:.3f}, '{}'".format(label, prob, os.path.basename(path)))
 
 
     def run(self):
