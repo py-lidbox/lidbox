@@ -589,8 +589,10 @@ class Preprocess(Command):
         return self.run_tasks()
 
 
-class Train(Command):
-    """Model training."""
+class Model(Command):
+    """Model training and evaluation."""
+
+    tasks = ("train", "evaluate_test_set", "predict")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -601,54 +603,29 @@ class Train(Command):
         parser.add_argument("--model-id",
             type=str,
             help="Use this value as the model name instead of the one in the experiment yaml-file.")
+        parser.add_argument("--train",
+            action="store_true",
+            help="Run model training using configuration from the experiment yaml.  Checkpoints are written at every epoch into the cache dir, unless --no-save-model was given.")
+        parser.add_argument("--evaluate-test-set",
+            action="store_true",
+            help="Evaluate model on test set")
+        parser.add_argument("--predict",
+            type=str,
+            action=ExpandAbspath,
+            help="Predict labels for all audio files listed in the given file, one per line.")
         return parser
-
-    def train(self):
-        args = self.args
-        if args.verbosity:
-            print("Preparing model for training")
-        if not self.state_data_ok():
-            return 1
-        data = self.state["data"]
-        model_config = self.experiment_config["model"]
-        if args.verbosity > 1:
-            print("\nModel config is:")
-            pprint.pprint(model_config)
-            print()
-        model = self.state["model"]
-        # Load training set consisting of pre-extracted features
-        training_set, training_set_meta = system.load_features_as_dataset(
-            # List of all .tfrecord files containing all training set samples
-            [data["training"]["features"]],
-            model_config
-        )
-        # Same for the validation set
-        validation_set, _ = system.load_features_as_dataset(
-            [data["validation"]["features"]],
-            model_config
-        )
-        model.prepare(training_set_meta, model_config)
-        if args.verbosity:
-            print("\nStarting training with model:\n")
-            print(str(model))
-            print()
-        model.fit(training_set, validation_set, model_config)
-        if args.verbosity:
-            print("\nTraining finished\n")
 
     def create_model(self, model_id, model_config):
         args = self.args
         now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         model_cache_dir = os.path.join(args.cache_dir, model_id)
         tensorboard_dir = os.path.join(model_cache_dir, "tensorboard", "log", now_str)
-        self.make_named_dir(tensorboard_dir, "tensorboard")
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
             "write_graph": False,
         }
         tensorboard_config = dict(default_tensorboard_config, **model_config.get("tensorboard", {}))
         checkpoint_dir = os.path.join(model_cache_dir, "checkpoints")
-        self.make_named_dir(checkpoint_dir, "checkpoints")
         checkpoint_format = "epoch{epoch:02d}_loss{val_loss:.2f}.hdf5"
         default_checkpoints_config = {
             "filepath": os.path.join(checkpoint_dir, checkpoint_format),
@@ -665,11 +642,112 @@ class Train(Command):
             "early_stopping": model_config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
+        if not args.train:
+            if args.verbosity > 1:
+                print("Not training, will not use keras callbacks")
+            callbacks_kwargs = {}
         if args.verbosity > 1:
-            print("KerasWrapper parameters will be set to:")
+            print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
             print()
+            self.make_named_dir(tensorboard_dir, "tensorboard")
+            self.make_named_dir(checkpoint_dir, "checkpoints")
         return models.KerasWrapper(model_id, **callbacks_kwargs)
+
+    def train(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for training")
+        if not self.state_data_ok():
+            return 1
+        data = self.state["data"]
+        model_config = self.experiment_config["model"]
+        if args.verbosity > 1:
+            print("\nModel config is:")
+            pprint.pprint(model_config)
+            print()
+        model = self.state["model"]
+        # Load training set consisting of pre-extracted features
+        training_set, features_meta = system.load_features_as_dataset(
+            # List of all .tfrecord files containing all training set samples
+            [data["training"]["features"]],
+            model_config
+        )
+        # Same for the validation set
+        validation_set, _ = system.load_features_as_dataset(
+            [data["validation"]["features"]],
+            model_config
+        )
+        model.prepare(features_meta, model_config)
+        if args.verbosity:
+            print("\nStarting training with model:\n")
+            print(str(model))
+            print()
+        model.fit(training_set, validation_set, model_config)
+        if args.verbosity:
+            print("\nTraining finished\n")
+
+    def evaluate_test_set(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for evaluation")
+        model = self.state["model"]
+        model_config = self.experiment_config["model"]
+        if not self.has_state() or "test" not in self.state["data"]:
+            if args.verbosity:
+                print("Error: test set paths not found")
+            return 1
+        test_set, features_meta = system.load_features_as_dataset(
+            [self.state["data"]["test"]["features"]],
+            model_config
+        )
+        model.prepare(features_meta, model_config)
+        model.evaluate(test_set, model_config)
+
+    def predict(self):
+        args = self.args
+        if args.verbosity:
+            print("Predicting labels for audio files listed in '{}'".format(args.predict))
+        config = self.experiment_config
+        if args.verbosity > 1:
+            print("Preparing model for prediction")
+        model_config = config["model"]
+        model = self.state["model"]
+        features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
+        model.prepare(features_meta, model_config)
+        paths = list(system.load_audiofile_paths(args.predict))
+        if args.verbosity:
+            print("Extracting features from {} audio files".format(len(paths)))
+        utterances = []
+        # Split to utterances and features by file
+        for path in paths:
+            utterance_chunks = transformations.speech_dataset_to_utterances(
+                [0], [path],
+                utterance_length_ms=config["utterance_length_ms"],
+                utterance_offset_ms=config["utterance_offset_ms"],
+                apply_vad=config.get("apply_vad", False),
+                print_progress=config.get("print_progress", 0)
+            )
+            features = transformations.utterances_to_features(
+                utterance_chunks,
+                label_to_index=[0],
+                extractors=config["extractors"],
+                sequence_length=config["sequence_length"]
+            )
+            utterances.append([feat for feat, dummy_label in features])
+        for u in utterances:
+            print(len(u))
+        label_to_index = self.state["label_to_index"]
+        index_to_label = {i: label for label, i in label_to_index.items()}
+        predictions = model.predict(utterances)
+        print(predictions)
+        for path, pred in zip(paths, predictions):
+            max_idx = 0
+            if pred.size == 0:
+                print("Cannot predict, too short sample: '{}'".format(path))
+                continue
+            print("'{}': {} with probability {:.2f}".format(path, index_to_label[max_idx], pred))
+
 
     def run(self):
         super().run()
@@ -677,54 +755,13 @@ class Train(Command):
         model_config = self.experiment_config["model"]
         self.model_id = args.model_id if args.model_id else model_config["name"]
         if args.verbosity:
-            print("Creating model '{}'".format(self.model_id))
+            print("Creating KerasWrapper '{}'".format(self.model_id))
         self.state["model"] = self.create_model(self.model_id, model_config)
-        return self.train()
-
-
-class Evaluate(Command):
-    """Prediction and evaluation using trained models."""
-
-    tasks = ("evaluate_test_set", "predict")
-
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        parser.add_argument("--model-id",
-            type=str,
-            help="Use this value as the model name instead of the one in the experiment yaml-file.")
-        parser.add_argument("--evaluate-test-set",
-            action="store_true",
-            help="Evaluate model on test set")
-        return parser
-
-    def evaluate_test_set(self):
-        args = self.args
-        if args.verbosity:
-            print("Preparing model for evaluation")
-        if not self.has_state() or "test" not in self.state["data"]:
-            if args.verbosity:
-                print("Error: test set paths not found")
-            return 1
-        self.model_id = args.model_id if args.model_id else self.experiment_config["model"]["name"]
-        if args.verbosity:
-            print("Loading model '{}' from the cache directory".format(self.model_id))
-        model = models.KerasWrapper.from_disk(args.cache_dir, self.model_id)
-        model_config = self.experiment_config["model"]
-        test_set, _ = system.load_features_as_dataset(
-            [self.state["data"]["test"]["features"]],
-            model_config
-        )
-        model.evaluate(test_set, model_config)
-
-    def run(self):
-        super().run()
         return self.run_tasks()
 
 
 all_commands = (
     Dataset,
     Preprocess,
-    Train,
-    Evaluate,
+    Model,
 )

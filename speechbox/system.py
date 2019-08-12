@@ -47,6 +47,14 @@ def dump_gzip_json(data, path):
     with gzip.open(path, "wb") as f:
         f.write(json.dumps(data, sort_keys=True, indent=2).encode('utf-8'))
 
+def load_audiofile_paths(pathlist_file):
+    with open(pathlist_file) as f:
+        for line in f:
+            line = line.strip()
+            wav, _ = read_wavfile(line)
+            if wav is not None:
+                yield line
+
 def sequence_to_example(sequence, onehot_label_vec):
     """
     Encode a single sequence and its label as a TensorFlow SequenceExample.
@@ -105,9 +113,12 @@ def write_features(sequence_features, target_path):
             record_writer.write(sequence_example.SerializeToString())
     return target_path
 
+def load_features_meta(tfrecord_path):
+    with open(tfrecord_path + ".meta.json") as f:
+        return json.load(f)
+
 def load_features_as_dataset(tfrecord_paths, model_config):
-    with open(tfrecord_paths[0] + ".meta.json") as f:
-        features_meta = json.load(f)
+    features_meta = load_features_meta(tfrecord_paths[0])
     num_labels, num_features = features_meta["num_labels"], features_meta["num_features"]
     dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
     dataset = dataset.map(lambda se: sequence_example_to_model_input(se, num_labels, num_features))
