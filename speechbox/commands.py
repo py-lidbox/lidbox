@@ -654,6 +654,22 @@ class Model(Command):
             self.make_named_dir(checkpoint_dir, "checkpoints")
         return models.KerasWrapper(model_id, **callbacks_kwargs)
 
+    @staticmethod
+    def get_loss_as_float(checkpoint_filename):
+        return float(checkpoint_filename.split("loss")[-1].split(".hdf5")[0])
+
+    def load_best_weights(self):
+        args = self.args
+        checkpoints_dir = os.path.join(args.cache_dir, self.model_id, "checkpoints")
+        all_checkpoints = os.listdir(checkpoints_dir)
+        if not all_checkpoints:
+            print("Error: Cannot load model weights since there are no keras checkpoints in '{}'".format(checkpoints_dir), file=sys.stderr)
+            return 1
+        best_checkpoint = os.path.join(checkpoints_dir, min((c for c in all_checkpoints), key=self.get_loss_as_float))
+        if args.verbosity:
+            print("Loading weights from keras checkpoint '{}'".format(best_checkpoint))
+        self.state["model"].load_weights(best_checkpoint)
+
     def train(self):
         args = self.args
         if args.verbosity:
@@ -701,6 +717,7 @@ class Model(Command):
             model_config
         )
         model.prepare(features_meta, model_config)
+        self.load_best_weights()
         model.evaluate(test_set, model_config)
 
     def predict(self):
@@ -714,6 +731,7 @@ class Model(Command):
         model = self.state["model"]
         features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
         model.prepare(features_meta, model_config)
+        self.load_best_weights()
         paths = list(system.load_audiofile_paths(args.predict))
         if args.verbosity:
             print("Extracting features from {} audio files".format(len(paths)))

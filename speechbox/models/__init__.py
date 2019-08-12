@@ -59,6 +59,10 @@ class KerasWrapper:
         )
 
     @with_device
+    def load_weights(self, path):
+        self.model.load_weights(path)
+
+    @with_device
     def fit(self, training_set, validation_set, model_config):
         self.model.fit(
             training_set,
