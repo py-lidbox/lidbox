@@ -119,7 +119,7 @@ class Command:
 
     def has_state(self):
         ok = True
-        if not self.state and self.args.verbosity:
+        if not self.state:
             print("Error: No current state loaded, you need to use '--load-state' to load existing state from some cache directory.", file=sys.stderr)
             ok = False
         return ok
@@ -135,13 +135,12 @@ class Command:
             val_splitted = set(train[key]) | set(val[key]) | set(test[key])
             if val_original != val_splitted:
                 ok = False
-                print("Error: key '{}' has an invalid split, some information was probably lost during the split.")
-                print("Values in the original data but not in the split:")
-                for o in val_original - val_splitted:
-                    print(o)
-                print("Values in the split but not in the original data:")
-                for s in val_splitted - val_original:
-                    print(s)
+                error_msg = "Error: key '{}' has an invalid split, some information was probably lost during the split.".format(key)
+                error_msg += "\nValues in the original data but not in the split:\n"
+                error_msg += ' '.join(str(o) for o in val_original - val_splitted)
+                error_msg += "\nValues in the split but not in the original data:\n"
+                error_msg += ' '.join(str(s) for s in val_splitted - val_original)
+                print(error_msg, file=sys.stderr)
         return ok
 
     def make_named_dir(self, path, name=None):
@@ -434,8 +433,7 @@ class Dataset(Command):
                 print("'{}', containing {} paths".format(datagroup_name, len(paths)))
             dataset_walker = dataset.get_dataset_walker(self.dataset_id, {"paths": paths, "labels": labels, "checksums": checksums})
             if not hasattr(dataset_walker, "parse_speaker_id"):
-                if args.verbosity:
-                    print("Error: Dataset walker '{}' does not support parsing speaker ids from audio file paths, cannot create 'utt2spk'. Define a parse_speaker_id for the walker class.".format(str(dataset_walker)))
+                print("Error: Dataset walker '{}' does not support parsing speaker ids from audio file paths, cannot create 'utt2spk'. Define a parse_speaker_id for the walker class.".format(str(dataset_walker)), file=sys.stderr)
                 return 1
             output_dir = os.path.join(kaldi_dir, datagroup_name)
             self.make_named_dir(output_dir)
@@ -534,7 +532,7 @@ class Dataset(Command):
                 print(i, "files done")
         if args.verbosity:
             if len(augmented_paths) != len(src_paths):
-                print("Error: failed to apply transformation.")
+                print("Error: failed to apply transformation.", file=sys.stderr)
             print("Out of {} input paths, {} were augmented.".format(len(src_paths), len(augmented_paths)))
 
     def run(self):
@@ -696,8 +694,7 @@ class Model(Command):
         model = self.state["model"]
         model_config = self.experiment_config["model"]
         if not self.has_state() or "test" not in self.state["data"]:
-            if args.verbosity:
-                print("Error: test set paths not found")
+            print("Error: test set paths not found", file=sys.stderr)
             return 1
         test_set, features_meta = system.load_features_as_dataset(
             [self.state["data"]["test"]["features"]],
