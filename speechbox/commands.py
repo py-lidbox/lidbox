@@ -9,6 +9,8 @@ import os
 import pprint
 import sys
 
+import numpy as np
+
 import speechbox
 import speechbox.dataset as dataset
 import speechbox.models as models
@@ -645,7 +647,7 @@ class Model(Command):
         if not args.train:
             if args.verbosity > 1:
                 print("Not training, will not use keras callbacks")
-            callbacks_kwargs = {}
+            callbacks_kwargs = {"device_str": model_config.get("eval_device")}
         if args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
@@ -734,19 +736,19 @@ class Model(Command):
                 extractors=config["extractors"],
                 sequence_length=config["sequence_length"]
             )
-            utterances.append([feat for feat, dummy_label in features])
-        for u in utterances:
-            print(len(u))
+            # Evaluate features generator while dropping dummy labels
+            features = [feat for feat, dummy_label in features]
+            if features:
+                utterances.append((path, features))
+            elif args.verbosity:
+                print("Unable to extract features for (possibly too short) sample: '{}'".format(path))
         label_to_index = self.state["label_to_index"]
         index_to_label = {i: label for label, i in label_to_index.items()}
-        predictions = model.predict(utterances)
-        print(predictions)
-        for path, pred in zip(paths, predictions):
-            max_idx = 0
-            if pred.size == 0:
-                print("Cannot predict, too short sample: '{}'".format(path))
-                continue
-            print("'{}': {} with probability {:.2f}".format(path, index_to_label[max_idx], pred))
+        for path, features in utterances:
+            features = np.array(features)
+            prediction = model.predict(features)
+            print(path, prediction)
+            # print("'{}': {} with probability {:.2f}".format(path, index_to_label[max_idx], pred))
 
 
     def run(self):

@@ -1,8 +1,21 @@
-from io import StringIO
+import functools
+import io
 import os
 
 import numpy as np
 import tensorflow as tf
+
+
+# Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
+def with_device(method):
+    @functools.wraps(method)
+    def wrapped(self, *args, **kwargs):
+        if self.device_str:
+            with tf.device(self.device_str):
+                return method(self, *args, **kwargs)
+        else:
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class KerasWrapper:
@@ -11,8 +24,9 @@ class KerasWrapper:
     def get_model_filepath(cls, basedir, model_id):
         return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
 
-    def __init__(self, model_id, tensorboard=None, early_stopping=None, checkpoints=None):
+    def __init__(self, model_id, device_str=None, tensorboard=None, early_stopping=None, checkpoints=None):
         self.model_id = model_id
+        self.device_str = device_str
         self.model = None
         self.callbacks = []
         if tensorboard:
@@ -22,11 +36,13 @@ class KerasWrapper:
         if checkpoints:
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
 
+    @with_device
     def to_disk(self, basedir):
         model_path = self.get_model_filepath(basedir, self.model_id)
         self.model.save(model_path, overwrite=True)
         return model_path
 
+    @with_device
     def prepare(self, features_meta, model_config):
         input_shape = features_meta["sequence_length"], features_meta["num_features"]
         num_cells = model_config["num_cells"]
@@ -42,6 +58,7 @@ class KerasWrapper:
             metrics=model_config["metrics"]
         )
 
+    @with_device
     def fit(self, training_set, validation_set, model_config):
         self.model.fit(
             training_set,
@@ -53,6 +70,7 @@ class KerasWrapper:
             callbacks=self.callbacks,
         )
 
+    @with_device
     def evaluate(self, test_set, model_config):
         return self.model.evaluate(
             test_set,
@@ -60,7 +78,9 @@ class KerasWrapper:
             verbose=model_config.get("verbose", 2)
         )
 
+    @with_device
     def predict(self, utterances):
+        print("predicting", utterances.shape)
         return self.model.predict(utterances)
 
     def evaluate_confusion_matrix(self, utterances, real_labels):
@@ -71,7 +91,7 @@ class KerasWrapper:
             return cm.eval(session=session)
 
     def __str__(self):
-        string_stream = StringIO()
+        string_stream = io.StringIO()
         def print_to_stream(*args, **kwargs):
             kwargs["file"] = string_stream
             print(*args, **kwargs)
