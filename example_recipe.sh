@@ -46,9 +46,10 @@ speechbox preprocess $cache_dir $experiment_config \
 # MFCCs have now been extracted from the audio files for each datagroup, and the features have been saved as TFRecords into the cache directory
 
 printf "\nTraining simple LSTM model\n\n"
-speechbox train $cache_dir $experiment_config \
+speechbox model $cache_dir $experiment_config \
 	--verbosity \
 	--load-state \
+	--train \
 	--model-id my-simple-lstm \
 
 # A simple keras model has been trained on the features extracted during the previous step and saved into the cache directory
