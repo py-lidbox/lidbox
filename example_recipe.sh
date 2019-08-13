@@ -30,7 +30,7 @@ speechbox dataset $cache_dir $experiment_config \
 	--verbosity \
 	--load-state \
 	--split by-file \
-	--check-split \
+	--check-split by-file \
 	--save-state
 
 # Audio files have now been split into 3 disjoint datagroups: training, validation, and test
