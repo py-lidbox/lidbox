@@ -685,7 +685,7 @@ class Model(Command):
         }
         checkpoints_config = dict(default_checkpoints_config, **model_config.get("checkpoints", {}))
         callbacks_kwargs = {
-            "checkpoints": checkpoints_config,
+            "checkpoints": None if args.no_save_model else checkpoints_config,
             "early_stopping": model_config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
@@ -695,7 +695,8 @@ class Model(Command):
             callbacks_kwargs = {"device_str": model_config.get("eval_device")}
         else:
             self.make_named_dir(tensorboard_dir, "tensorboard")
-            self.make_named_dir(checkpoint_dir, "checkpoints")
+            if not args.no_save_model:
+                self.make_named_dir(checkpoint_dir, "checkpoints")
         if args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
