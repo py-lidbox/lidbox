@@ -217,7 +217,16 @@ class Command:
 class Dataset(Command):
     """Dataset analysis and manipulation."""
 
-    tasks = ("walk", "parse", "split", "check_split", "check_integrity", "to_kaldi", "compare_state", "augment")
+    tasks = (
+        "walk",
+        "parse",
+        "split",
+        "check_split",
+        "check_integrity",
+        "to_kaldi",
+        "compare_state",
+        "augment",
+    )
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -239,11 +248,13 @@ class Dataset(Command):
             action="store_true",
             help="Check that every file in the walk is unique and contains audio. Might take a long time since every file will be opened briefly with sox and/or librosa.")
         parser.add_argument("--split",
+            type=str,
             choices=dataset.all_split_types,
             help="Create a random training-validation-test split for a dataset and store the splits as datagroups.")
         parser.add_argument("--check-split",
-            action="store_true",
-            help="Check that all datagroups are disjoint.")
+            type=str,
+            choices=dataset.all_split_types,
+            help="Check that all datagroups are disjoint by the given split type.")
         parser.add_argument("--check-integrity",
             action="store_true",
             help="Recompute MD5 checksum values for every file and compare the new values to the existing, cached values.")
@@ -376,15 +387,23 @@ class Dataset(Command):
         args = self.args
         if args.verbosity:
             print("Creating a training-validation-test split for dataset '{}' using split type '{}'".format(self.dataset_id, args.split))
-        if "all" in self.state.get("data", {}):
+        datagroups = self.state.get("data", {})
+        if "all" in datagroups:
             if args.verbosity:
                 print("Using existing dataset paths from current state, possibly loaded from the cache")
                 if args.src:
                     print("Ignoring dataset source directory '{}'".format(args.src))
             walker_config = self.merge_datagroups_from_state()
+        elif len(datagroups) > 0:
+            error_msg = (
+                "Error: The loaded state already has a split into {} different datagroups:\n".format(len(datagroups)) +
+                '\n'.join(str(datagroup) for datagroup in datagroups)
+            )
+            print(error_msg, file=sys.stderr)
+            return 1
         else:
             if args.verbosity:
-                print("Dataset paths not found in self.state['data'], walking over whole dataset to gather paths")
+                print("Dataset paths not found in self.state['data'], walking over whole dataset starting at '{}' to gather paths".format(args.src))
             if not self.args_src_ok():
                 return 1
             walker_config = {
@@ -666,7 +685,7 @@ class Model(Command):
         if not all_checkpoints:
             print("Error: Cannot load model weights since there are no keras checkpoints in '{}'".format(checkpoints_dir), file=sys.stderr)
             return 1
-        best_checkpoint = os.path.join(checkpoints_dir, min((c for c in all_checkpoints), key=self.get_loss_as_float))
+        best_checkpoint = os.path.join(checkpoints_dir, min(all_checkpoints, key=self.get_loss_as_float))
         if args.verbosity:
             print("Loading weights from keras checkpoint '{}'".format(best_checkpoint))
         self.state["model"].load_weights(best_checkpoint)
