@@ -58,7 +58,7 @@ class Command:
         parser.add_argument("--verbosity", "-v",
             action="count",
             default=0,
-            help="Increases verbosity of output for each -v supplied (up to 3).")
+            help="Increases verbosity of output for each -v supplied (up to 4).")
         parser.add_argument("--run-cProfile",
             action="store_true",
             help="Do profiling on all commands and write results into a file in the working directory.")
@@ -550,37 +550,70 @@ class Dataset(Command):
             for old, new, path in mismatch_list:
                 print("{} {} {}".format(old, new, path))
 
-    #TODO this is more like 'transform dataset from --src to --dst' since it does not add the output paths into self.state
     def augment(self):
-        if not self.args_dst_ok() or not self.has_state():
+        if not self.state_data_ok():
             return 1
         if "source_directory" not in self.state:
             print("Error: no source directory in cache, run --walk and --save-state on some dataset in directory specified by --src to gather all paths into the cache.", file=sys.stderr)
             return 1
         args = self.args
+        if not args.dst:
+            if args.verbosity:
+                print("No augmentation destination given, assuming cache directory '{}'".format(args.cache_dir))
+            dst = os.path.join(args.cache_dir, "augmented-data")
+        else:
+            dst = args.dst
         prefix = self.state["source_directory"]
         if args.verbosity:
-            print("Augmenting dataset from '{}' into '{}' with parameters:".format(prefix, args.dst))
-        sox_config = self.experiment_config["sox_transform"]
-        if args.verbosity:
-            pprint.pprint(sox_config)
-        src_paths = list(itertools.chain(*(d["paths"] for d in self.state["data"].values())))
-        # Retain directory structure after prefix of original paths when writing to the target directory
-        dst_paths = [p.replace(prefix, args.dst) for p in src_paths]
-        for path in dst_paths:
-            self.make_named_dir(os.path.dirname(path))
-        augmented_paths = []
+            print("Augmenting dataset from '{}' into '{}'".format(prefix, dst))
+        augment_config = self.experiment_config["augmentation"]
+        if "list" in augment_config:
+            augment_config = augment_config["list"]
+        elif "cartesian_product" in augment_config:
+            all_kwargs = augment_config["cartesian_product"].items()
+            flattened_kwargs = [[(aug_type, v) for v in aug_values] for aug_type, aug_values in all_kwargs]
+            augment_config = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
+        if args.verbosity > 1:
+            print("Full config for augmentation:")
+            pprint.pprint(augment_config)
+            print()
         print_progress = self.experiment_config.get("print_progress", 0)
-        if args.verbosity:
-            print("Starting augmentation")
-        for i, path in enumerate(system.apply_sox_transformer(src_paths, dst_paths, sox_config), start=1):
-            augmented_paths.append(path)
-            if print_progress and i % print_progress == 0:
-                print(i, "files done")
-        if args.verbosity:
-            if len(augmented_paths) != len(src_paths):
-                print("Error: failed to apply transformation.", file=sys.stderr)
-            print("Out of {} input paths, {} were augmented.".format(len(src_paths), len(augmented_paths)))
+        src_paths_by_datagroup = {
+            datagroup_key: datagroup["paths"]
+            for datagroup_key, datagroup in self.state["data"].items()
+        }
+        dst_paths_by_datagroup = {datagroup_key: [] for datagroup_key in src_paths_by_datagroup}
+        num_augmented = 0
+        for aug_kwargs in augment_config:
+            if args.verbosity:
+                print("Augmenting by:")
+                for aug_type, aug_value in aug_kwargs.items():
+                    print(aug_type, aug_value)
+                print()
+            for datagroup_key, src_paths in src_paths_by_datagroup.items():
+                # Create sox src-dst file pairs for each transformation
+                dst_paths = []
+                for src_path in src_paths:
+                    # Use directory structure from the source dir but replace the prefix
+                    dst_path = src_path.replace(prefix, dst)
+                    dirname, basename = os.path.split(dst_path)
+                    augdir = '__'.join((str(aug_type) + '-' + str(aug_value)) for aug_type, aug_value in aug_kwargs.items())
+                    target_dir = os.path.join(dirname, augdir)
+                    # Make dirs if they do not exist
+                    self.make_named_dir(target_dir)
+                    dst_paths.append(os.path.join(target_dir, basename))
+                for src_path, dst_path in system.apply_sox_transformer(src_paths, dst_paths, **aug_kwargs):
+                    if dst_path is None:
+                        if args.verbosity:
+                            print("Warning, sox failed to transform '{}' from '{}'".format(dst_path, src_path))
+                    else:
+                        num_augmented += 1
+                        if args.verbosity > 3:
+                            print("augmented {} to {}".format(src_path, dst_path))
+                    # We still want to gather all None's to know which failed
+                    dst_paths_by_datagroup[datagroup_key].append(dst_path)
+                    if print_progress > 0 and num_augmented % print_progress == 0:
+                        print(num_augmented, "files augmented")
 
     def run(self):
         super().run()

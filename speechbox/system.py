@@ -164,10 +164,22 @@ def count_dataset(tfrecord_paths):
             pass
     return num_elements
 
-def apply_sox_transformer(src_paths, dst_paths, config):
+def apply_sox_transformer(src_paths, dst_paths, **config):
     t = sox.Transformer()
     if "norm" in config:
-        t = t.norm(config["norm"])
+        db = float(config["norm"])
+        t = t.norm(db)
+    if "volume" in config:
+        amplitude = float(config["volume"])
+        t = t.vol(amplitude, gain_type="amplitude")
+    if "speed" in config:
+        factor = float(config["speed"])
+        t = t.speed(factor)
+    if "reverse" in config and config["reverse"]:
+        t = t.reverse()
+    # Try to apply transformation on every src_path, building output files into every dst_path
     for src, dst in zip(src_paths, dst_paths):
         if t.build(src, dst):
-            yield dst
+            yield src, dst
+        else:
+            yield src, None
