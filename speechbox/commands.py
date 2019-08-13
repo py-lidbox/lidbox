@@ -326,30 +326,58 @@ class Dataset(Command):
     def check_split(self):
         args = self.args
         if args.verbosity:
-            print("Checking that all datagroups are disjoint")
+            print("Checking that all datagroups are disjoint by split type '{}'".format(args.check_split))
         if not self.state_data_ok():
             return 1
         datagroups = self.state["data"]
-        if len(datagroups) == 1 and args.verbosity:
-            print("Only one datagroup found: '{}', doing nothing".format(list(datagroups.keys())[0]))
+        if len(datagroups) == 1:
+            print("Error: Only one datagroup found: '{}', cannot check that it is disjoint with other datagroups since other datagroups do not exist".format(list(datagroups.keys())[0]))
             return 1
-        for a, b in itertools.combinations(datagroups.keys(), r=2):
-            print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
-            # Group all filepaths by MD5 checksums of file contents
-            duplicates = collections.defaultdict(list)
-            a_paths = zip(datagroups[a]["checksums"], datagroups[a]["paths"])
-            b_paths = zip(datagroups[b]["checksums"], datagroups[b]["paths"])
-            for checksum, path in itertools.chain(a_paths, b_paths):
-                duplicates[checksum].append(path)
-            # Filter out all non-singleton groups
-            duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
-            if duplicates:
-                print("error: Datagroups are not disjoint, following files have equal checksums:")
-                for paths in duplicates:
-                    for path in paths:
-                        print(path)
-            else:
-                print("ok")
+        if args.check_split == "by-file":
+            for a, b in itertools.combinations(datagroups.keys(), r=2):
+                print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
+                # Group all filepaths by MD5 checksums of file contents
+                duplicates = collections.defaultdict(list)
+                a_paths = zip(datagroups[a]["checksums"], datagroups[a]["paths"])
+                b_paths = zip(datagroups[b]["checksums"], datagroups[b]["paths"])
+                for checksum, path in itertools.chain(a_paths, b_paths):
+                    duplicates[checksum].append(path)
+                # Filter out all non-singleton groups
+                duplicates = [paths for paths in duplicates.values() if len(paths) > 1]
+                if duplicates:
+                    error_msg = "error: datagroups are not disjoint"
+                    if args.verbosity > 2:
+                        error_msg += ", following files have equal checksums:"
+                        print(error_msg)
+                        for paths in duplicates:
+                            for path in paths:
+                                print(path)
+                    else:
+                        print(error_msg)
+                else:
+                    print("ok")
+        elif args.check_split == "by-speaker":
+            for a, b in itertools.combinations(datagroups.keys(), r=2):
+                print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
+                # Group all filepaths by speaker ids parsed from filepaths of the given dataset
+                parse_speaker_id = dataset.get_dataset_walker_cls(self.dataset_id).parse_speaker_id
+                a_speakers = set(parse_speaker_id(path) for path in datagroups[a]["paths"])
+                b_speakers = set(parse_speaker_id(path) for path in datagroups[b]["paths"])
+                shared_speakers = a_speakers & b_speakers
+                if shared_speakers:
+                    error_msg = "error: datagroups are not disjoint"
+                    if args.verbosity > 2:
+                        error_msg += ", following speakers have samples in both datagroups:"
+                        print(error_msg)
+                        for s in shared_speakers:
+                            print(s)
+                    else:
+                        print(error_msg)
+                else:
+                    print("ok")
+        else:
+            print("Error: Unknown split type '{}', cannot check".format(args.check_split), file=sys.stderr)
+            return 1
 
     def parse(self):
         args = self.args

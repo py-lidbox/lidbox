@@ -265,7 +265,8 @@ class OGIWalker(SpeechDatasetWalker):
         else:
             self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
-    def parse_speaker_id(self, path):
+    @staticmethod
+    def parse_speaker_id(path):
         """
         All filenames should be of form <langcode><callnumber><type>.wav,
         where lengths are:
@@ -338,7 +339,8 @@ class OGIWalker2(SpeechDatasetWalker):
             "vie": "vi-VN",
         }
 
-    def parse_speaker_id(self, path):
+    @staticmethod
+    def parse_speaker_id(path):
         # We assume all wav-files follow a pattern
         #   '..call-[[:digit:]]*-',
         # where the digit between two hyphens is the speaker id.

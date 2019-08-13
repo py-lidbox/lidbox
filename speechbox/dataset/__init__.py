@@ -23,11 +23,10 @@ def get_dataset_parser(dataset, config=None):
 def get_dataset_walker(dataset, config=None):
     if config is None:
         config = {}
-    # FIXME hack for mgb3
-    # if "test_dir" in config and config["test_dir"] == config["dataset_root"]:
-        # dataset = dataset + "-testset"
+    return get_dataset_walker_cls(dataset)(**config)
+
+def get_dataset_walker_cls(dataset):
     if dataset not in all_walkers:
         error_msg = "'{}' has no SpeechDatasetWalker defined".format(dataset)
         raise UnknownDatasetException(error_msg)
-    walker = all_walkers[dataset](**config)
-    return walker
+    return all_walkers[dataset]
