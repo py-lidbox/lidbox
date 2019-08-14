@@ -406,78 +406,54 @@ class OGIWalker2(SpeechDatasetWalker):
 
 
 class VarDial2017Walker(SpeechDatasetWalker):
+    """
+    Walker for the Vardial 2017 Arabic dialect recognition challenge.
+    The dataset division is assumed to be:
+        training:   train.vardial2017
+        validation: dev.vardial2017
+        test:       test.MGB3
+    Available from:
+    https://github.com/qcri/dialectID/tree/ee6e7e7ca84098eda75cda61892a0ccbd3d8d0bd/data
+    """
+    dataset_tree = {
+        "egy": [["wav", "EGY"]],
+        "glf": [["wav", "GLF"]],
+        "lav": [["wav", "LAV"]],
+        "msa": [["wav", "MSA"]],
+        "nor": [["wav", "NOR"]],
+    }
+    datagroup_patterns = (
+        ("training", "train.vardial2017"),
+        ("validation", "dev.vardial2017"),
+        ("test", "test.MGB3"),
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict({
-            "EGY": {
-                "name": "Egyptian Arabic",
-                "sample_dirs": [
-                    self.join_root("wav", "EGY"),
-                ]
-            },
-            "GLF": {
-                "name": "Gulf Arabic",
-                "sample_dirs": [
-                    self.join_root("wav", "GLF"),
-                ]
-            },
-            "LAV": {
-                "name": "Levantine Arabic",
-                "sample_dirs": [
-                    self.join_root("wav", "LAV"),
-                ]
-            },
-            "MSA": {
-                "name": "Modern Standard Arabic",
-                "sample_dirs": [
-                    self.join_root("wav", "MSA"),
-                ]
-            },
-            "NOR": {
-                "name": "North African Arabic",
-                "sample_dirs": [
-                    self.join_root("wav", "NOR"),
-                ]
-            },
-        })
+        self.label_definitions = collections.OrderedDict([
+            ("egy", {"name": "Egyptian Arabic"}),
+            ("glf", {"name": "Gulf Arabic"}),
+            ("lav", {"name": "Levantine Arabic"}),
+            ("msa", {"name": "Modern Standard Arabic"}),
+            ("nor", {"name": "North African Arabic"}),
+        ])
+        if kwargs.get("dataset_root"):
+            self.parse_directory_tree()
+        else:
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
+    @classmethod
+    def parse_datagroup(cls, wavpath):
+        wavpath = os.path.abspath(wavpath)
+        directories = set(d for d in os.path.dirname(wavpath).split(os.path.sep) if d)
+        for datagroup_key, pattern in cls.datagroup_patterns:
+            if pattern in directories:
+                return datagroup_key
 
-class MGB3TestSetWalker(SpeechDatasetWalker):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        #FIXME don't do file io in the initializer
-        label_to_paths = collections.defaultdict(list)
-        with open(self.join_root("reference")) as wav_labels:
-            for line in wav_labels:
-                wavpath, label = tuple(line.strip().split())
-                label_to_paths[label].append(self.join_root("wav", wavpath) + ".wav")
-        self.label_definitions = collections.OrderedDict({
-            "EGY": {
-                "name": "Egyptian Arabic",
-                "sample_dirs": [],
-                "sample_files": label_to_paths["1"]
-            },
-            "GLF": {
-                "name": "Gulf Arabic",
-                "sample_dirs": [],
-                "sample_files": label_to_paths["2"]
-            },
-            "LAV": {
-                "name": "Levantine Arabic",
-                "sample_dirs": [],
-                "sample_files": label_to_paths["3"]
-            },
-            "MSA": {
-                "name": "Modern Standard Arabic",
-                "sample_dirs": [],
-                "sample_files": label_to_paths["4"]
-            },
-            "NOR": {
-                "name": "North African Arabic",
-                "sample_dirs": [],
-                "sample_files": label_to_paths["5"]
-            },
-        })
+# Prepend all datagroup directories to all dataset tree directories
+for label, dirs in VarDial2017Walker.dataset_tree.items():
+    base = dirs.pop()
+    dirs.extend([[p] + base for _, p in VarDial2017Walker.datagroup_patterns])
 
 
 class TestWalker(SpeechDatasetWalker):
@@ -507,8 +483,6 @@ class TestWalker(SpeechDatasetWalker):
 all_walkers = collections.OrderedDict({
     "ogi": OGIWalker,
     "ogi-legacy": OGIWalker2,
-    "vardial2017": VarDial2017Walker,
-    "mgb3-testset": MGB3TestSetWalker,
-    "mgb3": VarDial2017Walker,
+    "vardial-2017": VarDial2017Walker,
     "unittest": TestWalker,
 })
