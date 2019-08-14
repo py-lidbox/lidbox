@@ -66,8 +66,7 @@ printf "\nTraining simple LSTM model\n\n"
 speechbox model $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--train \
-	--model-id my-simple-lstm\
+	--train
 
 # A simple (read: really bad) keras model has been trained on the features extracted during the previous step and saved into the cache directory
 
@@ -75,5 +74,4 @@ printf "\nEvaluating model\n\n"
 speechbox model $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--model-id my-simple-lstm \
-	--evaluate-test-set
+	--evaluate-test-set loss

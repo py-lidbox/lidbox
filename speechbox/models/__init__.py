@@ -84,14 +84,17 @@ class KerasWrapper:
 
     @with_device
     def predict(self, utterances):
-        return self.model.predict(utterances)
+        expected_num_labels = self.model.layers[-1].output_shape[-1]
+        predictions = np.zeros((len(utterances), expected_num_labels))
+        for i, sequences in enumerate(utterances):
+            predictions[i] = self.model.predict(sequences).mean(axis=0)
+        return predictions
 
+    @with_device
     def evaluate_confusion_matrix(self, utterances, real_labels):
         predicted_labels = np.int8(self.predict(utterances).argmax(axis=1))
-        real_labels = np.int8(real_labels.argmax(axis=1))
-        cm = tf.confusion_matrix(real_labels, predicted_labels)
-        with tf.Session() as session:
-            return cm.eval(session=session)
+        real_labels = np.int8(real_labels)
+        return tf.math.confusion_matrix(real_labels, predicted_labels).numpy()
 
     def __str__(self):
         string_stream = io.StringIO()

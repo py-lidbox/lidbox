@@ -58,6 +58,8 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
     """
     assert len(extractors) > 0, "No extractors defined"
     for label, utterance in utterances:
+        onehot = np.zeros(len(label_to_index), dtype=np.float32)
+        onehot[label_to_index[label]] = 1.0
         # Apply first extractor
         extractor = extractors[0].copy()
         feats = features.extract_features(utterance, extractor.pop("name"), extractor)
@@ -65,9 +67,30 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         #TODO extractors[1:], figuring out how to merge dimensions might get tricky
         sequences = partition_into_sequences(feats, sequence_length)
         for sequence in sequences:
-            onehot = np.zeros(len(label_to_index), dtype=np.float32)
-            onehot[label_to_index[label]] = 1.0
             yield sequence, onehot
+
+def files_to_utterances(paths, config):
+    """
+    Extract utterances from all audio files in the given iterator of paths, using parameters from the given experiment config.
+    """
+    for path in paths:
+        utterance_chunks = speech_dataset_to_utterances(
+            [0], [path],
+            utterance_length_ms=config["utterance_length_ms"],
+            utterance_offset_ms=config["utterance_offset_ms"],
+            apply_vad=config.get("apply_vad", False),
+            print_progress=config.get("print_progress", 0)
+        )
+        features = utterances_to_features(
+            utterance_chunks,
+            label_to_index=[0],
+            extractors=config["extractors"],
+            sequence_length=config["sequence_length"]
+        )
+        # Evaluate features generator while dropping dummy labels
+        features = [feat for feat, _ in features]
+        if features:
+            yield path, np.array(features)
 
 def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
     """

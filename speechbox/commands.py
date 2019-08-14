@@ -17,6 +17,7 @@ import speechbox.models as models
 import speechbox.preprocess.features as features
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
+import speechbox.visualization as visualization
 
 
 def create_argparser():
@@ -623,6 +624,10 @@ class Dataset(Command):
                             print("augmented {} to {}".format(src_path, dst_path))
                     if print_progress > 0 and num_augmented % print_progress == 0:
                         print(num_augmented, "files augmented")
+        if print_progress > 0:
+            print(num_augmented, "files augmented")
+        if args.verbosity:
+            print("Adding paths of all augmented files into data state")
         # All augmented, now expand the paths in the state dict
         for datagroup_key, datagroup in state_data.items():
             all_augmented_paths = dst_paths_by_datagroup[datagroup_key]
@@ -725,7 +730,9 @@ class Model(Command):
             action="store_true",
             help="Run model training using configuration from the experiment yaml.  Checkpoints are written at every epoch into the cache dir, unless --no-save-model was given.")
         parser.add_argument("--evaluate-test-set",
-            action="store_true",
+            type=str,
+            choices=("loss", "confusion-matrix"),
+            default="loss",
             help="Evaluate model on test set")
         parser.add_argument("--predict",
             type=str,
@@ -778,7 +785,7 @@ class Model(Command):
     def get_loss_as_float(checkpoint_filename):
         return float(checkpoint_filename.split("loss")[-1].split(".hdf5")[0])
 
-    def load_best_weights(self):
+    def get_best_weights_checkpoint(self):
         args = self.args
         checkpoints_dir = os.path.join(args.cache_dir, self.model_id, "checkpoints")
         all_checkpoints = os.listdir(checkpoints_dir)
@@ -788,7 +795,7 @@ class Model(Command):
         best_checkpoint = os.path.join(checkpoints_dir, min(all_checkpoints, key=self.get_loss_as_float))
         if args.verbosity:
             print("Loading weights from keras checkpoint '{}'".format(best_checkpoint))
-        self.state["model"].load_weights(best_checkpoint)
+        return best_checkpoint
 
     def train(self):
         args = self.args
@@ -829,16 +836,34 @@ class Model(Command):
             print("Preparing model for evaluation")
         model = self.state["model"]
         model_config = self.experiment_config["model"]
-        if not self.has_state() or "test" not in self.state["data"]:
+        if not self.state_data_ok():
+            return 1
+        if "test" not in self.state["data"]:
             print("Error: test set paths not found", file=sys.stderr)
             return 1
+        test_set_data = self.state["data"]["test"]
         test_set, features_meta = system.load_features_as_dataset(
-            [self.state["data"]["test"]["features"]],
+            [test_set_data["features"]],
             model_config
         )
         model.prepare(features_meta, model_config)
-        self.load_best_weights()
-        model.evaluate(test_set, model_config)
+        best_checkpoint = self.get_best_weights_checkpoint()
+        model.load_weights(best_checkpoint)
+        if args.evaluate_test_set == "loss":
+            model.evaluate(test_set, model_config)
+        elif args.evaluate_test_set == "confusion-matrix":
+            paths = test_set_data["paths"]
+            test_utterances = [sequences for _, sequences in transformations.files_to_utterances(paths, self.experiment_config)]
+            label_to_index = self.state["label_to_index"]
+            real_labels = [label_to_index[label] for label in test_set_data["labels"]]
+            cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
+            figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
+            cm_figure_path = os.path.join(args.cache_dir, figure_name)
+            visualization.write_confusion_matrix(cm, list(label_to_index.keys()), cm_figure_path)
+            if args.verbosity:
+                print("Wrote confusion matrix to '{}'".format(cm_figure_path))
+        else:
+            print("Error: unknown test set evaluation type '{}'".format(args.evaluate_test_set))
 
     def predict(self):
         args = self.args
@@ -851,40 +876,26 @@ class Model(Command):
         model = self.state["model"]
         features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
         model.prepare(features_meta, model_config)
-        self.load_best_weights()
+        model.load_weights(self.get_best_weights_checkpoint())
         paths = list(system.load_audiofile_paths(args.predict))
         if args.verbosity:
             print("Extracting features from {} audio files".format(len(paths)))
-        utterances = []
-        # Split to utterances and features by file
-        for path in paths:
-            utterance_chunks = transformations.speech_dataset_to_utterances(
-                [0], [path],
-                utterance_length_ms=config["utterance_length_ms"],
-                utterance_offset_ms=config["utterance_offset_ms"],
-                apply_vad=config.get("apply_vad", False),
-                print_progress=config.get("print_progress", 0)
-            )
-            features = transformations.utterances_to_features(
-                utterance_chunks,
-                label_to_index=[0],
-                extractors=config["extractors"],
-                sequence_length=config["sequence_length"]
-            )
-            # Evaluate features generator while dropping dummy labels
-            features = [feat for feat, dummy_label in features]
-            if features:
-                utterances.append((path, features))
-            elif args.verbosity:
-                print("Unable to extract features for (possibly too short) sample: '{}'".format(path))
-        index_to_label = {i: label for label, i in self.state["label_to_index"].items()}
-        for path, features in utterances:
-            features = np.array(features)
-            prediction = model.predict(features)
-            sequence_means = prediction.mean(axis=0)
-            label_index = sequence_means.argmax()
-            label, prob = index_to_label[label_index], sequence_means[label_index]
-            print("'{}' with probability {:.3f}, '{}'".format(label, prob, os.path.basename(path)))
+        utterances = list(transformations.files_to_utterances(paths, config))
+        if args.verbosity > 1:
+            ok_paths = set(path in path, _ in utterances)
+            for path in paths:
+                if path not in ok_paths:
+                    print("Warning: could not extract features from (possibly too short) file '{}'".format(path))
+        index_to_label = collections.OrderedDict(
+            sorted((i, label) for label, i in self.state["label_to_index"].items())
+        )
+        all_predictions = list(model.predict([features for _, features in utterances]))
+        for (path, _), prediction in zip(utterances, all_predictions):
+            print("'{}':".format(path))
+            print(("{:>8s}" * len(index_to_label)).format(*index_to_label.values()))
+            for p in prediction:
+                print("{:8.3f}".format(p), end='')
+            print()
 
 
     def run(self):
