@@ -1,24 +1,35 @@
-# Common
+# Dataset metadata
 dataset_id: unittest
+
 # Feature extraction
+augmentation:
+    cartesian_product:
+        volume: [0.25, 1.0, 4.0]
+        speed: [0.8, 1.0, 1.2]
 utterance_length_ms: 3000
-utterance_offset_ms: 1000
-sequence_length: 16
-print_progress: 10
+utterance_offset_ms: 500
+sequence_length: 32
+# How often to print progress, for operations that take a long time
+print_progress: 100
 extractors:
     - name: mfcc-deltas-012
       n_mfcc: 13
+
 # Model training
 model:
     name: debug-lstm
     batch_size: 32
-    dataset_shuffle_size: 300
+    dataset_shuffle_size: 1000
     epochs: 25
     loss: categorical_crossentropy
     metrics:
         - accuracy
-    num_cells: 8
+    num_cells: 32
     optimizer: adam
-    steps_per_epoch: 100
-    validation_steps: 10
+    steps_per_epoch: 500
+    validation_steps: 50
     verbose: 2
+    # Wait for at most 10 epochs for validation loss to improve before stopping training completely
+    early_stopping:
+        monitor: val_loss
+        patience: 10

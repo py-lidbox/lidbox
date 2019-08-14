@@ -14,10 +14,11 @@ fi
 cache_dir=./cache/example_experiment
 experiment_config=./experiment.example.yaml
 speech_corpus_root=./test/data_common_voice
+verbosity='-vvv'
 
 printf "Reading all audio files from mini speech corpus in ${speech_corpus_root}\n\n"
 speechbox dataset $cache_dir $experiment_config \
-	--verbosity \
+	$verbosity \
 	--src $speech_corpus_root \
 	--walk \
 	--check \
@@ -27,7 +28,7 @@ speechbox dataset $cache_dir $experiment_config \
 
 printf "\nCreating random training-validation-test split\n\n"
 speechbox dataset $cache_dir $experiment_config \
-	--verbosity \
+	$verbosity \
 	--load-state \
 	--split by-file \
 	--check-split by-file \
@@ -36,9 +37,25 @@ speechbox dataset $cache_dir $experiment_config \
 # Audio files have now been split into 3 disjoint datagroups: training, validation, and test
 # The split, defined by paths, has been saved into the cache directory
 
+printf "\nAugmenting the dataset by transforming audio files\n\n"
+speechbox dataset $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--augment \
+	--save-state
+
+# The dataset has been augmented by performing SoX transformations defined in the experiment yaml
+# The new audio files have been saved into the cache directory and the state has been updated to contain those files
+
+printf "\nChecking dataset integrity\n\n"
+speechbox dataset $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--check-integrity
+
 printf "\nExtracting features\n\n"
 speechbox preprocess $cache_dir $experiment_config \
-	--verbosity \
+	$verbosity \
 	--load-state \
 	--extract-features \
 	--save-state
@@ -47,10 +64,16 @@ speechbox preprocess $cache_dir $experiment_config \
 
 printf "\nTraining simple LSTM model\n\n"
 speechbox model $cache_dir $experiment_config \
-	--verbosity \
+	$verbosity \
 	--load-state \
 	--train \
-	--model-id my-simple-lstm \
+	--model-id my-simple-lstm\
 
-# A simple keras model has been trained on the features extracted during the previous step and saved into the cache directory
-# If training is resumed now, the weights should be loaded automatically from the cache directory
+# A simple (read: really bad) keras model has been trained on the features extracted during the previous step and saved into the cache directory
+
+printf "\nEvaluating model\n\n"
+speechbox model $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--model-id my-simple-lstm \
+	--evaluate-test-set

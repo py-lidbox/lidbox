@@ -242,9 +242,6 @@ class Dataset(Command):
         parser.add_argument("--parse",
             action="store_true",
             help="TODO")
-        parser.add_argument("--resampling-rate",
-            type=int,
-            help="If given with --parse, all wavfile output will be resampled to this sampling rate.")
         parser.add_argument("--check",
             action="store_true",
             help="Check that every file in the walk is unique and contains audio. Might take a long time since every file will be opened briefly with sox and/or librosa.")
@@ -292,7 +289,8 @@ class Dataset(Command):
             walker_config = {
                 "dataset_root": args.src,
             }
-        walker_config["sample_frequency"] = args.resampling_rate
+        if "sample_frequency" in self.experiment_config:
+            walker_config["sample_frequency"] = self.experiment_config["sample_frequency"]
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         if args.check:
             if args.verbosity:
@@ -393,8 +391,9 @@ class Dataset(Command):
         parser_config = {
             "dataset_root": args.src,
             "output_dir": args.dst,
-            "resampling_rate": args.sample_frequency,
         }
+        if "sample_frequency" in self.experiment_config:
+            parser_config["sample_frequency"] = self.experiment_config["sample_frequency"]
         parser = dataset.get_dataset_parser(self.dataset_id, parser_config)
         num_parsed = 0
         if not args.verbosity:
@@ -540,6 +539,11 @@ class Dataset(Command):
             return 1
         args = self.args
         if args.verbosity:
+            print("Checking number of files by datagroup.")
+        for datagroup_name, datagroup in self.state["data"].items():
+            for key in ("paths", "labels", "checksums"):
+                print(datagroup_name, key, len(datagroup.get(key, [])))
+        if args.verbosity:
             print("Checking integrity of all files by recomputing MD5 checksums.")
         mismatches = collections.defaultdict(list)
         for datagroup_name, datagroup in self.state["data"].items():
@@ -562,6 +566,9 @@ class Dataset(Command):
             print("Error: no source directory in cache, run --walk and --save-state on some dataset in directory specified by --src to gather all paths into the cache.", file=sys.stderr)
             return 1
         args = self.args
+        state_data = self.state["data"]
+        if args.verbosity and any("features" in datagroup for datagroup in state_data.values()):
+            print("Warning: some datagroups seem to have paths to extracted features. You should re-extract all features after the augmentation is complete.")
         if not args.dst:
             if args.verbosity:
                 print("No augmentation destination given, assuming cache directory '{}'".format(args.cache_dir))
@@ -583,11 +590,8 @@ class Dataset(Command):
             pprint.pprint(augment_config)
             print()
         print_progress = self.experiment_config.get("print_progress", 0)
-        src_paths_by_datagroup = {
-            datagroup_key: datagroup["paths"]
-            for datagroup_key, datagroup in self.state["data"].items()
-        }
-        dst_paths_by_datagroup = {datagroup_key: [] for datagroup_key in src_paths_by_datagroup}
+        # Collect paths of augmented files by datagroup, each set of augmented paths grouped by the source path it was augmented from
+        dst_paths_by_datagroup = {datagroup_key: collections.defaultdict(list) for datagroup_key in state_data}
         num_augmented = 0
         for aug_kwargs in augment_config:
             if args.verbosity:
@@ -595,7 +599,8 @@ class Dataset(Command):
                 for aug_type, aug_value in aug_kwargs.items():
                     print(aug_type, aug_value)
                 print()
-            for datagroup_key, src_paths in src_paths_by_datagroup.items():
+            for datagroup_key, datagroup in state_data.items():
+                src_paths = datagroup["paths"]
                 # Create sox src-dst file pairs for each transformation
                 dst_paths = []
                 for src_path in src_paths:
@@ -612,13 +617,28 @@ class Dataset(Command):
                         if args.verbosity:
                             print("Warning, sox failed to transform '{}' from '{}'".format(dst_path, src_path))
                     else:
+                        dst_paths_by_datagroup[datagroup_key][src_path].append(dst_path)
                         num_augmented += 1
                         if args.verbosity > 3:
                             print("augmented {} to {}".format(src_path, dst_path))
-                    # We still want to gather all None's to know which failed
-                    dst_paths_by_datagroup[datagroup_key].append(dst_path)
                     if print_progress > 0 and num_augmented % print_progress == 0:
                         print(num_augmented, "files augmented")
+        # All augmented, now expand the paths in the state dict
+        for datagroup_key, datagroup in state_data.items():
+            all_augmented_paths = dst_paths_by_datagroup[datagroup_key]
+            addition = {"checksums": [], "labels": [], "paths": []}
+            for label, src_path in zip(datagroup["labels"], datagroup["paths"]):
+                dst_paths = all_augmented_paths[src_path]
+                if not dst_paths:
+                    if args.verbosity:
+                        print("Warning: path not augmented: '{}'".format(src_path))
+                    continue
+                addition["checksums"].extend(system.md5sum(path) for path in dst_paths)
+                addition["labels"].extend(label for _ in dst_paths)
+                addition["paths"].extend(dst_paths)
+            for key, vals in addition.items():
+                datagroup[key].extend(vals)
+
 
     def swap_paths_prefix(self):
         args = self.args
