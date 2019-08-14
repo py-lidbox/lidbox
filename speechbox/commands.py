@@ -447,26 +447,11 @@ class Dataset(Command):
         self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
         if args.split == "by-speaker":
             splitter = transformations.dataset_split_samples_by_speaker
+        elif args.split == "parse-pre-defined":
+            splitter = transformations.dataset_split_parse_predefined
         else:
             splitter = transformations.dataset_split_samples
-        training_set, validation_set, test_set = splitter(dataset_walker, verbosity=args.verbosity)
-        split = {
-            "training": {
-                "paths": training_set[0],
-                "labels": training_set[1],
-                "checksums": training_set[2],
-            },
-            "validation": {
-                "paths": validation_set[0],
-                "labels": validation_set[1],
-                "checksums": validation_set[2],
-            },
-            "test": {
-                "paths": test_set[0],
-                "labels": test_set[1],
-                "checksums": test_set[2],
-            }
-        }
+        split = splitter(dataset_walker, verbosity=args.verbosity)
         # Merge split into self.state["data"], such that keys in split take priority and overwrite existing keys
         self.state["data"] = dict(self.state.get("data", {}), **split)
         if "all" in self.state["data"]:

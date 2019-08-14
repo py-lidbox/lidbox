@@ -1,6 +1,8 @@
 """
 Transformations on datasets.
 """
+import collections
+
 import numpy as np
 import sklearn.model_selection
 
@@ -114,11 +116,23 @@ def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05
         random_state=random_state,
         test_size=validation_ratio / (1.0 - test_ratio)
     )
-    return (
-        (split[0], split[2], split[4]),
-        (split[1], split[3], split[5]),
-        (test_paths, test_labels, test_checksums)
-    )
+    return {
+        "training": {
+            "paths": split[0],
+            "labels": split[2],
+            "checksums": split[4],
+        },
+        "validation": {
+            "paths": split[1],
+            "labels": split[3],
+            "checksums": split[5],
+        },
+        "test": {
+            "paths": test_paths,
+            "labels": test_labels,
+            "checksums": test_checksums,
+        }
+    }
 
 def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
     """
@@ -150,8 +164,34 @@ def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test
     # Set dataset_walker to return only files by test-set speaker IDs
     dataset_walker.set_speaker_filter(test_speakers)
     test_labels, test_paths, test_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
-    return (
-        (split[0], split[2], split[4]),
-        (split[1], split[3], split[5]),
-        (test_paths, test_labels, test_checksums)
-    )
+    return {
+        "training": {
+            "paths": split[0],
+            "labels": split[2],
+            "checksums": split[4],
+        },
+        "validation": {
+            "paths": split[1],
+            "labels": split[3],
+            "checksums": split[5],
+        },
+        "test": {
+            "paths": test_paths,
+            "labels": test_labels,
+            "checksums": test_checksums,
+        }
+    }
+
+def dataset_split_parse_predefined(dataset_walker, verbosity=0):
+    assert hasattr(dataset_walker, "datagroup_patterns"), "The given dataset walker, '{}', does not seem to support parsing predefined datagroup splits".format(repr(dataset_walker))
+    expected_datagroups = tuple(key for key, _ in dataset_walker.datagroup_patterns)
+    split = {datagroup_key: collections.defaultdict(list) for datagroup_key in expected_datagroups}
+    for label, wavpath, md5sum in dataset_walker.walk(verbosity=verbosity):
+        datagroup_key = dataset_walker.parse_datagroup(wavpath)
+        if datagroup_key is None:
+            error_msg = "dataset walker '{}' was unable to parse datagroup key for path '{}'".format(repr(dataset_walker), wavpath)
+            assert False, error_msg
+        split[datagroup_key]["labels"].append(label)
+        split[datagroup_key]["paths"].append(wavpath)
+        split[datagroup_key]["checksums"].append(md5sum)
+    return split

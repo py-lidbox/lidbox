@@ -9,8 +9,9 @@ all_datasets = (
     tuple(all_parsers.keys())
 )
 all_split_types = (
-    "by-speaker",
-    "by-file",
+    "by-file", # Split by file paths
+    "by-speaker", # Use a dataset walker to parse speaker ids for each file to determine speaker
+    "parse-pre-defined", # Parse a pre-defined split using a dataset walker
 )
 
 def get_dataset_parser(dataset, config=None):
