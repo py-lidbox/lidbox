@@ -226,6 +226,7 @@ class Dataset(Command):
         "to_kaldi",
         "compare_state",
         "augment",
+        "swap_paths_prefix",
     )
 
     @classmethod
@@ -269,6 +270,10 @@ class Dataset(Command):
         parser.add_argument("--augment",
             action="store_true",
             help="Apply augmentation on all paths in dataset and write output into directory given by '--dst'. Augmentation config is defined in the experiment config under sox_transform.")
+        parser.add_argument("--swap-paths-prefix",
+            type=str,
+            action=ExpandAbspath,
+            help="Replace the source directory prefix of every path in every datagroups with the given prefix.")
         return parser
 
     def walk(self):
@@ -614,6 +619,19 @@ class Dataset(Command):
                     dst_paths_by_datagroup[datagroup_key].append(dst_path)
                     if print_progress > 0 and num_augmented % print_progress == 0:
                         print(num_augmented, "files augmented")
+
+    def swap_paths_prefix(self):
+        args = self.args
+        if not self.state_data_ok():
+            return 1
+        prefix = self.state["source_directory"]
+        new_prefix = args.swap_paths_prefix
+        if args.verbosity:
+            print("Swapping prefix '{}' for '{}' in all paths in state".format(prefix, new_prefix))
+        for datagroup in self.state["data"].values():
+            datagroup["paths"] = [p.replace(prefix, new_prefix) for p in datagroup["paths"]]
+        self.state["source_directory"] = new_prefix
+
 
     def run(self):
         super().run()
