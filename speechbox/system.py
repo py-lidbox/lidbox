@@ -8,7 +8,6 @@ import json
 from audioread.exceptions import NoBackendError
 import librosa
 import sox
-import tensorflow as tf
 import yaml
 
 
@@ -59,6 +58,7 @@ def sequence_to_example(sequence, onehot_label_vec):
     """
     Encode a single sequence and its label as a TensorFlow SequenceExample.
     """
+    import tensorflow as tf
     def float_vec_to_float_features(v):
         return tf.train.Feature(float_list=tf.train.FloatList(value=v))
     def sequence_to_floatlist_features(seq):
@@ -80,6 +80,7 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     """
     Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
     """
+    import tensorflow as tf
     context_definition = {
         "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
     }
@@ -94,6 +95,7 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     return sequence["inputs"], context["target"]
 
 def write_features(sequence_features, target_path):
+    import tensorflow as tf
     target_path += ".tfrecord"
     # Peek the dimensions from the first sample
     sequence, onehot_label = next(sequence_features)
@@ -118,6 +120,7 @@ def load_features_meta(tfrecord_path):
         return json.load(f)
 
 def load_features_as_dataset(tfrecord_paths, model_config):
+    import tensorflow as tf
     features_meta = load_features_meta(tfrecord_paths[0])
     num_labels, num_features = features_meta["num_labels"], features_meta["num_features"]
     dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
@@ -151,6 +154,7 @@ def count_dataset(tfrecord_paths):
     """
     Count the amount of entries in a TFRecord file by iterating over it once.
     """
+    import tensorflow as tf
     dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
     next_element = tf.data.make_one_shot_iterator(dataset).get_next()
     num_elements = 0
