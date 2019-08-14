@@ -569,8 +569,15 @@ class Dataset(Command):
             augment_config = augment_config["list"]
         elif "cartesian_product" in augment_config:
             all_kwargs = augment_config["cartesian_product"].items()
-            flattened_kwargs = [[(aug_type, v) for v in aug_values] for aug_type, aug_values in all_kwargs]
-            augment_config = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
+            flattened_kwargs = [
+                [(aug_type, v) for v in aug_values]
+                for aug_type, aug_values in all_kwargs
+            ]
+            # Set augment_config to be all possible combinations of given values, except the one where all values are equal to 1.0
+            augment_config = [
+                dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)
+                if not all(value == 1 for _, value in kwargs)
+            ]
         if args.verbosity > 1:
             print("Full config for augmentation:")
             pprint.pprint(augment_config)
