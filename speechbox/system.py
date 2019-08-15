@@ -122,13 +122,18 @@ def load_features_meta(tfrecord_path):
 def load_features_as_dataset(tfrecord_paths, model_config):
     import tensorflow as tf
     features_meta = load_features_meta(tfrecord_paths[0])
-    num_labels, num_features = features_meta["num_labels"], features_meta["num_features"]
+    def parse_sequence_example(seq_example_string):
+        num_labels = features_meta["num_labels"]
+        num_features =  features_meta["num_features"]
+        return sequence_example_to_model_input(seq_example_string, num_labels, num_features)
     dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
-    dataset = dataset.map(lambda se: sequence_example_to_model_input(se, num_labels, num_features))
-    if model_config.get("dataset_shuffle_size", 0):
+    dataset = dataset.map(parse_sequence_example)
+    if "dataset_shuffle_size" in model_config:
         dataset = dataset.shuffle(model_config["dataset_shuffle_size"])
-    dataset = dataset.repeat()
-    dataset = dataset.batch(model_config["batch_size"])
+    if "repeat" in model_config:
+        dataset = dataset.repeat(count=model_config["repeat"])
+    if "batch_size" in model_config:
+        dataset = dataset.batch(model_config["batch_size"])
     return dataset, features_meta
 
 def write_utterance(utterance, basedir):

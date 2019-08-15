@@ -68,8 +68,8 @@ class KerasWrapper:
             training_set,
             validation_data=validation_set,
             epochs=model_config["epochs"],
-            steps_per_epoch=model_config["steps_per_epoch"],
-            validation_steps=model_config["validation_steps"],
+            steps_per_epoch=model_config.get("steps_per_epoch"),
+            validation_steps=model_config.get("validation_steps"),
             verbose=model_config.get("verbose", 2),
             callbacks=self.callbacks,
         )
@@ -78,7 +78,7 @@ class KerasWrapper:
     def evaluate(self, test_set, model_config):
         return self.model.evaluate(
             test_set,
-            steps=model_config["validation_steps"],
+            steps=model_config.get("validation_steps"),
             verbose=model_config.get("verbose", 2)
         )
 
