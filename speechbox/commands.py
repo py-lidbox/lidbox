@@ -834,6 +834,8 @@ class Model(Command):
             print("Error: test set paths not found", file=sys.stderr)
             return 1
         test_set_data = self.state["data"]["test"]
+        if args.verbosity > 1:
+            print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
             [test_set_data["features"]],
             model_config
@@ -844,10 +846,21 @@ class Model(Command):
         if args.evaluate_test_set == "loss":
             model.evaluate(test_set, model_config)
         elif args.evaluate_test_set == "confusion-matrix":
+            if args.verbosity > 1:
+                print("Extracting features for all files in the test set")
             paths = test_set_data["paths"]
-            test_utterances = [sequences for _, sequences in transformations.files_to_utterances(paths, self.experiment_config)]
+            transformer = transformations.files_to_utterances(paths, self.experiment_config)
+            test_labels = []
+            test_utterances = []
+            for label, (path, utterance) in zip(test_set_data["labels"], transformer):
+                if utterance is None:
+                    if args.verbosity > 1:
+                        print("Warning: could not extract features from (possibly too short) file '{}'".format(path))
+                else:
+                    test_labels.append(label)
+                    test_utterances.append(utterance)
             label_to_index = self.state["label_to_index"]
-            real_labels = [label_to_index[label] for label in test_set_data["labels"]]
+            real_labels = [label_to_index[label] for label in test_labels]
             cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
             figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
             cm_figure_path = os.path.join(args.cache_dir, figure_name)
@@ -872,17 +885,19 @@ class Model(Command):
         paths = list(system.load_audiofile_paths(args.predict))
         if args.verbosity:
             print("Extracting features from {} audio files".format(len(paths)))
-        utterances = list(transformations.files_to_utterances(paths, config))
-        if args.verbosity > 1:
-            ok_paths = set(path in path, _ in utterances)
-            for path in paths:
-                if path not in ok_paths:
+        utterances = []
+        extracted_paths = []
+        for path, utterance in transformations.files_to_utterances(paths, config):
+            if utterance is None:
+                if args.verbosity > 1:
                     print("Warning: could not extract features from (possibly too short) file '{}'".format(path))
+            else:
+                utterances.append(utterance)
+                extracted_paths.append(path)
         index_to_label = collections.OrderedDict(
             sorted((i, label) for label, i in self.state["label_to_index"].items())
         )
-        all_predictions = list(model.predict([features for _, features in utterances]))
-        for (path, _), prediction in zip(utterances, all_predictions):
+        for path, prediction in zip(extracted_paths, model.predict(utterances)):
             print("'{}':".format(path))
             print(("{:>8s}" * len(index_to_label)).format(*index_to_label.values()))
             for p in prediction:

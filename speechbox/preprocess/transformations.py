@@ -91,8 +91,8 @@ def files_to_utterances(paths, config):
         )
         # Evaluate features generator while dropping dummy labels
         features = [feat for feat, _ in features]
-        if features:
-            yield path, np.array(features)
+        features = np.array(features) if features else None
+        yield path, features
 
 def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
     """
