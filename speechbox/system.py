@@ -11,6 +11,8 @@ import sox
 import yaml
 
 
+TFRECORD_COMPRESSION = "GZIP"
+
 def read_wavfile(path, **librosa_kwargs):
     if "sr" not in librosa_kwargs:
         # Detect sampling rate if not specified
@@ -109,7 +111,7 @@ def write_features(sequence_features, target_path):
     # Put back the first sample
     sequence_features = itertools.chain([(sequence, onehot_label)], sequence_features)
     # Write all samples
-    with tf.io.TFRecordWriter(target_path, options="GZIP") as record_writer:
+    with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
         for sequence, onehot_label in sequence_features:
             sequence_example = sequence_to_example(sequence, onehot_label)
             record_writer.write(sequence_example.SerializeToString())
@@ -123,19 +125,31 @@ def load_features_as_dataset(tfrecord_paths, model_config=None):
     import tensorflow as tf
     if model_config is None:
         model_config = {}
+    # All labels should have features of same dimensions
     features_meta = load_features_meta(tfrecord_paths[0])
+    assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
+    num_labels = features_meta["num_labels"]
+    num_features =  features_meta["num_features"]
     def parse_sequence_example(seq_example_string):
-        num_labels = features_meta["num_labels"]
-        num_features =  features_meta["num_features"]
         return sequence_example_to_model_input(seq_example_string, num_labels, num_features)
-    dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
-    dataset = dataset.map(parse_sequence_example)
+    def parse_compressed_tfrecords(paths):
+        d = tf.data.TFRecordDataset(paths, compression_type=TFRECORD_COMPRESSION)
+        if "parallel_parse" in model_config:
+            d = d.map(parse_sequence_example, num_parallel_calls=model_config["parallel_parse"])
+        else:
+            d = d.map(parse_sequence_example)
+        return d
+    dataset = tf.data.Dataset.from_tensor_slices(tfrecord_paths)
+    # Consume TFRecords in cycles over all labels, each time taking a single sample with a different label
+    dataset = dataset.interleave(parse_compressed_tfrecords, cycle_length=num_labels, block_length=1)
     if "dataset_shuffle_size" in model_config:
         dataset = dataset.shuffle(model_config["dataset_shuffle_size"])
     if "repeat" in model_config:
         dataset = dataset.repeat(count=model_config["repeat"])
     if "batch_size" in model_config:
         dataset = dataset.batch(model_config["batch_size"])
+        if "prefetch" in model_config:
+            dataset = dataset.prefetch(model_config["steps_per_epoch"])
     return dataset, features_meta
 
 def write_utterance(utterance, basedir):
@@ -156,16 +170,6 @@ def load_utterances(basedir):
 def load_yaml(path):
     with open(path) as f:
         return yaml.safe_load(f)
-
-def count_dataset(tfrecord_path):
-    """
-    Count the amount of entries in a given TFRecord file by iterating over it once.
-    """
-    dataset, _ = load_features_as_dataset([tfrecord_path])
-    num_elements = 0
-    for _ in dataset:
-        num_elements += 1
-    return num_elements
 
 def apply_sox_transformer(src_paths, dst_paths, **config):
     t = sox.Transformer()

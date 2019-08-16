@@ -113,12 +113,12 @@ class Model(StatefulCommand):
         # Load training set consisting of pre-extracted features
         training_set, features_meta = system.load_features_as_dataset(
             # List of all .tfrecord files containing all training set samples
-            [data["training"]["features"]],
+            list(data["training"]["features"].values()),
             model_config
         )
         # Same for the validation set
         validation_set, _ = system.load_features_as_dataset(
-            [data["validation"]["features"]],
+            list(data["validation"]["features"].values()),
             model_config
         )
         model.prepare(features_meta, model_config)
@@ -145,7 +145,7 @@ class Model(StatefulCommand):
         if args.verbosity > 1:
             print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
-            [test_set_data["features"]],
+            list(test_set_data["features"].values()),
             model_config
         )
         model.prepare(features_meta, model_config)

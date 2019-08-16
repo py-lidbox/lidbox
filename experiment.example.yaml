@@ -11,7 +11,7 @@ utterance_length_ms: 2000
 utterance_offset_ms: 500
 sequence_length: 32
 # How often to print progress, for operations that take a long time
-print_progress: 100
+print_progress: 25
 extractors:
     - name: mfcc-deltas-012
       n_mfcc: 13
@@ -28,10 +28,12 @@ model:
     optimizer: adam
     steps_per_epoch: 500
     validation_steps: 50
-    # Use a shuffle buffer of 5000 samples
-    dataset_shuffle_size: 5000
+    dataset_shuffle_size: 500
     # Repeat dataset indefinitely
     repeat: -1
+    # Use CPU to prefetch batches during training
+    prefetch: True
+    parallel_parse: 4
     verbose: 2
     # Wait for at most 10 epochs for validation loss to improve before stopping training completely
     early_stopping:
