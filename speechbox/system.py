@@ -173,8 +173,8 @@ def load_yaml(path):
 
 def apply_sox_transformer(src_paths, dst_paths, **config):
     t = sox.Transformer()
-    if "norm" in config:
-        db = float(config["norm"])
+    if "normalize" in config:
+        db = float(config["normalize"])
         t = t.norm(db)
     if "volume" in config:
         amplitude = float(config["volume"])

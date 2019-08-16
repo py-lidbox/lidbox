@@ -371,6 +371,10 @@ class Dataset(StatefulCommand):
             ]
             # Set augment_config to be all possible combinations of given values
             augment_config = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
+        if "normalize" in self.experiment_config["augmentation"]:
+            normalize = self.experiment_config["augmentation"]["normalize"]
+            for kwargs in augment_config:
+                kwargs["normalize"] = normalize
         if args.verbosity > 1:
             print("Full config for augmentation:")
             pprint.pprint(augment_config)
@@ -413,6 +417,9 @@ class Dataset(StatefulCommand):
             print(num_augmented, "files augmented")
         if args.verbosity:
             print("Adding paths of all augmented files into data state")
+        ignore_src_files = self.experiment_config["augmentation"].get("ignore_src_files", False)
+        if args.verbosity and ignore_src_files:
+            print("'ignore_src_files' given in the augmentation config, original files will be ignored. Only augmented filepaths will be saved into data state.")
         # All augmented, now expand the paths in the state dict
         for datagroup_key, datagroup in state_data.items():
             all_augmented_paths = dst_paths_by_datagroup[datagroup_key]
@@ -427,7 +434,10 @@ class Dataset(StatefulCommand):
                 addition["labels"].extend(label for _ in dst_paths)
                 addition["paths"].extend(dst_paths)
             for key, vals in addition.items():
-                datagroup[key].extend(vals)
+                if ignore_src_files:
+                    datagroup[key] = vals
+                else:
+                    datagroup[key].extend(vals)
 
 
     def swap_paths_prefix(self):
