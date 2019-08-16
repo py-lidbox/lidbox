@@ -31,16 +31,23 @@ def extract_features(utterance_wav, extractor, config):
     assert features.ndim == 2, "Unexpected dimension {} for features, expected 2".format(features.ndim)
     return features
 
-def mfcc_deltas_012(utterance, n_mfcc):
+def mfcc(utterance, n_mfcc):
     """
-    MFCCs, normalize each coef by L2 norm, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
-    Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
+    MFCCs and normalize each coef by L2 norm.
     """
     signal, rate = utterance
     # Extract MFCCs
     mfccs = librosa.feature.mfcc(y=signal, sr=rate, n_mfcc=n_mfcc)
     # Normalize each coefficient such that the L2 norm for each coefficient over all frames is equal to 1
     mfccs = librosa.util.normalize(mfccs, norm=2.0, axis=0)
+    return mfccs.T
+
+def mfcc_deltas_012(utterance, n_mfcc):
+    """
+    MFCCs, normalize each coef by L2 norm, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
+    Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
+    """
+    mfccs = mfcc(utterance, n_mfcc).T
     # Compute deltas and delta-deltas and interleave them for every frame
     # i.e. for frames f_i, the features are:
     # f_0, d(f_0), d(d(f_0)), f_1, d(f_1), d(d(f_1)), f_2, d(f_2), ...
@@ -52,5 +59,6 @@ def mfcc_deltas_012(utterance, n_mfcc):
 
 
 all_extractors = collections.OrderedDict([
+    ("mfcc", mfcc),
     ("mfcc-deltas-012", mfcc_deltas_012),
 ])

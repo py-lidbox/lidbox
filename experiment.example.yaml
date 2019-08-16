@@ -13,8 +13,8 @@ sequence_length: 32
 # How often to print progress, for operations that take a long time
 print_progress: 25
 extractors:
-    - name: mfcc-deltas-012
-      n_mfcc: 13
+    - name: mfcc
+      n_mfcc: 20
 
 # Model training
 model:
