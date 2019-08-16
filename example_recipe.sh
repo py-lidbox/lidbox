@@ -62,6 +62,12 @@ speechbox preprocess $cache_dir $experiment_config \
 
 # MFCCs have now been extracted from the audio files for each datagroup, and the features have been saved as TFRecords into the cache directory
 
+printf "\nCounting total amount of features\n\n"
+speechbox preprocess $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--count-features \
+
 printf "\nTraining simple LSTM model\n\n"
 speechbox model $cache_dir $experiment_config \
 	$verbosity \

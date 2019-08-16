@@ -20,7 +20,6 @@ extractors:
 model:
     name: debug-lstm
     batch_size: 16
-    dataset_shuffle_size: 1000
     epochs: 25
     loss: categorical_crossentropy
     metrics:
@@ -29,6 +28,10 @@ model:
     optimizer: adam
     steps_per_epoch: 500
     validation_steps: 50
+    # Use a shuffle buffer of 5000 samples
+    dataset_shuffle_size: 5000
+    # Repeat dataset indefinitely
+    repeat: -1
     verbose: 2
     # Wait for at most 10 epochs for validation loss to improve before stopping training completely
     early_stopping:

@@ -119,8 +119,10 @@ def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)
 
-def load_features_as_dataset(tfrecord_paths, model_config):
+def load_features_as_dataset(tfrecord_paths, model_config=None):
     import tensorflow as tf
+    if model_config is None:
+        model_config = {}
     features_meta = load_features_meta(tfrecord_paths[0])
     def parse_sequence_example(seq_example_string):
         num_labels = features_meta["num_labels"]
@@ -155,22 +157,14 @@ def load_yaml(path):
     with open(path) as f:
         return yaml.safe_load(f)
 
-def count_dataset(tfrecord_paths):
+def count_dataset(tfrecord_path):
     """
-    Count the amount of entries in a TFRecord file by iterating over it once.
+    Count the amount of entries in a given TFRecord file by iterating over it once.
     """
-    import tensorflow as tf
-    dataset = tf.data.TFRecordDataset(tfrecord_paths, compression_type="GZIP")
-    next_element = tf.data.make_one_shot_iterator(dataset).get_next()
+    dataset, _ = load_features_as_dataset([tfrecord_path])
     num_elements = 0
-    with tf.Session() as session:
-        try:
-            while True:
-                session.run(next_element)
-                num_elements += 1
-        except tf.errors.OutOfRangeError:
-            # Iterator exhausted
-            pass
+    for _ in dataset:
+        num_elements += 1
     return num_elements
 
 def apply_sox_transformer(src_paths, dst_paths, **config):

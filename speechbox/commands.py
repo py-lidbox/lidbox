@@ -110,8 +110,8 @@ class Command:
         ok = True
         if not self.has_state() or "data" not in self.state:
             error_msg = (
-                "Error: self.state does not have a 'data' key containing filepaths and labels, cannot extract features."
-                " Either load an existing dataset definition from the cache with '--load-state' or create a new dataset split."
+                "Error: self.state does not have a 'data' key containing filepaths and labels."
+                " Either load an existing dataset definition from the cache with '--load-state' or load a dataset from disk by using a dataset walker."
                 "\nSee e.g. 'speechbox dataset --help'."
             )
             print(error_msg, file=sys.stderr)
@@ -573,11 +573,8 @@ class Dataset(Command):
                 [(aug_type, v) for v in aug_values]
                 for aug_type, aug_values in all_kwargs
             ]
-            # Set augment_config to be all possible combinations of given values, except the one where all values are equal to 1.0
-            augment_config = [
-                dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)
-                if not all(value == 1 for _, value in kwargs)
-            ]
+            # Set augment_config to be all possible combinations of given values
+            augment_config = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
         if args.verbosity > 1:
             print("Full config for augmentation:")
             pprint.pprint(augment_config)
@@ -656,9 +653,9 @@ class Dataset(Command):
 
 
 class Preprocess(Command):
-    """Feature extraction."""
+    """Feature extraction and feature analysis."""
 
-    tasks = ("extract_features",)
+    tasks = ("extract_features", "count_features")
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -666,6 +663,9 @@ class Preprocess(Command):
         parser.add_argument("--extract-features",
             action="store_true",
             help="Perform feature extraction on whole dataset.")
+        parser.add_argument("--count-features",
+            action="store_true",
+            help="Count the amount of extracted features in every datagroup.")
         return parser
 
     def extract_features(self):
@@ -698,6 +698,19 @@ class Preprocess(Command):
             datagroup["features"] = wrote_path
             if args.verbosity:
                 print("Wrote '{}' features to '{}'".format(datagroup_name, wrote_path))
+
+    def count_features(self):
+        args = self.args
+        if args.verbosity:
+            print("Counting all extracted features by datagroup")
+        if not self.state_data_ok():
+            return 1
+        for datagroup_name, datagroup in self.state["data"].items():
+            if "features" not in datagroup:
+                print("Error: No features extracted for datagroup '{}', cannot count features".format(datagroup_name), file=sys.stderr)
+                continue
+            num_features = system.count_dataset(datagroup["features"])
+            print("'{}' has {} features".format(datagroup_name, num_features))
 
     def run(self):
         super().run()
