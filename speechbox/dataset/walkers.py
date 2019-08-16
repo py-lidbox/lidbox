@@ -257,7 +257,7 @@ class OGIWalker(SpeechDatasetWalker):
             ("kor", {"name": "Korean"}),
             ("spa", {"name": "Spanish"}),
             ("tam", {"name": "Tamil"}),
-            ("vie", {"name": "Vietnam"}),
+            ("vie", {"name": "Vietnamese"}),
         ])
         #FIXME this is getting out of hand, maybe use a factory classmethod instead
         if kwargs.get("dataset_root"):

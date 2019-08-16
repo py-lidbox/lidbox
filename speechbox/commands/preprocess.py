@@ -37,8 +37,12 @@ class Preprocess(StatefulCommand):
             if "features" in datagroup:
                 if args.verbosity:
                     print("Warning: datagroup '{}' already has features extracted, they will be overwritten:".format(datagroup_name))
-                    for f in datagroup["features"]:
-                        pprint.pprint(f)
+                    features = datagroup["features"]
+                    if type(features) is str:
+                        print(feature)
+                    else:
+                        for f in datagroup["features"]:
+                            pprint.pprint(f)
             datagroup["features"] = {}
             tfrecords_dir = os.path.join(args.cache_dir, datagroup_name)
             self.make_named_dir(tfrecords_dir)
