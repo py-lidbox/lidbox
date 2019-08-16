@@ -4,7 +4,7 @@ Command line entrypoint.
 import sys
 
 import speechbox
-from speechbox import commands
+from speechbox.commands import create_argparser
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
         print("Running cProfile, writing output to '{}'".format(profile_file), file=sys.stderr)
         profile = cProfile.Profile()
         profile.enable()
-    parser = commands.create_argparser()
+    parser = create_argparser()
     if len(sys.argv) < 2:
         parser.error("Too few arguments, run '{} --help' for more information.".format(speechbox.__name__))
     # TODO when a subcommand is used incorrectly, get usage strings for its subparser  instead of the root parser

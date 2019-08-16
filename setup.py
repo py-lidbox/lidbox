@@ -25,9 +25,10 @@ setuptools.setup(
     ],
     packages=[
         "speechbox",
+        "speechbox.commands",
         "speechbox.dataset",
-        "speechbox.preprocess",
         "speechbox.models",
+        "speechbox.preprocess",
     ],
     entry_points={
         "console_scripts": [
