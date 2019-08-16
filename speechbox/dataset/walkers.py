@@ -1,8 +1,9 @@
 """
 Iterator classes for extracting paths, labels, and other metadata from speech corpora and datasets.
 """
-import os
 import collections
+import csv
+import os
 import re
 
 from speechbox.system import read_wavfile, md5sum, get_audio_type
@@ -21,12 +22,6 @@ class SpeechDatasetWalker:
                 " otherwise there is no paths to walk over"
             )
             assert paths and labels and checksums, error_msg
-        else:
-            error_msg = (
-                "If dataset_root is not None, then a SpeechDatasetWalker should not get its paths, labels, or checksums predefined,"
-                " because they will be produced by walking over all directories starting at the dataset_root"
-            )
-            assert paths is None and labels is None and checksums is None, error_msg
         # Where to start an os.walk from (unless paths and labels explicitly given)
         self.dataset_root = dataset_root
         # If not None, an integer denoting the expected sample frequency/rate in Hz
@@ -456,6 +451,58 @@ for label, dirs in VarDial2017Walker.dataset_tree.items():
     dirs.extend([[p] + base for _, p in VarDial2017Walker.datagroup_patterns])
 
 
+class CommonVoiceWalker(SpeechDatasetWalker):
+    """
+    Walker for wav-files extracted from mp3-files of a Common Voice dataset.
+    Data source: https://voice.mozilla.org/en
+    The walker assumes all mp3-files from the 'clips' directory have been extracted into a 'wav' directory next to the 'clips' directory,
+    i.e. in the same directory as the tsv metadata files.
+    It is also assumed that the user has extracted each dataset into a directory named by the three letter ISO 639-3 identifier of the dataset language.
+    """
+    dataset_tree = {}
+    file_to_speaker_id = {}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.label_definitions = collections.OrderedDict([
+            ("cat", {"name": "Catalan"}),
+            ("cmn", {"name": "Mandarin Chinese"}),
+            ("cym", {"name": "Welsh"}),
+            ("deu", {"name": "German"}),
+            ("eng", {"name": "English"}),
+            ("fas", {"name": "Persian"}),
+            ("fra", {"name": "French"}),
+            ("ita", {"name": "Italian"}),
+            ("kab", {"name": "Kabyle"}),
+            ("kir", {"name": "Kyrgyz"}),
+            ("nld", {"name": "Dutch"}),
+            ("rus", {"name": "Russian"}),
+            ("spa", {"name": "Spanish"}),
+            ("swe", {"name": "Swedish"}),
+            ("tur", {"name": "Turkish"}),
+        ])
+        assert "dataset_root" in kwargs, "CommonVoiceWalker always needs the dataset root for loading metadata files"
+        dataset_tree = self.__class__.dataset_tree
+        if not dataset_tree:
+            for label in self.label_definitions:
+                assert label not in dataset_tree
+                dataset_tree[label] = [[label, "wav"]]
+        self.parse_directory_tree()
+        if any(k in kwargs for k in ("paths", "labels", "checksums")):
+            assert all(k in kwargs for k in ("paths", "labels", "checksums"))
+            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
+        file_to_speaker_id = self.__class__.file_to_speaker_id
+        if not file_to_speaker_id:
+            for label in self.label_definitions:
+                with open(os.path.join(kwargs["dataset_root"], label, "validated.tsv")) as f:
+                    for row in csv.DictReader(f, delimiter='\t'):
+                        file_to_speaker_id[row["path"].split(".mp3")[0]] = row["client_id"]
+
+    @classmethod
+    def parse_speaker_id(cls, path):
+        return cls.file_to_speaker_id.get(os.path.basename(path).split(".wav")[0])
+
+
 class TestWalker(SpeechDatasetWalker):
     dataset_tree = {
         "cmn": [["chinese"]],
@@ -484,5 +531,6 @@ all_walkers = collections.OrderedDict({
     "ogi": OGIWalker,
     "ogi-legacy": OGIWalker2,
     "vardial-2017": VarDial2017Walker,
+    "common-voice": CommonVoiceWalker,
     "unittest": TestWalker,
 })
