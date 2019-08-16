@@ -44,15 +44,16 @@ class Parser(Command):
         parser = dataset.get_dataset_parser(args.parse, parser_config)
         num_parsed = 0
         if not args.verbosity:
-            for _ in parser.parse():
-                num_parsed += 1
+            for path, output in parser.parse():
+                if output is not None:
+                    num_parsed += 1
         else:
             for path, output in parser.parse():
                 if output is None:
                     print("Warning: failed to parse '{}'".format(path))
                     continue
                 num_parsed += 1
-                if any(output):
+                if args.verbosity > 1 and any(output):
                     status, out, err = output
                     msg = "Warning:"
                     if status:
@@ -62,6 +63,8 @@ class Parser(Command):
                     if err:
                         msg += " stderr: '{}'".format(err)
                     print(msg)
+                if num_parsed % 1000 == 0:
+                    print(num_parsed, "files parsed")
         print(num_parsed, "files parsed from '{}' to '{}'".format(args.src, args.dst))
 
     def run(self):
