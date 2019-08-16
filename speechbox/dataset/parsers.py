@@ -10,11 +10,12 @@ import sox
 
 class DatasetParser:
     """Base parser that can transform wavfiles in some directory."""
-    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None):
+    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None, fail_early=False):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.output_count_limit = output_count_limit
         self.resampling_freq = resampling_freq
+        self.fail_early = fail_early
 
     def iter_wavfiles_at_root(self):
         """Yield all wavfiles at self.dataset_root."""
@@ -25,6 +26,15 @@ class DatasetParser:
                     if sox.file_info.file_type(wavpath) == "wav":
                         yield wavpath
 
+    def build(self, transformer, src_path, dst_path):
+        output = None
+        try:
+            output = transformer.build(src_path, dst_path, return_output=True)
+        except sox.core.SoxError:
+            if self.fail_early:
+                raise
+        return output
+
     def parse(self):
         t = (sox.transform.Transformer()
                 .set_globals(verbosity=2)
@@ -34,7 +44,7 @@ class DatasetParser:
             t = t.rate(self.resampling_freq)
         for src_path in self.iter_wavfiles_at_root():
             dst_path = os.path.join(self.output_dir, os.path.basename(src_path))
-            yield t.build(src_path, dst_path, return_output=True)
+            yield src_path, self.build(t, src_path, dst_path)
 
     def __repr__(self):
         return "<{}: src='{}' dst='{}'>".format(self.__class__.__name__, self.dataset_root, self.output_dir)
@@ -62,7 +72,10 @@ class CommonVoiceParser(DatasetParser):
         for sample in samples:
             src_path = os.path.join(self.dataset_root, "clips", sample["path"])
             dst_path = os.path.join(output_dir, sample["path"].split(".mp3")[0] + ".wav")
-            yield t.build(src_path, dst_path, return_output=True)
+            if os.path.exists(dst_path):
+                print("Warning: Skipping '{}' because it already exists and will not be overwritten".format(dst_path))
+                continue
+            yield src_path, self.build(t, src_path, dst_path)
 
     def parse(self):
         top_samples = self.top_voted_samples(limit=self.output_count_limit)

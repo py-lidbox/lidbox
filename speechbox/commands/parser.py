@@ -23,6 +23,9 @@ class Parser(Command):
         parser.add_argument("--resample",
             type=int,
             help="Resample all output files to the given sample frequency.")
+        parser.add_argument("--fail-early",
+            action="store_true",
+            help="Stop parsing if SoX throws an error.")
         return parser
 
     def parse(self):
@@ -34,6 +37,7 @@ class Parser(Command):
         parser_config = {
             "dataset_root": args.src,
             "output_dir": args.dst,
+            "fail_early": args.fail_early,
         }
         if args.resample:
             parser_config["resampling_freq"] = args.resample
@@ -43,7 +47,10 @@ class Parser(Command):
             for _ in parser.parse():
                 num_parsed += 1
         else:
-            for output in parser.parse():
+            for path, output in parser.parse():
+                if output is None:
+                    print("Warning: failed to parse '{}'".format(path))
+                    continue
                 num_parsed += 1
                 if any(output):
                     status, out, err = output

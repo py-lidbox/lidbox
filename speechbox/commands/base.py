@@ -71,6 +71,9 @@ class Command:
     def run(self):
         pass
 
+    def exit(self):
+        pass
+
 
 
 class StatefulCommand(Command):
