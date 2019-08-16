@@ -5,13 +5,13 @@ import pprint
 import sys
 
 from speechbox.commands import ExpandAbspath
-from speechbox.commands.base import Command
+from speechbox.commands.base import StatefulCommand
 import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
 
 
-class Dataset(Command):
+class Dataset(StatefulCommand):
     """Dataset analysis and manipulation."""
 
     tasks = (

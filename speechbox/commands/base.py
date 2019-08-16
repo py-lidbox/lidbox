@@ -8,14 +8,80 @@ import speechbox.system as system
 
 
 class Command:
-    """Base command with common helpers for all subcommands."""
+    """Stateless, minimal command skeleton."""
+
+    tasks = tuple()
+
+    @classmethod
+    def create_argparser(cls, subparsers):
+        parser = subparsers.add_parser(cls.__name__.lower(), description=cls.__doc__)
+        parser.add_argument("--verbosity", "-v",
+            action="count",
+            default=0,
+            help="Increases verbosity of output for each -v supplied (up to 4).")
+        parser.add_argument("--run-cProfile",
+            action="store_true",
+            help="Do profiling on all commands and write results into a file in the working directory.")
+        return parser
+
+    def __init__(self, args):
+        self.args = args
+
+    def args_src_ok(self):
+        args = self.args
+        ok = True
+        if not args.src:
+            print("Error: Specify dataset source directory", file=sys.stderr)
+            ok = False
+        elif not os.path.isdir(args.src):
+            print("Error: Source directory '{}' does not exist.".format(args.src), file=sys.stderr)
+            ok = False
+        return ok
+
+    def args_dst_ok(self):
+        args = self.args
+        ok = True
+        if not args.dst:
+            #TODO self.error that prints usage
+            print("Error: Specify dataset destination directory with", file=sys.stderr)
+            ok = False
+        else:
+            self.make_named_dir(args.dst, "destination")
+        return ok
+
+    def make_named_dir(self, path, name=None):
+        if not os.path.isdir(path):
+            if self.args.verbosity:
+                if name:
+                    print("Creating {} directory '{}'".format(name, path))
+                else:
+                    print("Creating directory '{}'".format(path))
+            os.makedirs(path)
+
+    def run_tasks(self):
+        given_tasks = [getattr(self, task_name) for task_name in self.__class__.tasks if getattr(self.args, task_name)]
+        if not given_tasks:
+            print("Error: No tasks given, doing nothing", file=sys.stderr)
+            return 2
+        for task in given_tasks:
+            ret = task()
+            if ret:
+                return ret
+
+    def run(self):
+        pass
+
+
+
+class StatefulCommand(Command):
+    """Base command with state that can be loaded and saved between runs."""
 
     tasks = tuple()
     valid_datagroup_keys = ("paths", "labels", "checksums")
 
     @classmethod
     def create_argparser(cls, subparsers):
-        parser = subparsers.add_parser(cls.__name__.lower(), description=cls.__doc__)
+        parser = super().create_argparser(subparsers)
         parser.add_argument("cache_dir",
             type=str,
             action=ExpandAbspath,
@@ -24,13 +90,6 @@ class Command:
             type=str,
             action=ExpandAbspath,
             help="Path to a yaml-file containing the experiment configuration, e.g. hyperparameters, feature extractors etc.")
-        parser.add_argument("--verbosity", "-v",
-            action="count",
-            default=0,
-            help="Increases verbosity of output for each -v supplied (up to 4).")
-        parser.add_argument("--run-cProfile",
-            action="store_true",
-            help="Do profiling on all commands and write results into a file in the working directory.")
         parser.add_argument("--src",
             type=str,
             action=ExpandAbspath,
@@ -112,15 +171,6 @@ class Command:
                 print(error_msg, file=sys.stderr)
         return ok
 
-    def make_named_dir(self, path, name=None):
-        if not os.path.isdir(path):
-            if self.args.verbosity:
-                if name:
-                    print("Creating {} directory '{}'".format(name, path))
-                else:
-                    print("Creating directory '{}'".format(path))
-            os.makedirs(path)
-
     def load_state(self):
         args = self.args
         state_path = os.path.join(args.cache_dir, "speechbox_state.json.gz")
@@ -167,16 +217,6 @@ class Command:
             print("Running with initial state:")
             pprint.pprint(self.state, depth=3)
             print()
-
-    def run_tasks(self):
-        given_tasks = [getattr(self, task_name) for task_name in self.__class__.tasks if getattr(self.args, task_name)]
-        if not given_tasks:
-            print("Error: No tasks given, doing nothing", file=sys.stderr)
-            return 2
-        for task in given_tasks:
-            ret = task()
-            if ret:
-                return ret
 
     def exit(self):
         if self.args.save_state:

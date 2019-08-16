@@ -1,11 +1,13 @@
+import itertools
 import os
+import pprint
 
-from speechbox.commands.base import Command
+from speechbox.commands.base import StatefulCommand
 import speechbox.system as system
 import speechbox.preprocess.transformations as transformations
 
 
-class Preprocess(Command):
+class Preprocess(StatefulCommand):
     """Feature extraction and feature analysis."""
 
     tasks = ("extract_features", "count_features")

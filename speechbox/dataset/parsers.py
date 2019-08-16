@@ -4,18 +4,17 @@ Speech dataset parsers and cleaning tools.
 import collections
 import csv
 import os
-import logging
 
 import sox
 
 
 class DatasetParser:
     """Base parser that can transform wavfiles in some directory."""
-    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_rate=None):
+    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.output_count_limit = output_count_limit
-        self.resampling_rate = resampling_rate
+        self.resampling_freq = resampling_freq
 
     def iter_wavfiles_at_root(self):
         """Yield all wavfiles at self.dataset_root."""
@@ -31,8 +30,8 @@ class DatasetParser:
                 .set_globals(verbosity=2)
                 .set_input_format(file_type="wav")
                 .set_output_format(file_type="wav"))
-        if self.resampling_rate:
-            t = t.rate(self.resampling_rate)
+        if self.resampling_freq:
+            t = t.rate(self.resampling_freq)
         for src_path in self.iter_wavfiles_at_root():
             dst_path = os.path.join(self.output_dir, os.path.basename(src_path))
             yield t.build(src_path, dst_path, return_output=True)
@@ -67,7 +66,7 @@ class CommonVoiceParser(DatasetParser):
 
     def parse(self):
         top_samples = self.top_voted_samples(limit=self.output_count_limit)
-        return self.convert_to_wavs(top_samples, self.output_dir, resample_to=self.resampling_rate)
+        return self.convert_to_wavs(top_samples, self.output_dir, resample_to=self.resampling_freq)
 
 
 all_parsers = collections.OrderedDict({

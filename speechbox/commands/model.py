@@ -5,14 +5,14 @@ import pprint
 import sys
 
 from speechbox.commands import ExpandAbspath
-from speechbox.commands.base import Command
+from speechbox.commands.base import StatefulCommand
 import speechbox.models as models
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
 import speechbox.visualization as visualization
 
 
-class Model(Command):
+class Model(StatefulCommand):
     """Model training and evaluation."""
 
     tasks = ("train", "evaluate_test_set", "predict")
