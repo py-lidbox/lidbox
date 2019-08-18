@@ -66,7 +66,7 @@ printf "\nCounting total amount of features\n\n"
 speechbox preprocess $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--count-features \
+	--count-features
 
 printf "\nTraining simple LSTM model\n\n"
 speechbox model $cache_dir $experiment_config \
