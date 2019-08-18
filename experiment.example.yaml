@@ -2,38 +2,42 @@
 dataset_id: unittest
 
 # Feature extraction
-#TODO features:
 augmentation:
+    normalize: -3.0
+    ignore_src_files: True
     cartesian_product:
-        volume: [0.25, 1.0, 4.0]
-        speed: [0.8, 1.0, 1.2]
-utterance_length_ms: 2000
+        speed: [0.8, 0.9, 1.0, 1.1, 1.2]
+utterance_length_ms: 3000
 utterance_offset_ms: 500
-sequence_length: 32
+# Length of LSTM input sequences
+sequence_length: 16
 # How often to print progress, for operations that take a long time
 print_progress: 25
 extractors:
     - name: mfcc
       n_mfcc: 20
 
-# Model training
-model:
-    name: debug-lstm
-    batch_size: 16
-    epochs: 25
+# Training and model hyperparameters
+experiment:
+    name: lstm-experiment
+    model_definition:
+        name: lstm_1_dropout
+        kwargs:
+            num_cells: 64
+    optimizer:
+        cls: Adam
+        kwargs:
+            epsilon: 0.1
     loss: categorical_crossentropy
     metrics:
         - accuracy
-    num_cells: 32
-    optimizer: adam
+    batch_size: 32
+    epochs: 25
     steps_per_epoch: 500
-    validation_steps: 50
-    dataset_shuffle_size: 500
+    validation_steps: 100
+    dataset_shuffle_size: 1000
     # Repeat dataset indefinitely
     repeat: -1
-    # Use CPU to prefetch batches during training
-    prefetch: True
-    parallel_parse: 4
     verbose: 2
     # Wait for at most 10 epochs for validation loss to improve before stopping training completely
     early_stopping:

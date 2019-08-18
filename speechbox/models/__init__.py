@@ -1,4 +1,5 @@
 import functools
+import importlib
 import io
 import os
 
@@ -24,10 +25,12 @@ class KerasWrapper:
     def get_model_filepath(cls, basedir, model_id):
         return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
 
-    def __init__(self, model_id, device_str=None, tensorboard=None, early_stopping=None, checkpoints=None):
+    def __init__(self, model_id, model_definition, device_str=None, tensorboard=None, early_stopping=None, checkpoints=None):
         self.model_id = model_id
         self.device_str = device_str
         self.model = None
+        import_path = "speechbox.models." + model_definition["name"]
+        self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition["kwargs"])
         self.callbacks = []
         if tensorboard:
             self.callbacks.append(tf.keras.callbacks.TensorBoard(**tensorboard))
@@ -58,19 +61,16 @@ class KerasWrapper:
         return metrics_dir, dataset
 
     @with_device
-    def prepare(self, features_meta, model_config):
+    def prepare(self, features_meta, training_config):
         input_shape = features_meta["sequence_length"], features_meta["num_features"]
-        num_cells = model_config["num_cells"]
-        num_labels = features_meta["num_labels"]
-        self.model = tf.keras.models.Sequential([
-            tf.keras.layers.LSTM(num_cells, input_shape=input_shape, return_sequences=True),
-            tf.keras.layers.LSTM(num_cells),
-            tf.keras.layers.Dense(num_labels, activation='softmax')
-        ])
+        output_shape = features_meta["num_labels"]
+        self.model = self.model_loader(input_shape, output_shape)
+        opt_conf = training_config["optimizer"]
+        optimizer = getattr(tf.optimizers, opt_conf["cls"])(**opt_conf["kwargs"])
         self.model.compile(
-            loss=model_config["loss"],
-            optimizer=model_config["optimizer"],
-            metrics=model_config["metrics"]
+            loss=training_config["loss"],
+            optimizer=optimizer,
+            metrics=training_config["metrics"]
         )
 
     @with_device

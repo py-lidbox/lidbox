@@ -86,7 +86,7 @@ class Model(StatefulCommand):
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
             print()
-        return models.KerasWrapper(model_id, **callbacks_kwargs)
+        return models.KerasWrapper(model_id, training_config["model_definition"], **callbacks_kwargs)
 
     @staticmethod
     def get_loss_as_float(checkpoint_filename):
