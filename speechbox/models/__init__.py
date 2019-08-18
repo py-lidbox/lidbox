@@ -42,6 +42,21 @@ class KerasWrapper:
         self.model.save(model_path, overwrite=True)
         return model_path
 
+    def enable_dataset_logger(self, dataset_name, dataset):
+        tensorboard = [callback for callback in self.callbacks if "TensorBoard" in callback.__class__.__name__]
+        assert len(tensorboard) == 1, "TensorBoard is not enabled for model or it has too many TensorBoard instances, there is nowhere to write the output of the logged metrics"
+        tensorboard = tensorboard[0]
+        metrics_dir = os.path.join(tensorboard.log_dir, "dataset", dataset_name)
+        summary_writer = tf.summary.create_file_writer(metrics_dir)
+        summary_writer.set_as_default()
+        def inspect_batches(batch_idx, batch):
+            targets = batch[1]
+            print("\nLogger enabled for dataset '{}', targets of shape {} from each batch will be written as histograms for TensorBoard".format(dataset_name, targets.shape[1:]))
+            tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
+            return batch
+        dataset = dataset.enumerate().map(inspect_batches)
+        return metrics_dir, dataset
+
     @with_device
     def prepare(self, features_meta, model_config):
         input_shape = features_meta["sequence_length"], features_meta["num_features"]

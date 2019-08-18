@@ -40,16 +40,23 @@ class Model(StatefulCommand):
             help="Predict labels for all audio files listed in the given file, one per line.")
         return parser
 
-    def create_model(self, model_id, model_config):
+    def create_model(self, model_id, training_config):
         args = self.args
         now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         model_cache_dir = os.path.join(args.cache_dir, model_id)
         tensorboard_dir = os.path.join(model_cache_dir, "tensorboard", "log", now_str)
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
-            "write_graph": False,
+            "write_graph": True,
+            "update_freq": "epoch",
         }
-        tensorboard_config = dict(default_tensorboard_config, **model_config.get("tensorboard", {}))
+        if args.debug:
+            default_tensorboard_config.update({
+                "update_freq": "batch",
+                "histogram_freq": 1,
+                "embeddings_freq": 1,
+            })
+        tensorboard_config = dict(default_tensorboard_config, **training_config.get("tensorboard", {}))
         checkpoint_dir = os.path.join(model_cache_dir, "checkpoints")
         checkpoint_format = "epoch{epoch:02d}_loss{val_loss:.2f}.hdf5"
         default_checkpoints_config = {
@@ -61,16 +68,16 @@ class Model(StatefulCommand):
             "save_best_only": True,
             "verbose": 0,
         }
-        checkpoints_config = dict(default_checkpoints_config, **model_config.get("checkpoints", {}))
+        checkpoints_config = dict(default_checkpoints_config, **training_config.get("checkpoints", {}))
         callbacks_kwargs = {
             "checkpoints": None if args.no_save_model else checkpoints_config,
-            "early_stopping": model_config.get("early_stopping"),
+            "early_stopping": training_config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
         if not args.train:
             if args.verbosity > 1:
                 print("Not training, will not use keras callbacks")
-            callbacks_kwargs = {"device_str": model_config.get("eval_device")}
+            callbacks_kwargs = {"device_str": training_config.get("eval_device")}
         else:
             self.make_named_dir(tensorboard_dir, "tensorboard")
             if not args.no_save_model:
@@ -104,29 +111,32 @@ class Model(StatefulCommand):
         if not self.state_data_ok():
             return 1
         data = self.state["data"]
-        model_config = self.experiment_config["model"]
+        training_config = self.experiment_config["experiment"]
         if args.verbosity > 1:
             print("\nModel config is:")
-            pprint.pprint(model_config)
+            pprint.pprint(training_config)
             print()
         model = self.state["model"]
         # Load training set consisting of pre-extracted features
         training_set, features_meta = system.load_features_as_dataset(
             # List of all .tfrecord files containing all training set samples
             list(data["training"]["features"].values()),
-            model_config
+            training_config
         )
+        if args.debug:
+            metrics_dir, training_set = model.enable_dataset_logger("training", training_set)
+            self.make_named_dir(metrics_dir)
         # Same for the validation set
         validation_set, _ = system.load_features_as_dataset(
             list(data["validation"]["features"].values()),
-            model_config
+            training_config
         )
-        model.prepare(features_meta, model_config)
+        model.prepare(features_meta, training_config)
         if args.verbosity:
             print("\nStarting training with model:\n")
             print(str(model))
             print()
-        model.fit(training_set, validation_set, model_config)
+        model.fit(training_set, validation_set, training_config)
         if args.verbosity:
             print("\nTraining finished\n")
 
@@ -135,7 +145,7 @@ class Model(StatefulCommand):
         if args.verbosity:
             print("Preparing model for evaluation")
         model = self.state["model"]
-        model_config = self.experiment_config["model"]
+        training_config = self.experiment_config["experiment"]
         if not self.state_data_ok():
             return 1
         if "test" not in self.state["data"]:
@@ -146,13 +156,13 @@ class Model(StatefulCommand):
             print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
             list(test_set_data["features"].values()),
-            model_config
+            training_config
         )
-        model.prepare(features_meta, model_config)
+        model.prepare(features_meta, training_config)
         best_checkpoint = self.get_best_weights_checkpoint()
         model.load_weights(best_checkpoint)
         if args.evaluate_test_set == "loss":
-            model.evaluate(test_set, model_config)
+            model.evaluate(test_set, training_config)
         elif args.evaluate_test_set == "confusion-matrix":
             if args.verbosity > 1:
                 print("Extracting features for all files in the test set")
@@ -185,10 +195,10 @@ class Model(StatefulCommand):
         config = self.experiment_config
         if args.verbosity > 1:
             print("Preparing model for prediction")
-        model_config = config["model"]
+        training_config = config["model"]
         model = self.state["model"]
         features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
-        model.prepare(features_meta, model_config)
+        model.prepare(features_meta, training_config)
         model.load_weights(self.get_best_weights_checkpoint())
         paths = list(system.load_audiofile_paths(args.predict))
         if args.verbosity:
@@ -216,9 +226,9 @@ class Model(StatefulCommand):
     def run(self):
         super().run()
         args = self.args
-        model_config = self.experiment_config["model"]
-        self.model_id = args.model_id if args.model_id else model_config["name"]
+        training_config = self.experiment_config["experiment"]
+        self.model_id = args.model_id if args.model_id else training_config["name"]
         if args.verbosity:
             print("Creating KerasWrapper '{}'".format(self.model_id))
-        self.state["model"] = self.create_model(self.model_id, model_config)
+        self.state["model"] = self.create_model(self.model_id, training_config)
         return self.run_tasks()

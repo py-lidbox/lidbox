@@ -19,6 +19,10 @@ class Command:
             action="count",
             default=0,
             help="Increases verbosity of output for each -v supplied (up to 4).")
+        parser.add_argument("--debug",
+            action="store_true",
+            default=False,
+            help="Set maximum verbosity and enable extra debugging information regardless of performance impacts.")
         parser.add_argument("--run-cProfile",
             action="store_true",
             help="Do profiling on all commands and write results into a file in the working directory.")
@@ -69,7 +73,9 @@ class Command:
                 return ret
 
     def run(self):
-        pass
+        if self.args.debug:
+            print("\n\nWarning: running in debug mode\n\n")
+            self.args.verbosity = 4
 
     def exit(self):
         pass
@@ -197,6 +203,7 @@ class StatefulCommand(Command):
         }
 
     def run(self):
+        super().run()
         args = self.args
         if args.verbosity > 1:
             print("Running tool '{}' with arguments:".format(self.__class__.__name__.lower()))
@@ -224,3 +231,4 @@ class StatefulCommand(Command):
     def exit(self):
         if self.args.save_state:
             self.save_state()
+        super().exit()
