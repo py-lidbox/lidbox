@@ -24,6 +24,7 @@ class Dataset(StatefulCommand):
         "compare_state",
         "augment",
         "swap_paths_prefix",
+        "get_audio_durations"
     )
 
     @classmethod
@@ -68,6 +69,9 @@ class Dataset(StatefulCommand):
             type=str,
             action=ExpandAbspath,
             help="Replace the source directory prefix of every path in every datagroups with the given prefix.")
+        parser.add_argument("--get-audio-durations",
+            action="store_true",
+            help="Use SoX to compute durations of all audio files in the dataset.")
         return parser
 
     def walk(self):
@@ -86,8 +90,10 @@ class Dataset(StatefulCommand):
             walker_config = {
                 "dataset_root": args.src,
             }
-        if "sample_frequency" in self.experiment_config:
-            walker_config["sample_frequency"] = self.experiment_config["sample_frequency"]
+        walker_config["enabled_labels"] = self.experiment_config["dataset"]["labels"]
+        sample_frequency = self.experiment_config["dataset"].get("sample_frequency")
+        if sample_frequency:
+            walker_config["sample_frequency"] = sample_frequency
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         if args.check:
             if args.verbosity:
@@ -157,10 +163,16 @@ class Dataset(StatefulCommand):
                 else:
                     print("ok")
         elif args.check_split == "by-speaker":
+            walker_config = self.merge_datagroups_from_state()
+            walker_config["dataset_root"] = self.state["source_directory"]
+            walker_config["enabled_labels"] = self.experiment_config["dataset"]["labels"]
+            walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
+            if args.verbosity > 1:
+                print("Datset walker used for parsing speaker ids:", walker)
+            parse_speaker_id = walker.parse_speaker_id
             for a, b in itertools.combinations(datagroups.keys(), r=2):
                 print("'{}' vs '{}' ... ".format(a, b), flush=True, end='')
                 # Group all filepaths by speaker ids parsed from filepaths of the given dataset
-                parse_speaker_id = dataset.get_dataset_walker_cls(self.dataset_id).parse_speaker_id
                 a_speakers = set(parse_speaker_id(path) for path in datagroups[a]["paths"])
                 b_speakers = set(parse_speaker_id(path) for path in datagroups[b]["paths"])
                 shared_speakers = a_speakers & b_speakers
@@ -189,8 +201,9 @@ class Dataset(StatefulCommand):
             "dataset_root": args.src,
             "output_dir": args.dst,
         }
-        if "sample_frequency" in self.experiment_config:
-            parser_config["sample_frequency"] = self.experiment_config["sample_frequency"]
+        sample_frequency = self.experiment_config["dataset"].get("sample_frequency")
+        if sample_frequency:
+            parser_config["sample_frequency"] = sample_frequency
         parser = dataset.get_dataset_parser(self.dataset_id, parser_config)
         num_parsed = 0
         if not args.verbosity:
@@ -223,6 +236,7 @@ class Dataset(StatefulCommand):
                 if args.src:
                     print("Ignoring dataset source directory '{}'".format(args.src))
             walker_config = self.merge_datagroups_from_state()
+            walker_config["dataset_root"] = self.state["source_directory"]
         elif len(datagroups) > 0:
             error_msg = (
                 "Error: The loaded state already has a split into {} different datagroups:\n".format(len(datagroups)) +
@@ -238,6 +252,7 @@ class Dataset(StatefulCommand):
             walker_config = {
                 "dataset_root": args.src,
             }
+        walker_config["enabled_labels"] = self.experiment_config["dataset"]["labels"]
         dataset_walker = dataset.get_dataset_walker(self.dataset_id, walker_config)
         # The label-to-index mapping is common for all datagroups in the split
         self.state["label_to_index"] = dataset_walker.make_label_to_index_dict()
@@ -360,30 +375,33 @@ class Dataset(StatefulCommand):
         prefix = self.state["source_directory"]
         if args.verbosity:
             print("Augmenting dataset from '{}' into '{}'".format(prefix, dst))
-        augment_config = self.experiment_config["augmentation"]
+        augment_config = self.experiment_config["features"]["augmentation"]
+        augment_params = []
         if "list" in augment_config:
-            augment_config = augment_config["list"]
+            augment_params = augment_config["list"]
         elif "cartesian_product" in augment_config:
             all_kwargs = augment_config["cartesian_product"].items()
             flattened_kwargs = [
                 [(aug_type, v) for v in aug_values]
                 for aug_type, aug_values in all_kwargs
             ]
-            # Set augment_config to be all possible combinations of given values
-            augment_config = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
-        if "normalize" in self.experiment_config["augmentation"]:
-            normalize = self.experiment_config["augmentation"]["normalize"]
-            for kwargs in augment_config:
-                kwargs["normalize"] = normalize
+            # Set augment_params to be all possible combinations of given values
+            augment_params = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
+        # Add normalization to all augmentation param combinations, if specified
+        if "normalize" in augment_config:
+            if not augment_params:
+                augment_params.append({})
+            for kwargs in augment_params:
+                kwargs["normalize"] = augment_config["normalize"]
         if args.verbosity > 1:
             print("Full config for augmentation:")
-            pprint.pprint(augment_config)
+            pprint.pprint(augment_params)
             print()
         print_progress = self.experiment_config.get("print_progress", 0)
         # Collect paths of augmented files by datagroup, each set of augmented paths grouped by the source path it was augmented from
         dst_paths_by_datagroup = {datagroup_key: collections.defaultdict(list) for datagroup_key in state_data}
         num_augmented = 0
-        for aug_kwargs in augment_config:
+        for aug_kwargs in augment_params:
             if args.verbosity:
                 print("Augmenting by:")
                 for aug_type, aug_value in aug_kwargs.items():
@@ -412,12 +430,12 @@ class Dataset(StatefulCommand):
                         if args.verbosity > 3:
                             print("augmented {} to {}".format(src_path, dst_path))
                     if print_progress > 0 and num_augmented % print_progress == 0:
-                        print(num_augmented, "files augmented")
+                        print(num_augmented, "files done")
         if print_progress > 0:
-            print(num_augmented, "files augmented")
+            print(num_augmented, "files done")
         if args.verbosity:
             print("Adding paths of all augmented files into data state")
-        ignore_src_files = self.experiment_config["augmentation"].get("ignore_src_files", False)
+        ignore_src_files = self.experiment_config["features"]["augmentation"].get("ignore_src_files", False)
         if args.verbosity and ignore_src_files:
             print("'ignore_src_files' given in the augmentation config, original files will be ignored. Only augmented filepaths will be saved into data state.")
         # All augmented, now expand the paths in the state dict
@@ -451,6 +469,21 @@ class Dataset(StatefulCommand):
         for datagroup in self.state["data"].values():
             datagroup["paths"] = [p.replace(prefix, new_prefix) for p in datagroup["paths"]]
         self.state["source_directory"] = new_prefix
+
+
+    def get_audio_durations(self):
+        args = self.args
+        if not self.state_data_ok():
+            return 1
+        if args.verbosity:
+            print("Computing durations of all audio files extracted from '{}'".format(self.state["source_directory"]))
+        max_align_width = max(len("datagroup"), len(max(self.state["data"].keys(), key=lambda k: len(k))))
+        print("{:{width}s}: {:s}".format("datagroup", "duration", width=max_align_width))
+        for datagroup_key, datagroup in self.state["data"].items():
+            secs = system.get_total_duration_sec(datagroup["paths"])
+            mins, secs = secs // 60, secs % 60
+            hours, mins = mins // 60, mins % 60
+            print("{:{width}s}: {:02d}h {:02d}min {:02d}sec".format(datagroup_key, hours, mins, secs, width=max_align_width))
 
 
     def run(self):

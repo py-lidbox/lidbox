@@ -29,7 +29,7 @@ class Preprocess(StatefulCommand):
             print("Starting feature extraction")
         if not self.state_data_ok():
             return 1
-        config = self.experiment_config
+        config = self.experiment_config["features"]
         label_to_index = self.state["label_to_index"]
         for datagroup_name, datagroup in self.state["data"].items():
             if args.verbosity:

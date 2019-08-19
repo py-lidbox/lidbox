@@ -30,12 +30,14 @@ class ExpandAbspath(argparse.Action):
 
 from speechbox.commands.dataset import Dataset
 from speechbox.commands.model import Model
-from speechbox.commands.preprocess import Preprocess
 from speechbox.commands.parser import Parser
+from speechbox.commands.preprocess import Preprocess
+from speechbox.commands.system import System
 
 all_commands = (
     Dataset,
     Model,
-    Preprocess,
     Parser,
+    Preprocess,
+    System,
 )

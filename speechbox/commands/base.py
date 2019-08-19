@@ -81,7 +81,6 @@ class Command:
         pass
 
 
-
 class StatefulCommand(Command):
     """Base command with state that can be loaded and saved between runs."""
 
@@ -216,16 +215,12 @@ class StatefulCommand(Command):
             print("Experiment config is:")
             pprint.pprint(self.experiment_config)
             print()
-        if "src" in self.experiment_config:
-            if args.src and args.verbosity:
-                print("Dataset source directory given in experiment config yaml as '{}', the directory given with --src: '{}' will be ignored.".format(self.experiment_config["src"], args.src))
-            args.src = self.experiment_config["src"]
-        self.dataset_id = self.experiment_config["dataset_id"]
+        self.dataset_id = self.experiment_config["dataset"]["key"]
         if args.load_state:
             self.load_state()
         if args.verbosity > 1:
             print("Running with initial state:")
-            pprint.pprint(self.state, depth=3)
+            pprint.pprint(self.state, depth=None if args.debug else 3)
             print()
 
     def exit(self):

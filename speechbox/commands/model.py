@@ -2,6 +2,7 @@ from datetime import datetime
 import collections
 import os
 import pprint
+import shutil
 import sys
 
 from speechbox.commands import ExpandAbspath
@@ -38,13 +39,21 @@ class Model(StatefulCommand):
             type=str,
             action=ExpandAbspath,
             help="Predict labels for all audio files listed in the given file, one per line.")
+        parser.add_argument("--reset-tensorboard",
+            action="store_true",
+            help="Delete tensorboard directory from previous runs for this model.")
         return parser
 
     def create_model(self, model_id, training_config):
         args = self.args
-        now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         model_cache_dir = os.path.join(args.cache_dir, model_id)
-        tensorboard_dir = os.path.join(model_cache_dir, "tensorboard", "log", now_str)
+        tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "log")
+        if args.reset_tensorboard and os.path.isdir(tensorboard_log_dir):
+            if args.verbosity:
+                print("Clearing tensorboard directory '{}'".format(tensorboard_log_dir))
+            shutil.rmtree(tensorboard_log_dir)
+        now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        tensorboard_dir = os.path.join(tensorboard_log_dir, now_str)
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
             "write_graph": True,
@@ -146,6 +155,7 @@ class Model(StatefulCommand):
             print("Preparing model for evaluation")
         model = self.state["model"]
         training_config = self.experiment_config["experiment"]
+        features_config = self.experiment_config["features"]
         if not self.state_data_ok():
             return 1
         if "test" not in self.state["data"]:
@@ -167,7 +177,7 @@ class Model(StatefulCommand):
             if args.verbosity > 1:
                 print("Extracting features for all files in the test set")
             paths = test_set_data["paths"]
-            transformer = transformations.files_to_utterances(paths, self.experiment_config)
+            transformer = transformations.files_to_utterances(paths, features_config)
             test_labels = []
             test_utterances = []
             for label, (path, utterance) in zip(test_set_data["labels"], transformer):

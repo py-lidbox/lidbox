@@ -15,36 +15,38 @@ class SpeechDatasetWalker:
     Instances of this class are iterable, yielding (label, wavpath) pairs for every file in some dataset, given the root directory of the dataset.
     The tree structure of a particular dataset is defined in the self.label_definitions dict in a subclass of this class.
     """
-    def __init__(self, dataset_root=None, paths=None, labels=None, checksums=None, sample_frequency=None):
-        if dataset_root is None:
-            error_msg = (
-                "If dataset_root is None, a SpeechDatasetWalker must get its paths, labels, and checksums predefined,"
-                " otherwise there is no paths to walk over"
-            )
-            assert paths and labels and checksums, error_msg
+    # Metadata for each label, should be defined in subclasses inheriting this class
+    default_label_definitions = collections.OrderedDict()
+
+    def __init__(self, dataset_root=None, paths=None, labels=None, checksums=None, sample_frequency=None, enabled_labels=None):
+        if enabled_labels is None:
+            enabled_labels = []
         # Where to start an os.walk from (unless paths and labels explicitly given)
         self.dataset_root = dataset_root
         # If not None, an integer denoting the expected sample frequency/rate in Hz
         self.sample_frequency = sample_frequency
-        # Metadata for each label
-        self.label_definitions = collections.OrderedDict()
         # Label to speaker id mapping
         self.ignored_speaker_ids_by_label = {}
+        # Select enabled labels
+        self.label_definitions = collections.OrderedDict()
+        for label in enabled_labels:
+            self.label_definitions[label] = self.default_label_definitions[label].copy()
+        for label, definition in self.label_definitions.items():
+            definition["sample_dirs"] = [self.join_root(*paths) for paths in self.dataset_tree[label]]
+        if any(l is not None for l in [paths, labels, checksums]):
+            assert all(l is not None for l in [paths, labels, checksums])
+            # Iterate over given paths instead of searching for all wavs from sample_dirs
+            for label_def in self.label_definitions.values():
+                label_def["sample_dirs"] = []
+                label_def["sample_files"] = []
+                label_def["sample_file_checksums"] = []
+            # Set all given wavpaths
+            for label, path, checksum in zip(labels, paths, checksums):
+                self.label_definitions[label]["sample_files"].append(path)
+                self.label_definitions[label]["sample_file_checksums"].append(checksum)
 
     def join_root(self, *paths):
         return os.path.join(self.dataset_root, *paths)
-
-    def overwrite_target_paths(self, paths, labels, checksums):
-        """Overwrite dataset directory traversal list by absolute paths that should be walked over instead."""
-        # Clear all current paths and directories
-        for label_def in self.label_definitions.values():
-            label_def["sample_dirs"] = []
-            label_def["sample_files"] = []
-            label_def["sample_file_checksums"] = []
-        # Set all given wavpaths
-        for label, path, checksum in zip(labels, paths, checksums):
-            self.label_definitions[label]["sample_files"].append(path)
-            self.label_definitions[label]["sample_file_checksums"].append(checksum)
 
     def load(self, wavpath):
         return read_wavfile(wavpath, sr=self.sample_frequency)
@@ -203,10 +205,6 @@ class SpeechDatasetWalker:
                         print(f)
                     print("-- Invalid files end --")
 
-    def parse_directory_tree(self):
-        for label, definition in self.label_definitions.items():
-            definition["sample_dirs"] = [self.join_root(*paths) for paths in self.dataset_tree[label]]
-
     def __iter__(self):
         return self.walk()
 
@@ -238,27 +236,22 @@ class OGIWalker(SpeechDatasetWalker):
         "tam": [["wav", "tamil"]],
         "vie": [["wav", "vietnam"]],
     }
+    default_label_definitions = collections.OrderedDict([
+        ("cmn", {"name": "Mandarin Chinese"}),
+        ("deu", {"name": "German"}),
+        ("eng", {"name": "English"}),
+        ("fas", {"name": "Persian/Farsi"}),
+        ("fra", {"name": "French"}),
+        ("hin", {"name": "Hindi"}),
+        ("jpn", {"name": "Japanese"}),
+        ("kor", {"name": "Korean"}),
+        ("spa", {"name": "Spanish"}),
+        ("tam", {"name": "Tamil"}),
+        ("vie", {"name": "Vietnamese"}),
+    ])
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict([
-            ("cmn", {"name": "Mandarin Chinese"}),
-            ("deu", {"name": "German"}),
-            ("eng", {"name": "English"}),
-            ("fas", {"name": "Persian/Farsi"}),
-            ("fra", {"name": "French"}),
-            ("hin", {"name": "Hindi"}),
-            ("jpn", {"name": "Japanese"}),
-            ("kor", {"name": "Korean"}),
-            ("spa", {"name": "Spanish"}),
-            ("tam", {"name": "Tamil"}),
-            ("vie", {"name": "Vietnamese"}),
-        ])
-        #FIXME this is getting out of hand, maybe use a factory classmethod instead
-        if kwargs.get("dataset_root"):
-            self.parse_directory_tree()
-        else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
     @staticmethod
     def parse_speaker_id(path):
@@ -306,23 +299,19 @@ class OGIWalker2(SpeechDatasetWalker):
             ("cd04", "speech", "vietnamese")
         ],
     }
+    default_label_definitions = collections.OrderedDict({
+        "eng": {"name": "English"},
+        "hin": {"name": "Hindi"},
+        "jpn": {"name": "Japanese"},
+        "kor": {"name": "Korean"},
+        "cmn": {"name": "Mandarin Chinese"},
+        "spa": {"name": "Spanish"},
+        "tam": {"name": "Tamil"},
+        "vie": {"name": "Vietnamese"},
+    })
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict({
-            "eng": {"name": "English"},
-            "hin": {"name": "Hindi"},
-            "jpn": {"name": "Japanese"},
-            "kor": {"name": "Korean"},
-            "cmn": {"name": "Mandarin Chinese"},
-            "spa": {"name": "Spanish"},
-            "tam": {"name": "Tamil"},
-            "vie": {"name": "Vietnamese"},
-        })
-        if kwargs.get("dataset_root"):
-            self.parse_directory_tree()
-        else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
         self.bcp47_mappings = {
             "cmn": "zh", # Chinese, Mandarin (Simplified, China)
             "eng": "en-US",
@@ -422,20 +411,16 @@ class VarDial2017Walker(SpeechDatasetWalker):
         ("validation", "dev.vardial2017"),
         ("test", "test.MGB3"),
     )
+    default_label_definitions = collections.OrderedDict([
+        ("egy", {"name": "Egyptian Arabic"}),
+        ("glf", {"name": "Gulf Arabic"}),
+        ("lav", {"name": "Levantine Arabic"}),
+        ("msa", {"name": "Modern Standard Arabic"}),
+        ("nor", {"name": "North African Arabic"}),
+    ])
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict([
-            ("egy", {"name": "Egyptian Arabic"}),
-            ("glf", {"name": "Gulf Arabic"}),
-            ("lav", {"name": "Levantine Arabic"}),
-            ("msa", {"name": "Modern Standard Arabic"}),
-            ("nor", {"name": "North African Arabic"}),
-        ])
-        if kwargs.get("dataset_root"):
-            self.parse_directory_tree()
-        else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
 
     @classmethod
     def parse_datagroup(cls, wavpath):
@@ -460,71 +445,44 @@ class CommonVoiceWalker(SpeechDatasetWalker):
     It is also assumed that the user has extracted each dataset into a directory named by the three letter ISO 639-3 identifier of the dataset language.
     """
     dataset_tree = {}
-    file_to_speaker_id = {}
+    default_label_definitions = collections.OrderedDict([
+        ("bre", {"name": "Breton"}),
+        ("cat", {"name": "Catalan"}),
+        ("cmn", {"name": "Mandarin Chinese"}),
+        ("cym", {"name": "Welsh"}),
+        ("deu", {"name": "German"}),
+        ("eng", {"name": "English"}),
+        ("est", {"name": "Estonian"}),
+        ("fas", {"name": "Persian"}),
+        ("fra", {"name": "French"}),
+        ("ita", {"name": "Italian"}),
+        ("kab", {"name": "Kabyle"}),
+        ("kir", {"name": "Kyrgyz"}),
+        ("mon", {"name": "Mongolian"}),
+        ("nld", {"name": "Dutch"}),
+        ("rus", {"name": "Russian"}),
+        ("spa", {"name": "Spanish"}),
+        ("swe", {"name": "Swedish"}),
+        ("tur", {"name": "Turkish"}),
+    ])
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict([
-            ("cat", {"name": "Catalan"}),
-            ("cmn", {"name": "Mandarin Chinese"}),
-            ("cym", {"name": "Welsh"}),
-            ("deu", {"name": "German"}),
-            ("eng", {"name": "English"}),
-            ("fas", {"name": "Persian"}),
-            ("fra", {"name": "French"}),
-            ("ita", {"name": "Italian"}),
-            ("kab", {"name": "Kabyle"}),
-            ("kir", {"name": "Kyrgyz"}),
-            ("nld", {"name": "Dutch"}),
-            ("rus", {"name": "Russian"}),
-            ("spa", {"name": "Spanish"}),
-            ("swe", {"name": "Swedish"}),
-            ("tur", {"name": "Turkish"}),
-        ])
-        assert "dataset_root" in kwargs, "CommonVoiceWalker always needs the dataset root for loading metadata files"
+        #FIXME, terrible
         dataset_tree = self.__class__.dataset_tree
         if not dataset_tree:
-            for label in self.label_definitions:
+            for label in self.default_label_definitions:
                 assert label not in dataset_tree
                 dataset_tree[label] = [[label, "wav"]]
-        self.parse_directory_tree()
-        if any(k in kwargs for k in ("paths", "labels", "checksums")):
-            assert all(k in kwargs for k in ("paths", "labels", "checksums"))
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
-        file_to_speaker_id = self.__class__.file_to_speaker_id
-        if not file_to_speaker_id:
-            for label in self.label_definitions:
-                with open(os.path.join(kwargs["dataset_root"], label, "validated.tsv")) as f:
-                    for row in csv.DictReader(f, delimiter='\t'):
-                        file_to_speaker_id[row["path"].split(".mp3")[0]] = row["client_id"]
-
-    @classmethod
-    def parse_speaker_id(cls, path):
-        return cls.file_to_speaker_id.get(os.path.basename(path).split(".wav")[0])
-
-
-class TestWalker(SpeechDatasetWalker):
-    dataset_tree = {
-        "cmn": [["chinese"]],
-        "eng": [["english"]],
-        "fas": [["persian"]],
-        "fra": [["french"]],
-        "swe": [["swedish"]],
-    }
-
-    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.label_definitions = collections.OrderedDict({
-            "cmn": {"name": "Mandarin (China)"},
-            "eng": {"name": "English"},
-            "fas": {"name": "Persian"},
-            "fra": {"name": "French"},
-            "swe": {"name": "Swedish"},
-        })
-        if kwargs.get("dataset_root"):
-            self.parse_directory_tree()
-        else:
-            self.overwrite_target_paths(kwargs["paths"], kwargs["labels"], kwargs["checksums"])
+        self.file_to_speaker_id = {}
+        assert "dataset_root" in kwargs, "CommonVoiceWalker always needs the dataset root for loading metadata files"
+        for label in self.label_definitions:
+            with open(os.path.join(kwargs["dataset_root"], label, "validated.tsv")) as f:
+                for row in csv.DictReader(f, delimiter='\t'):
+                    self.file_to_speaker_id[row["path"].split(".mp3")[0]] = row["client_id"]
+
+    def parse_speaker_id(self, path):
+        return self.file_to_speaker_id.get(os.path.basename(path).split(".wav")[0])
 
 
 all_walkers = collections.OrderedDict({
@@ -532,5 +490,4 @@ all_walkers = collections.OrderedDict({
     "ogi-legacy": OGIWalker2,
     "vardial-2017": VarDial2017Walker,
     "common-voice": CommonVoiceWalker,
-    "unittest": TestWalker,
 })

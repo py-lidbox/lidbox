@@ -30,7 +30,7 @@ class DatasetParser:
         output = None
         try:
             output = transformer.build(src_path, dst_path, return_output=True)
-        except sox.core.SoxError:
+        except (sox.core.SoxError, OSError):
             if self.fail_early:
                 raise
         return output
@@ -57,29 +57,35 @@ class CommonVoiceParser(DatasetParser):
         with open(os.path.join(self.dataset_root, "validated.tsv")) as f:
             self.metadata = list(csv.DictReader(f, delimiter='\t'))
 
-    def top_voted_samples(self, limit=None):
+    def top_voted_samples(self):
         def upvote_ratio(row):
             return int(row["up_votes"]) - int(row["down_votes"])
-        return sorted(self.metadata, key=upvote_ratio, reverse=True)[:limit]
+        return sorted(self.metadata, key=upvote_ratio, reverse=True)
 
-    def convert_to_wavs(self, samples, output_dir, resample_to=None):
+    def convert_to_wavs(self, samples, output_dir):
         t = (sox.transform.Transformer()
                 .set_globals(verbosity=2)
                 .set_input_format(file_type="mp3")
                 .set_output_format(file_type="wav"))
-        if resample_to:
-            t = t.rate(resample_to)
+        if self.resampling_freq:
+            t = t.rate(self.resampling_freq)
         for sample in samples:
             src_path = os.path.join(self.dataset_root, "clips", sample["path"])
             dst_path = os.path.join(output_dir, sample["path"].split(".mp3")[0] + ".wav")
             if os.path.exists(dst_path):
-                print("Warning: Skipping '{}' because it already exists and will not be overwritten".format(dst_path))
+                print("Warning: Skipping '{}' because it already exists".format(dst_path))
                 continue
             yield src_path, self.build(t, src_path, dst_path)
 
     def parse(self):
-        top_samples = self.top_voted_samples(limit=self.output_count_limit)
-        return self.convert_to_wavs(top_samples, self.output_dir, resample_to=self.resampling_freq)
+        converter = self.convert_to_wavs(self.top_voted_samples(), self.output_dir)
+        num_parsed = 0
+        for parsed in converter:
+            if all(p is not None for p in parsed):
+                yield parsed
+                num_parsed += 1
+            if self.output_count_limit and num_parsed >= self.output_count_limit:
+                return
 
 
 all_parsers = collections.OrderedDict({

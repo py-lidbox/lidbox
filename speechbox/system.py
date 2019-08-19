@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import itertools
 import json
+import subprocess
 
 from audioread.exceptions import NoBackendError
 import librosa
@@ -12,6 +13,20 @@ import yaml
 
 
 TFRECORD_COMPRESSION = "GZIP"
+SUBPROCESS_BATCH_SIZE = 5000
+
+def run_for_files(cmd, filepaths):
+    # Run in batches
+    for begin in range(0, len(filepaths), SUBPROCESS_BATCH_SIZE):
+        batch = ' '.join(filepaths[begin:begin+SUBPROCESS_BATCH_SIZE])
+        process = subprocess.run(
+            (cmd + ' ' + batch).split(' '),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8"
+        )
+        yield process.stdout.strip()
 
 def read_wavfile(path, **librosa_kwargs):
     if "sr" not in librosa_kwargs:
@@ -190,3 +205,9 @@ def apply_sox_transformer(src_paths, dst_paths, **config):
             yield src, dst
         else:
             yield src, None
+
+def get_total_duration_sec(paths):
+    # Run SoXi for all files
+    soxi_cmd = "soxi -D -T"
+    seconds = sum(float(output) for output in run_for_files(soxi_cmd, paths))
+    return round(seconds)
