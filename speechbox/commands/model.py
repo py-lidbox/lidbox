@@ -42,6 +42,9 @@ class Model(StatefulCommand):
         parser.add_argument("--reset-tensorboard",
             action="store_true",
             help="Delete tensorboard directory from previous runs for this model.")
+        parser.add_argument("--reset-checkpoints",
+            action="store_true",
+            help="Delete checkpoints from previous runs for this model.")
         return parser
 
     def create_model(self, model_id, training_config):
@@ -67,6 +70,10 @@ class Model(StatefulCommand):
             })
         tensorboard_config = dict(default_tensorboard_config, **training_config.get("tensorboard", {}))
         checkpoint_dir = os.path.join(model_cache_dir, "checkpoints")
+        if args.reset_checkpoints and os.path.isdir(checkpoint_dir):
+            if args.verbosity:
+                print("Clearing checkpoint directory '{}'".format(checkpoint_dir))
+            shutil.rmtree(checkpoint_dir)
         checkpoint_format = "epoch{epoch:02d}_loss{val_loss:.2f}.hdf5"
         default_checkpoints_config = {
             "filepath": os.path.join(checkpoint_dir, checkpoint_format),
