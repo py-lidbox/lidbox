@@ -27,6 +27,9 @@ For example, after downloading the Breton language dataset `br.tar.gz`, it shoul
 └── validated.tsv
 ```
 
+The directory where `bre` is located in does not matter.
+You can change `/m/data/speech/common-voice` to anything, but remember to update it also in `test.bash`.
+
 By default, the test script uses the following languages:
 
 * `bre`: Breton, version `br_10h_2019-06-12`
