@@ -23,10 +23,9 @@ def run_for_files(cmd, filepaths):
             (cmd + ' ' + batch).split(' '),
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8"
+            stderr=subprocess.PIPE
         )
-        yield process.stdout.strip()
+        yield process.stdout.decode("utf-8").strip()
 
 def read_wavfile(path, **librosa_kwargs):
     if "sr" not in librosa_kwargs:
