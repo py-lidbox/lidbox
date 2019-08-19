@@ -14,7 +14,7 @@ git clone --depth 1 https://github.com/matiaslindgren/speechbox.git
 cd speechbox
 pip install --editable .
 ```
-Run the example recipe to check everything is working:
+Run the tests to check everything is working:
 ```bash
-./example_recipe.sh
+./test/test.sh
 ```

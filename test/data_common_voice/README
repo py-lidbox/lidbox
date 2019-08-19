@@ -1,5 +1,0 @@
-Small subset of the Mozilla Common Voice dataset, downloaded at 2019-08-01 from https://voice.mozilla.org/en/datasets.
-Common Voice is distributed under "CC0 1.0 Universal (CC0 1.0) Public Domain Dedication" license.
-See https://creativecommons.org/publicdomain/zero/1.0/.
-
-All files were chosen randomly out of the full Common Voice dataset, and then downsampled to 8000 Hz to save space.

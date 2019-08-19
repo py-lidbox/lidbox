@@ -1,0 +1,57 @@
+# Dataset metadata
+dataset:
+    key: common-voice
+    sampling_frequency: 48000
+    labels:
+        - bre
+        - est
+        - mon
+        - tur
+
+# How often to print progress, for operations that take a long time
+print_progress: 25
+
+# Feature extraction
+features:
+    augmentation:
+        # Create files with volume normalized to -3.0 dB
+        normalize: -3.0
+        # Use normalized files from the cache directory and do not use source files
+        ignore_src_files: True
+    # Extract 3 second utterances from all files
+    utterance_length_ms: 3000
+    # Use 1 second offset when extracting utterances, i.e. every utterance will share 2 seconds with the previous and next utterances
+    utterance_offset_ms: 1000
+    # Length of LSTM input sequences
+    sequence_length: 16
+    # Which features to extract
+    extractors:
+        - name: mfcc
+          n_mfcc: 20
+
+# Training and model hyperparameters
+experiment:
+    # For naming directories etc, has no inherent meaning
+    name: lstm-experiment
+    # Which Keras model module to load from speechbox.models
+    model_definition:
+        name: lstm_1_dropout
+        kwargs:
+            num_cells: 64
+    optimizer:
+        cls: Adam
+        kwargs:
+            epsilon: 0.01
+    loss: categorical_crossentropy
+    metrics:
+        - accuracy
+    batch_size: 32
+    epochs: 20
+    # How many batches per epoch
+    steps_per_epoch: 500
+    validation_steps: 100
+    # Size of shuffle buffer containing samples
+    dataset_shuffle_size: 10000
+    # Repeat dataset indefinitely
+    repeat: -1
+    verbose: 2
