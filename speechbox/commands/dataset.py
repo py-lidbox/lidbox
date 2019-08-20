@@ -480,10 +480,8 @@ class Dataset(StatefulCommand):
         max_align_width = max(len("datagroup"), len(max(self.state["data"].keys(), key=lambda k: len(k))))
         print("{:{width}s}: {:s}".format("datagroup", "duration", width=max_align_width))
         for datagroup_key, datagroup in self.state["data"].items():
-            secs = system.get_total_duration_sec(datagroup["paths"])
-            mins, secs = secs // 60, secs % 60
-            hours, mins = mins // 60, mins % 60
-            print("{:{width}s}: {:02d}h {:02d}min {:02d}sec".format(datagroup_key, hours, mins, secs, width=max_align_width))
+            duration_str = system.format_duration(system.get_total_duration(datagroup["paths"]))
+            print("{:{width}s}: {duration_str:s}".format(datagroup_key, width=max_align_width, duration_str=duration_str))
 
 
     def run(self):

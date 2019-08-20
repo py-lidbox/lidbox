@@ -210,3 +210,12 @@ def get_total_duration_sec(paths):
     soxi_cmd = "soxi -D -T"
     seconds = sum(float(output) for output in run_for_files(soxi_cmd, paths))
     return round(seconds)
+
+def get_total_duration(paths):
+    secs = get_total_duration_sec(paths)
+    mins, secs = secs // 60, secs % 60
+    hours, mins = mins // 60, mins % 60
+    return hours, mins, secs
+
+def format_duration(duration):
+    return "{:02d}h {:02d}min {:02d}sec".format(*duration)
