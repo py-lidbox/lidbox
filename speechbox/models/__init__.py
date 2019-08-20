@@ -66,7 +66,7 @@ class KerasWrapper:
         output_shape = features_meta["num_labels"]
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
-        optimizer = getattr(tf.optimizers, opt_conf["cls"])(**opt_conf["kwargs"])
+        optimizer = getattr(tf.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))
         self.model.compile(
             loss=training_config["loss"],
             optimizer=optimizer,

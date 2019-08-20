@@ -1,9 +1,10 @@
 import itertools
 
-import numpy as np
+import librosa.display
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
+import numpy as np
 
 
 # Modified version of:
