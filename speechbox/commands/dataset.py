@@ -481,11 +481,14 @@ class Dataset(StatefulCommand):
             return 1
         if args.verbosity:
             print("Computing durations of all audio files extracted from '{}'".format(self.state["source_directory"]))
-        max_align_width = max(len("datagroup"), len(max(self.state["data"].keys(), key=lambda k: len(k))))
-        print("{:{width}s}: {:s}".format("datagroup", "duration", width=max_align_width))
+        by_label = lambda pair: pair[0]
         for datagroup_key, datagroup in self.state["data"].items():
-            duration_str = system.format_duration(system.get_total_duration(datagroup["paths"]))
-            print("{:{width}s}: {duration_str:s}".format(datagroup_key, width=max_align_width, duration_str=duration_str))
+            paths_sorted_by_label = sorted(zip(datagroup["labels"], datagroup["paths"]), key=by_label)
+            print(datagroup_key)
+            for label, group in itertools.groupby(paths_sorted_by_label, by_label):
+                paths = [path for label, path in group]
+                duration_str = system.format_duration(system.get_total_duration(paths))
+                print("  {:s}: {duration_str:s}".format(label, duration_str=duration_str))
 
 
     def run(self):
