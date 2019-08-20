@@ -37,21 +37,17 @@ experiment:
     model_definition:
         name: lstm_1_dropout
         kwargs:
-            num_cells: 64
+            num_cells: 4
     optimizer:
         cls: Adam
-        kwargs:
-            epsilon: 0.01
     loss: categorical_crossentropy
     metrics:
         - accuracy
     batch_size: 32
     epochs: 20
     # How many batches per epoch
-    steps_per_epoch: 500
-    validation_steps: 100
+    steps_per_epoch: 50
+    validation_steps: 10
     # Size of shuffle buffer containing samples
     dataset_shuffle_size: 10000
-    # Repeat dataset indefinitely
-    repeat: -1
     verbose: 2

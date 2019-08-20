@@ -35,6 +35,10 @@ class Model(StatefulCommand):
             choices=("loss", "confusion-matrix"),
             default="loss",
             help="Evaluate model on test set")
+        parser.add_argument("--confusion-matrix-path",
+            type=str,
+            action=ExpandAbspath,
+            help="Alternative, full path of the confusion matrix output.")
         parser.add_argument("--predict",
             type=str,
             action=ExpandAbspath,
@@ -197,8 +201,11 @@ class Model(StatefulCommand):
             label_to_index = self.state["label_to_index"]
             real_labels = [label_to_index[label] for label in test_labels]
             cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
-            figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
-            cm_figure_path = os.path.join(args.cache_dir, figure_name)
+            if args.confusion_matrix_path:
+                cm_figure_path = args.confusion_matrix_path
+            else:
+                figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
+                cm_figure_path = os.path.join(args.cache_dir, figure_name)
             # Sort labels by index for labeling plot axes
             label_names = sorted(label_to_index, key=lambda label: label_to_index[label])
             visualization.write_confusion_matrix(cm, label_names, cm_figure_path)
