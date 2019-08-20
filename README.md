@@ -4,7 +4,7 @@ Command line toolbox for managing speech data classification experiments.
 
 The slightly more sane alternative to a legacy shell script spaghetti of hard-coded paths.
 
-## Quickstart
+## Installing
 
 Make sure you have [`sox`](http://sox.sourceforge.net/) installed and on your path.
 
@@ -14,7 +14,5 @@ git clone --depth 1 https://github.com/matiaslindgren/speechbox.git
 cd speechbox
 pip install --editable .
 ```
-Run the tests to check everything is working:
-```bash
-./test/test.sh
-```
+
+See the `test` directory on how to do some tests to make sure everything is working.
