@@ -199,7 +199,9 @@ class Model(StatefulCommand):
             cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
             figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
             cm_figure_path = os.path.join(args.cache_dir, figure_name)
-            visualization.write_confusion_matrix(cm, list(label_to_index.keys()), cm_figure_path)
+            # Sort labels by index for labeling plot axes
+            label_names = sorted(label_to_index, key=lambda label: label_to_index[label])
+            visualization.write_confusion_matrix(cm, label_names, cm_figure_path)
             if args.verbosity:
                 print("Wrote confusion matrix to '{}'".format(cm_figure_path))
         else:
