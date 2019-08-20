@@ -415,6 +415,10 @@ class Dataset(StatefulCommand):
                     # Use directory structure from the source dir but replace the prefix
                     dst_path = src_path.replace(prefix, dst)
                     dirname, basename = os.path.split(dst_path)
+                    #FIXME replace dash separator - with underscore _
+                    # reason: aug_types with negative aug_values are difficult to read:
+                    # e.g. speed-2.0__normalize--3.0 ->
+                    # ->   speed_2.0__normalize_-3.0
                     augdir = '__'.join((str(aug_type) + '-' + str(aug_value)) for aug_type, aug_value in aug_kwargs.items())
                     target_dir = os.path.join(dirname, augdir)
                     # Make dirs if they do not exist
