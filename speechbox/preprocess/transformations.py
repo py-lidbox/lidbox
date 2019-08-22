@@ -28,10 +28,10 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=False):
+def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=True):
     """
     Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.
-    If slide_over_all is given and True, every audio file will be concatenated and utterances yielded from a window that slides over every file, regardless of utterance boundaries.
+    If slide_over_all is given and False, every audio file will be concatenated and utterances yielded from a window that slides over every file, regardless of utterance boundaries.
     """
     # Working memory for incomplete utterances
     label_to_wav = {label: np.zeros((0,)) for label in set(labels)}
