@@ -101,7 +101,7 @@ def files_to_utterances(paths, config):
         features = np.array(features) if features else None
         yield path, features
 
-def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
+def dataset_split_samples(dataset_walker, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """
     Collect all wavpaths with the given dataset_walker and perform a random training-validation-test split.
     Returns a 3-tuple of (paths, labels, checksums) pairs for each split.
@@ -141,7 +141,7 @@ def dataset_split_samples(dataset_walker, validation_ratio=0.05, test_ratio=0.05
         }
     }
 
-def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.05, test_ratio=0.05, random_state=None, verbosity=0):
+def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """
     Same as dataset_split_samples, but the training-set split will be disjoint by speaker ID.
     In this case, test_ratio is the ratio of unique speakers in the test set to unique speakers in the training set (and similarily for the validation_ratio).
