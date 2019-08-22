@@ -1,6 +1,9 @@
 import itertools
 
 import librosa.display
+import librosa.feature
+import matplotlib
+matplotlib.use("SVG")
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
@@ -30,9 +33,17 @@ def write_confusion_matrix(cm, label_names, figpath, title='', cmap=plt.cm.Blues
     plt.savefig(figpath)
 
 
-def plot_mfccs(mfcc):
-    plt.figure(figsize=(12, 6))
-    librosa.display.specshow(mfcc, x_axis="time")
-    plt.colorbar()
-    plt.title("MFCC")
+def plot_overview(wav, figpath):
+    """Plot as much visual information as possible for a wavfile."""
+    plt.clf()
+    signal, sample_rate = wav
+    S = librosa.feature.melspectrogram(y=signal, sr=sample_rate)
+    Sp = [librosa.power_to_db(S**p, ref=np.max) for p in (1.0, 1.5, 2.0)]
+    for i, S in enumerate(Sp, start=1):
+        plt.subplot(2, len(Sp), i)
+        librosa.display.specshow(S, fmax=16000)
+    for i, S in enumerate(Sp, start=1):
+        plt.subplot(2, len(Sp), i + len(Sp))
+        librosa.display.specshow(librosa.feature.mfcc(y=signal, sr=sample_rate, S=S))
     plt.tight_layout()
+    plt.savefig(figpath)
