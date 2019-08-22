@@ -85,8 +85,9 @@ class KerasWrapper:
             epochs=model_config["epochs"],
             steps_per_epoch=model_config.get("steps_per_epoch"),
             validation_steps=model_config.get("validation_steps"),
-            verbose=model_config.get("verbose", 2),
             callbacks=self.callbacks,
+            verbose=model_config.get("verbose", 2),
+            class_weight=model_config.get("class_weight"),
         )
 
     @with_device

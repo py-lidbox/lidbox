@@ -83,11 +83,16 @@ class Preprocess(StatefulCommand):
             if "features" not in datagroup:
                 print("Error: No features extracted for datagroup '{}', cannot count features".format(datagroup_name), file=sys.stderr)
                 continue
-            print("Datagroup '{}' features count by label:".format(datagroup_name))
+            num_features_by_label = {}
             for label, features_file in datagroup["features"].items():
                 dataset, _ = system.load_features_as_dataset([features_file])
-                num_features = dataset.reduce(0, lambda count, _: count + 1)
-                print("  {}: {} features".format(label, num_features))
+                num_features_by_label[label] = int(dataset.reduce(0, lambda count, _: count + 1))
+            datagroup["num_features_by_label"] = num_features_by_label
+            if args.verbosity:
+                print("Datagroup '{}' features count by label:".format(datagroup_name))
+                for label, num_features in num_features_by_label.items():
+                    print("  {}: {} features".format(label, num_features))
+
 
     def run(self):
         super().run()

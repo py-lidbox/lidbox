@@ -30,6 +30,9 @@ class Model(StatefulCommand):
         parser.add_argument("--train",
             action="store_true",
             help="Run model training using configuration from the experiment yaml.  Checkpoints are written at every epoch into the cache dir, unless --no-save-model was given.")
+        parser.add_argument("--imbalanced-labels",
+            action="store_true",
+            help="Apply weighting on imbalanced labels during training by using a pre-calculated feature distribution.")
         parser.add_argument("--evaluate-test-set",
             type=str,
             choices=("loss", "confusion-matrix"),
@@ -132,6 +135,23 @@ class Model(StatefulCommand):
             return 1
         data = self.state["data"]
         training_config = self.experiment_config["experiment"]
+        if args.imbalanced_labels:
+            if args.verbosity:
+                print("Loading number of features by label for calculating class weights that will be applied on the loss function.")
+            if "class_weight" in training_config:
+                if args.verbosity:
+                    print("Class weights already defined in the experiment config, ignoring feature distribution saved into state and using the config weights.")
+            else:
+                if args.verbosity:
+                    print("Class weights not defined, calculating weights from training set feature distribution")
+                num_features_by_label = data["training"]["num_features_by_label"]
+                assert all(num_features > 0 for num_features in num_features_by_label.values())
+                label_to_index = self.state["label_to_index"]
+                num_total_features = sum(num_features_by_label.values())
+                training_config["class_weight"] = {
+                    label_to_index[label]: float(num_features / num_total_features)
+                    for label, num_features in num_features_by_label.items()
+                }
         if args.verbosity > 1:
             print("\nModel config is:")
             pprint.pprint(training_config)
@@ -153,7 +173,7 @@ class Model(StatefulCommand):
         )
         model.prepare(features_meta, training_config)
         if args.verbosity:
-            print("\nStarting training with model:\n")
+            print("Starting training with model:\n")
             print(str(model))
             print()
         model.fit(training_set, validation_set, training_config)
