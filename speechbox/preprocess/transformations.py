@@ -28,17 +28,20 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress):
+def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=False):
     """
     Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.
+    If slide_over_all is given and True, every audio file will be concatenated and utterances yielded from a window that slides over every file, regardless of utterance boundaries.
     """
     # Working memory for incomplete utterances
-    label_to_wav = {label: np.empty((0,)) for label in set(labels)}
+    label_to_wav = {label: np.zeros((0,)) for label in set(labels)}
     for i, (label, wavpath) in enumerate(zip(labels, paths), start=1):
         wav, rate = system.read_wavfile(wavpath)
         if apply_vad:
-            wav, _ = features.remove_silence((wav, rate))
-        wav = np.concatenate((label_to_wav[label], wav))
+            wav, _ = system.remove_silence((wav, rate))
+        # If we are merging, prepend partial utterance from end of previous file
+        if slide_over_all:
+            wav = np.concatenate((label_to_wav[label], wav))
         utterance_boundary = int(rate * utterance_length_ms * 1e-3)
         utterance_offset = int(rate * utterance_offset_ms * 1e-3)
         assert utterance_boundary > 0, "Invalid boundary, {}, for utterance from file '{}'".format(utterance_boundary, wavpath)
@@ -49,8 +52,12 @@ def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_o
             yield label, (wav[:utterance_boundary], rate)
             # Move utterance window forward
             wav = wav[utterance_offset:]
-        # Put rest back to wait for the next signal chunk
-        label_to_wav[label] = wav
+        if slide_over_all:
+            # Put rest back to wait for the next signal chunk
+            label_to_wav[label] = wav
+        else:
+            # Drop tail and start from scratch for next file
+            label_to_wav[label] = np.zeros((0,))
         if print_progress and i % print_progress == 0:
             print(i, "done")
 
@@ -64,7 +71,7 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         onehot[label_to_index[label]] = 1.0
         # Apply first extractor
         extractor = extractors[0].copy()
-        feats = features.extract_features(utterance, extractor.pop("name"), extractor)
+        feats = features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
         # If there are more extractors, apply them sequentially and append results to features
         #TODO extractors[1:], figuring out how to merge dimensions might get tricky
         sequences = partition_into_sequences(feats, sequence_length)

@@ -13,6 +13,7 @@ print_progress: 25
 
 # Feature extraction
 features:
+    apply_vad: True
     augmentation:
         # Create files with volume normalized to -3.0 dB
         normalize: -3.0
@@ -26,8 +27,9 @@ features:
     sequence_length: 16
     # Which features to extract
     extractors:
-        - name: mfcc
-          n_mfcc: 20
+        - name: mfcc-deltas-012
+          kwargs:
+              n_mfcc: 20
 
 # Training and model hyperparameters
 experiment:

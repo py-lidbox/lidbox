@@ -9,6 +9,7 @@ import subprocess
 from audioread.exceptions import NoBackendError
 import librosa
 import sox
+import webrtcvad
 import yaml
 
 
@@ -185,19 +186,39 @@ def load_yaml(path):
     with open(path) as f:
         return yaml.safe_load(f)
 
-def apply_sox_transformer(src_paths, dst_paths, **config):
+def remove_silence(wav, aggressiveness=0):
+    """
+    Perform voice activity detection with webrtcvad.
+    """
+    frame_length_ms = 10
+    expected_sample_rates = (8000, 16000, 32000, 48000)
+    data, fs = wav
+    assert fs in expected_sample_rates, "sample rate was {}, but webrtcvad supports only following samples rates: {}".format(fs, expected_sample_rates)
+    frame_width = int(fs * frame_length_ms * 1e-3)
+    # Do voice activity detection for each frame, creating an index filter containing True if frame is speech and False otherwise
+    vad = webrtcvad.Vad(aggressiveness)
+    speech_indexes = []
+    for frame_start in range(0, data.size - (data.size % frame_width), frame_width):
+        frame_bytes = bytes(data[frame_start:(frame_start + frame_width)])
+        speech_indexes.extend(frame_width*[vad.is_speech(frame_bytes, fs)])
+    # Always filter out the tail if it does not fit inside the frame
+    speech_indexes.extend((data.size % frame_width) * [False])
+    return data[speech_indexes], fs
+
+def apply_sox_transformer(src_paths, dst_paths, transform_steps):
     t = sox.Transformer()
-    if "normalize" in config:
-        db = float(config["normalize"])
-        t = t.norm(db)
-    if "volume" in config:
-        amplitude = float(config["volume"])
-        t = t.vol(amplitude, gain_type="amplitude")
-    if "speed" in config:
-        factor = float(config["speed"])
-        t = t.speed(factor)
-    if "reverse" in config and config["reverse"]:
-        t = t.reverse()
+    for config in transform_steps:
+        if "normalize" in config:
+            db = float(config["normalize"])
+            t = t.norm(db)
+        if "volume" in config:
+            amplitude = float(config["volume"])
+            t = t.vol(amplitude, gain_type="amplitude")
+        if "speed" in config:
+            factor = float(config["speed"])
+            t = t.speed(factor)
+        if "reverse" in config and config["reverse"]:
+            t = t.reverse()
     # Try to apply transformation on every src_path, building output files into every dst_path
     for src, dst in zip(src_paths, dst_paths):
         if t.build(src, dst):
