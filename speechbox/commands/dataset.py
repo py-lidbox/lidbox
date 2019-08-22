@@ -388,11 +388,6 @@ class Dataset(StatefulCommand):
             # Set augment_params to be all possible combinations of given values
             augment_params = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
         # Add normalization to all augmentation param combinations, if specified
-        if "normalize" in augment_config:
-            if not augment_params:
-                augment_params.append({})
-            for kwargs in augment_params:
-                kwargs["normalize"] = augment_config["normalize"]
         if args.verbosity > 1:
             print("Full config for augmentation:")
             pprint.pprint(augment_params)
