@@ -64,14 +64,16 @@ class KerasWrapper:
     def parse_metrics(metrics):
         keras_metrics = []
         for m in metrics:
-            cls = None
+            metric = None
             if m == "accuracy":
-                cls = tf.keras.metrics.Accuracy()
+                #FIXME why aren't Accuracy instances working?
+                # metric = tf.keras.metrics.Accuracy()
+                metric = m
             elif m == "precision":
-                cls = tf.keras.metrics.Precision()
+                metric = tf.keras.metrics.Precision()
             elif m == "recall":
-                cls = tf.keras.metrics.Recall()
-            assert cls is not None, "Invalid metric {}".format(m)
+                metric = tf.keras.metrics.Recall()
+            assert metric is not None, "Invalid metric {}".format(m)
             keras_metrics.append(metric)
         return keras_metrics
 

@@ -10,7 +10,7 @@ def loader(input_shape, output_shape, num_cells=8, dropout=0.5, merge_mode='conc
         merge_mode=merge_mode,
         input_shape=input_shape
     )
-    bn = tf.keras.layers.BatchNormalization()
+    bn = tf.keras.layers.BatchNormalization(name="BN")
     output = tf.keras.layers.Dense(output_shape,
         name="softmax",
         activation='softmax'
