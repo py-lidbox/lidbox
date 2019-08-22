@@ -19,10 +19,7 @@ setuptools.setup(
         "scikit-learn ~= 0.21",
         "sox ~= 1.3",
         "webrtcvad ~= 2.0",
-        "numpy < 1.17",
         "matplotlib ~= 3.0",
-        # "tensorflow == 2.0.0-beta1",
-        "tensorflow-gpu == 2.0.0-beta1",
     ],
     packages=[
         "speechbox",
