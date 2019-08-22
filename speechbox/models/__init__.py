@@ -60,6 +60,21 @@ class KerasWrapper:
         dataset = dataset.enumerate().map(inspect_batches)
         return metrics_dir, dataset
 
+    @staticmethod
+    def parse_metrics(metrics):
+        keras_metrics = []
+        for m in metrics:
+            cls = None
+            if m == "accuracy":
+                cls = tf.keras.metrics.Accuracy()
+            elif m == "precision":
+                cls = tf.keras.metrics.Precision()
+            elif m == "recall":
+                cls = tf.keras.metrics.Recall()
+            assert cls is not None, "Invalid metric {}".format(m)
+            keras_metrics.append(metric)
+        return keras_metrics
+
     @with_device
     def prepare(self, features_meta, training_config):
         input_shape = features_meta["sequence_length"], features_meta["num_features"]
@@ -70,7 +85,7 @@ class KerasWrapper:
         self.model.compile(
             loss=training_config["loss"],
             optimizer=optimizer,
-            metrics=training_config["metrics"]
+            metrics=self.parse_metrics(training_config["metrics"])
         )
 
     @with_device
