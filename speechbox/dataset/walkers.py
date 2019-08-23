@@ -48,9 +48,6 @@ class SpeechDatasetWalker:
     def join_root(self, *paths):
         return os.path.join(self.dataset_root, *paths)
 
-    def load(self, wavpath):
-        return read_wavfile(wavpath, sr=self.sample_frequency)
-
     def get_file_id(self, wavpath):
         return os.path.basename(wavpath).split(".wav")[0]
 

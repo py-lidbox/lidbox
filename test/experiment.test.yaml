@@ -1,7 +1,6 @@
 # Dataset metadata
 dataset:
     key: common-voice
-    sampling_frequency: 48000
     labels:
         - bre
         - est
@@ -13,43 +12,46 @@ print_progress: 25
 
 # Feature extraction
 features:
+    # Before extracting features, resample the file to this freq regardless of the native rate
+    resample_to: 16000
+    # Try to remove silence from all files before starting feature extraction
     apply_vad: True
-    augmentation:
-        # Create files with volume normalized to -3.0 dB
-        normalize: -3.0
-        # Use normalized files from the cache directory and do not use source files
-        ignore_src_files: True
-    # Extract 3 second utterances from all files
+    # Split all files into 3 second chunks
     utterance_length_ms: 3000
-    # Use 1 second offset when extracting utterances, i.e. every utterance will share 2 seconds with the previous and next utterances
-    utterance_offset_ms: 1000
-    # Length of LSTM input sequences
+    # Use 0.5 second offset when extracting utterances, i.e. every utterance will share 2.5 seconds with the previous and next utterances
+    utterance_offset_ms: 500
+    # Length of time-dependent input sequences for the LSTM layers
     sequence_length: 16
-    # Which features to extract
+    # Extract 20 MFCCs using librosa
     extractors:
-        - name: mfcc-deltas-012
+        - name: mfcc
           kwargs:
               n_mfcc: 20
 
 # Training and model hyperparameters
 experiment:
     # For naming directories etc, has no inherent meaning
-    name: lstm-experiment
+    name: lstm_1_layer_512_cells
     # Which Keras model module to load from speechbox.models
     model_definition:
-        name: lstm_1_dropout
+        # Single layer LSTM, nothing fancy
+        name: lstm
         kwargs:
-            num_cells: 4
+            num_layers: 1
+            num_cells: 512
     optimizer:
         cls: Adam
     loss: categorical_crossentropy
     metrics:
         - accuracy
-    batch_size: 32
+        - precision
+        - recall
+    batch_size: 4
     epochs: 20
     # How many batches per epoch
-    steps_per_epoch: 50
-    validation_steps: 10
+    steps_per_epoch: 500
+    validation_steps: 50
     # Size of shuffle buffer containing samples
     dataset_shuffle_size: 10000
-    verbose: 2
+    # Always use CPU for evaluation
+    eval_device: "/CPU:0"

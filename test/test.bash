@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 common_voice_src=/m/data/speech/common-voice
-num_files_to_parse=100
+num_files_to_parse=500
 
 cache_dir=./test-cache
 experiment_config=./experiment.test.yaml
@@ -59,33 +59,13 @@ speechbox dataset $cache_dir $experiment_config \
 	--check \
 	--save-state
 
-printf "\nCreating random training-validation-test split by audio file, but not saving it to state\n"
-speechbox dataset $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--split by-file \
-	--check-split by-file
-
-printf "\nCreating random training-validation-test split by speaker ID\n"
+printf "\nCreating random training-test split by speaker ID\n"
 speechbox dataset $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
 	--split by-speaker \
 	--check-split by-speaker \
 	--save-state
-
-printf "\nAugmenting the dataset by transforming audio files\n"
-speechbox dataset $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--augment \
-	--save-state
-
-printf "\nChecking dataset integrity\n"
-speechbox dataset $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--check-integrity
 
 printf "\nComputing total duration of dataset audio files\n"
 speechbox dataset $cache_dir $experiment_config \

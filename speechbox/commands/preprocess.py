@@ -59,7 +59,8 @@ class Preprocess(StatefulCommand):
                     utterance_length_ms=config["utterance_length_ms"],
                     utterance_offset_ms=config["utterance_offset_ms"],
                     apply_vad=config.get("apply_vad", False),
-                    print_progress=config.get("print_progress", 0)
+                    print_progress=config.get("print_progress", 0),
+                    resample_to=config.get("resample_to")
                 )
                 features = transformations.utterances_to_features(
                     utterances,

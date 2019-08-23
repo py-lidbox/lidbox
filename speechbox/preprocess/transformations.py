@@ -28,7 +28,7 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=True):
+def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, resample_to=None, slide_over_all=True):
     """
     Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.
     If slide_over_all is given and False, every audio file will be concatenated and utterances yielded from a window that slides over every file, regardless of utterance boundaries.
@@ -36,7 +36,7 @@ def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_o
     # Working memory for incomplete utterances
     label_to_wav = {label: np.zeros((0,)) for label in set(labels)}
     for i, (label, wavpath) in enumerate(zip(labels, paths), start=1):
-        wav, rate = system.read_wavfile(wavpath)
+        wav, rate = system.read_wavfile(wavpath, sr=resample_to)
         if apply_vad:
             wav, _ = system.remove_silence((wav, rate))
         # If we are merging, prepend partial utterance from end of previous file
@@ -88,7 +88,8 @@ def files_to_utterances(paths, config):
             utterance_length_ms=config["utterance_length_ms"],
             utterance_offset_ms=config["utterance_offset_ms"],
             apply_vad=config.get("apply_vad", False),
-            print_progress=config.get("print_progress", 0)
+            print_progress=config.get("print_progress", 0),
+            resample_to=config.get("resample_to")
         )
         features = utterances_to_features(
             utterance_chunks,
