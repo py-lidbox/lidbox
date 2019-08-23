@@ -152,10 +152,14 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
         else:
             d = d.map(parse_sequence_example)
         return d
-    if "class_weights" in training_config:
-        # Assign a probability for drawing a sample for each label
-        draw_prob = {label: 1.0 - class_weight for label, class_weight in training_config["class_weight"].items()}
-        assert len(label_probabilities) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
+    class_weights = training_config.get("class_weight")
+    if class_weights:
+        assert len(class_weights) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
+        # Assign a higher probability for drawing a more rare sample by inverting ratios of label to total num labels
+        draw_prob = {label: 1.0/class_weight for label, class_weight in class_weights.items()}
+        # Normalize so it is a prob distribution
+        tot = sum(draw_prob.values())
+        draw_prob = {label: inv_ratio/tot for label, inv_ratio in draw_prob.items()}
         # Assume .tfrecord files have been named by label
         weights = [
             draw_prob[os.path.basename(path).split(".tfrecord")[0]]
