@@ -261,7 +261,6 @@ class OGIWalker(SpeechDatasetWalker):
             patterns = set()
             with open(os.path.join(split_def_dir, split_fname)) as split_f:
                 for line in split_f:
-                    print(line)
                     cols = line.split(' ')
                     # Make sure all lines contain what we expect
                     assert cols[0].strip().isdigit(), "row is '{}'".format(cols)
@@ -277,11 +276,6 @@ class OGIWalker(SpeechDatasetWalker):
                     for p in cols[1:]:
                         patterns.add(speaker_id + p)
             self.datagroup_patterns.append((datagroup_key, patterns))
-        s = 0
-        for d, p in self.datagroup_patterns:
-            s += len(p)
-            print(d, len(p))
-        print("all", s)
 
     def parse_datagroup(self, wavpath):
         utt_id = os.path.basename(wavpath).split(".wav")[0]
