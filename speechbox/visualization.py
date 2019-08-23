@@ -2,8 +2,6 @@ import itertools
 
 import librosa.display
 import librosa.feature
-import matplotlib
-matplotlib.use("SVG")
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
