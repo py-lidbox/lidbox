@@ -185,8 +185,15 @@ class Model(StatefulCommand):
         if args.verbosity:
             print("Preparing model for evaluation")
         model = self.state["model"]
-        training_config = self.experiment_config["experiment"]
-        features_config = self.experiment_config["features"]
+        eval_config = {"features": dict(self.experiment_config["features"], **self.experiment_config["evaluation"]["features"])}
+        train_conf = self.experiment_config["experiment"]
+        needed_training_keys = ("loss", "metrics", "optimizer", "batch_size")
+        for key in needed_training_keys:
+            eval_config[key] = train_conf[key]
+        if args.verbosity > 1:
+            print("Initializing model and extracting features for evaluation with config:")
+            pprint.pprint(eval_config)
+            print()
         if not self.state_data_ok():
             return 1
         if "test" not in self.state["data"]:
@@ -197,18 +204,18 @@ class Model(StatefulCommand):
             print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
             list(test_set_data["features"].values()),
-            training_config
+            eval_config
         )
-        model.prepare(features_meta, training_config)
+        model.prepare(features_meta, eval_config)
         best_checkpoint = self.get_best_weights_checkpoint()
         model.load_weights(best_checkpoint)
         if args.evaluate_test_set == "loss":
-            model.evaluate(test_set, training_config)
+            model.evaluate(test_set, steps=eval_config.get("steps"), verbose=eval_config.get("verbose", 2))
         elif args.evaluate_test_set == "confusion-matrix":
             if args.verbosity > 1:
                 print("Extracting features for all files in the test set")
             paths = test_set_data["paths"]
-            transformer = transformations.files_to_utterances(paths, features_config)
+            transformer = transformations.files_to_utterances(paths, eval_config["features"])
             test_labels = []
             test_utterances = []
             for label, (path, utterance) in zip(test_set_data["labels"], transformer):

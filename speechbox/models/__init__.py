@@ -108,11 +108,11 @@ class KerasWrapper:
         )
 
     @with_device
-    def evaluate(self, test_set, model_config):
+    def evaluate(self, test_set, steps, verbose):
         return self.model.evaluate(
             test_set,
-            steps=model_config.get("validation_steps"),
-            verbose=model_config.get("verbose", 2)
+            steps=steps,
+            verbose=verbose
         )
 
     @with_device
