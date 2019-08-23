@@ -136,10 +136,10 @@ def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)
 
-def load_features_as_dataset(tfrecord_paths, model_config=None):
+def load_features_as_dataset(tfrecord_paths, training_config=None):
     import tensorflow as tf
-    if model_config is None:
-        model_config = {}
+    if training_config is None:
+        training_config = {}
     # All labels should have features of same dimensions
     features_meta = load_features_meta(tfrecord_paths[0])
     assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
@@ -149,22 +149,34 @@ def load_features_as_dataset(tfrecord_paths, model_config=None):
         return sequence_example_to_model_input(seq_example_string, num_labels, num_features)
     def parse_compressed_tfrecords(paths):
         d = tf.data.TFRecordDataset(paths, compression_type=TFRECORD_COMPRESSION)
-        if "parallel_parse" in model_config:
-            d = d.map(parse_sequence_example, num_parallel_calls=model_config["parallel_parse"])
+        if "parallel_parse" in training_config:
+            d = d.map(parse_sequence_example, num_parallel_calls=training_config["parallel_parse"])
         else:
             d = d.map(parse_sequence_example)
         return d
-    dataset = tf.data.Dataset.from_tensor_slices(tfrecord_paths)
-    # Consume TFRecords in cycles over all labels, each time taking a single sample with a different label
-    dataset = dataset.interleave(parse_compressed_tfrecords, cycle_length=num_labels, block_length=1)
-    if "dataset_shuffle_size" in model_config:
-        dataset = dataset.shuffle(model_config["dataset_shuffle_size"])
-    if "repeat" in model_config:
-        dataset = dataset.repeat(count=model_config["repeat"])
-    if "batch_size" in model_config:
-        dataset = dataset.batch(model_config["batch_size"])
-        if "prefetch" in model_config:
-            dataset = dataset.prefetch(model_config["steps_per_epoch"])
+    if "class_weights" in training_config:
+        # Assign a probability for drawing a sample for each label
+        draw_prob = {label: 1.0 - class_weight for label, class_weight in training_config["class_weight"].items()}
+        assert len(label_probabilities) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
+        # Assume .tfrecord files have been named by label
+        weights = [
+            draw_prob[os.path.basename(path).split(".tfrecord")[0]]
+            for path in tfrecord_paths
+        ]
+    else:
+        # All samples equally probable
+        weights = [1.0 for path in tfrecord_paths]
+    # Assume each tfrecord file contains features only for a single label
+    label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
+    if "repeat" in training_config:
+        label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
+    dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
+    if "dataset_shuffle_size" in training_config:
+        dataset = dataset.shuffle(training_config["dataset_shuffle_size"])
+    if "batch_size" in training_config:
+        dataset = dataset.batch(training_config["batch_size"])
+        if "prefetch" in training_config:
+            dataset = dataset.prefetch(training_config["steps_per_epoch"])
     return dataset, features_meta
 
 def write_utterance(utterance, basedir):
