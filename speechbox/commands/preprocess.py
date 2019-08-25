@@ -1,6 +1,7 @@
 import itertools
 import os
 import pprint
+import sys
 
 from speechbox.commands.base import StatefulCommand
 import speechbox.system as system
