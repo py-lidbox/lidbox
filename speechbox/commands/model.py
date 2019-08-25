@@ -184,7 +184,10 @@ class Model(StatefulCommand):
         if args.verbosity:
             print("Preparing model for evaluation")
         model = self.state["model"]
-        eval_config = {"features": dict(self.experiment_config["features"], **self.experiment_config["evaluation"]["features"])}
+        eval_config = {"features": self.experiment_config["features"]}
+        if "evaluation" in self.experiment_config:
+            special_config = self.experiment_config["evaluation"]
+            eval_config["features"].update(special_config["features"])
         train_conf = self.experiment_config["experiment"]
         needed_training_keys = ("loss", "metrics", "optimizer", "batch_size")
         for key in needed_training_keys:
