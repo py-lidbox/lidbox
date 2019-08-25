@@ -1,5 +1,3 @@
-import itertools
-
 import librosa.display
 import librosa.feature
 import matplotlib.pyplot as plt
@@ -8,27 +6,38 @@ plt.rcParams["svg.fonttype"] = "none"
 import numpy as np
 
 
-# Modified version of:
-# http://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html#sphx-glr-auto-examples-model-selection-plot-confusion-matrix-py
-def write_confusion_matrix(cm, label_names, figpath, title='', cmap=plt.cm.Blues, no_legend=True):
-    plt.figure(figsize=(4, 4))
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+# Modified from:
+# https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
+def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legend=True):
+    num_labels = len(label_names)
+    assert cm.shape[0] == num_labels and cm.shape[1] == num_labels, "Invalid confusion matrix and/or labels"
+    fig, ax = plt.subplots(figsize=(4, 4))
     if title:
-        plt.title(title)
+        ax.set_title(title)
+    im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
     if not no_legend:
-        plt.colorbar(fraction=0.040, pad=0.05)
-    tick_marks = np.arange(len(label_names))
-    plt.xticks(tick_marks, label_names, rotation=45)
-    plt.yticks(tick_marks, label_names)
+        ax.figure.colorbar(im, ax=ax)
+    ax.set(xticks=np.arange(num_labels),
+           yticks=np.arange(num_labels),
+           xlim=(-0.5, num_labels - 0.5),
+           ylim=(num_labels - 0.5, -0.5),
+           xticklabels=label_names,
+           yticklabels=label_names,
+           title=title,
+           ylabel='True label',
+           xlabel='Predicted label')
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     thresh = cm.max() / 2.0
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], 'd'),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
+    for row in range(num_labels):
+        for col in range(num_labels):
+            ax.text(col, row, format(cm[row, col], 'd'),
+                    ha="center",
+                    va="center",
+                    color="white" if cm[row, col] > thresh else "black")
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
     plt.tight_layout()
-    plt.savefig(figpath)
+    return fig, ax
 
 
 def plot_overview(wav, figpath):
