@@ -15,7 +15,8 @@ def loader(input_shape, output_shape, num_cells, num_layers=1, narrowing=False):
             num_cells //= 2
         lstm_i = tf.keras.layers.LSTM(
             num_cells,
-            name="LSTM_{}".format(i)
+            name="LSTM_{}".format(i),
+            return_sequences=i < num_layers
         )
         lstm_layers.append(lstm_i)
     output = tf.keras.layers.Dense(output_shape, activation='softmax')
