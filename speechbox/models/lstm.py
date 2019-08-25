@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def loader(input_shape, output_shape, num_cells, num_layers=1):
+def loader(input_shape, output_shape, num_cells, num_layers=1, narrowing=False):
     lstm_layers = []
     lstm_1 = tf.keras.layers.LSTM(
         num_cells,
@@ -11,6 +11,8 @@ def loader(input_shape, output_shape, num_cells, num_layers=1):
     )
     lstm_layers.append(lstm_1)
     for i in range(2, num_layers + 1):
+        if narrowing:
+            num_cells //= 2
         lstm_i = tf.keras.layers.LSTM(
             num_cells,
             name="LSTM_{}".format(i)
