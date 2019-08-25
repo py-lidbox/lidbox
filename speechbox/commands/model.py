@@ -138,18 +138,17 @@ class Model(StatefulCommand):
         if args.imbalanced_labels:
             if args.verbosity:
                 print("Loading number of features by label for calculating class weights that will be applied on the loss function.")
-            if "class_weight" in training_config:
+            if "label_weights" in training_config:
                 if args.verbosity:
-                    print("Class weights already defined in the experiment config, ignoring feature distribution saved into state and using the config weights.")
+                    print("Label weights already defined in the experiment config, ignoring feature distribution saved into state and using the config weights.")
             else:
                 if args.verbosity:
-                    print("Class weights not defined, calculating weights from training set feature distribution")
+                    print("Label weights not defined, calculating weights from training set feature distribution")
                 num_features_by_label = data["training"]["num_features_by_label"]
                 assert all(num_features > 0 for num_features in num_features_by_label.values())
-                label_to_index = self.state["label_to_index"]
                 num_total_features = sum(num_features_by_label.values())
-                training_config["class_weight"] = {
-                    label_to_index[label]: float(num_features / num_total_features)
+                training_config["label_weights"] = {
+                    label: float(num_features / num_total_features)
                     for label, num_features in num_features_by_label.items()
                 }
         if args.verbosity > 1:

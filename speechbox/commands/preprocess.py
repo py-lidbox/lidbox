@@ -92,7 +92,7 @@ class Preprocess(StatefulCommand):
             if args.verbosity:
                 print("Datagroup '{}' features count by label:".format(datagroup_name))
                 for label, num_features in num_features_by_label.items():
-                    print("  {}: {} features".format(label, num_features))
+                    print("  {}: {}".format(label, num_features))
 
 
     def run(self):
