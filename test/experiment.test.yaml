@@ -12,6 +12,17 @@ print_progress: 25
 
 # Feature extraction
 features:
+    # Augment the training and validation sets by creating new audio files from speed and volume transformations
+    augmentation:
+        datagroups:
+            - training
+            - validation
+        # Use only augmented files for training and validation
+        ignore_src_files: True
+        # Create 9 different combinations of all pairs
+        cartesian_product:
+            volume: [0.25, 1.0, 2.0]
+            speed: [0.9, 1.0, 1.1]
     # Before extracting features, resample the file to this freq regardless of the native rate
     resample_to: 16000
     # Try to remove silence from all files before starting feature extraction

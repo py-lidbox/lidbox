@@ -365,7 +365,7 @@ class Dataset(StatefulCommand):
         args = self.args
         state_data = self.state["data"]
         if args.verbosity and any("features" in datagroup for datagroup in state_data.values()):
-            print("Warning: some datagroups seem to have paths to extracted features. You should re-extract all features after the augmentation is complete.")
+            print("Warning: some datagroups seem to have paths to extracted features. You should re-extract all features in case some datagroup gets new files by augmentation.")
         if not args.dst:
             if args.verbosity:
                 print("No augmentation destination given, assuming cache directory '{}'".format(args.cache_dir))
@@ -386,15 +386,16 @@ class Dataset(StatefulCommand):
                 for aug_type, aug_values in all_kwargs
             ]
             # Set augment_params to be all possible combinations of given values
-            augment_params = [dict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
+            augment_params = [collections.OrderedDict(kwargs) for kwargs in itertools.product(*flattened_kwargs)]
         # Add normalization to all augmentation param combinations, if specified
         if args.verbosity > 1:
             print("Full config for augmentation:")
             pprint.pprint(augment_params)
             print()
         print_progress = self.experiment_config.get("print_progress", 0)
+        augment_datagroups = augment_config.get("datagroups", state_data.keys())
         # Collect paths of augmented files by datagroup, each set of augmented paths grouped by the source path it was augmented from
-        dst_paths_by_datagroup = {datagroup_key: collections.defaultdict(list) for datagroup_key in state_data}
+        dst_paths_by_datagroup = {datagroup_key: collections.defaultdict(list) for datagroup_key in augment_datagroups}
         num_augmented = 0
         for aug_kwargs in augment_params:
             if args.verbosity:
@@ -402,7 +403,8 @@ class Dataset(StatefulCommand):
                 for aug_type, aug_value in aug_kwargs.items():
                     print(aug_type, aug_value)
                 print()
-            for datagroup_key, datagroup in state_data.items():
+            for datagroup_key in augment_datagroups:
+                datagroup = state_data[datagroup_key]
                 src_paths = datagroup["paths"]
                 # Create sox src-dst file pairs for each transformation
                 dst_paths = []
@@ -419,7 +421,8 @@ class Dataset(StatefulCommand):
                     # Make dirs if they do not exist
                     self.make_named_dir(target_dir)
                     dst_paths.append(os.path.join(target_dir, basename))
-                for src_path, dst_path in system.apply_sox_transformer(src_paths, dst_paths, **aug_kwargs):
+                transform_steps = [{k: v} for k, v in aug_kwargs.items()]
+                for src_path, dst_path in system.apply_sox_transformer(src_paths, dst_paths, transform_steps):
                     if dst_path is None:
                         if args.verbosity:
                             print("Warning, sox failed to transform '{}' from '{}'".format(dst_path, src_path))
@@ -436,9 +439,10 @@ class Dataset(StatefulCommand):
             print("Adding paths of all augmented files into data state")
         ignore_src_files = self.experiment_config["features"]["augmentation"].get("ignore_src_files", False)
         if args.verbosity and ignore_src_files:
-            print("'ignore_src_files' given in the augmentation config, original files will be ignored. Only augmented filepaths will be saved into data state.")
+            print("'ignore_src_files' given in the augmentation config, original files of each augmented dataset group will be ignored. Only augmented filepaths will be saved into data state for each augmented dataset group.")
         # All augmented, now expand the paths in the state dict
-        for datagroup_key, datagroup in state_data.items():
+        for datagroup_key in augment_datagroups:
+            datagroup = state_data[datagroup_key]
             all_augmented_paths = dst_paths_by_datagroup[datagroup_key]
             addition = {"checksums": [], "labels": [], "paths": []}
             for label, src_path in zip(datagroup["labels"], datagroup["paths"]):

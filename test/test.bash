@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 common_voice_src=/m/data/speech/common-voice
-num_files_to_parse=200
+num_files_to_parse=100
 
 cache_dir=./test-cache
 experiment_config=./experiment.test.yaml
@@ -67,7 +67,20 @@ speechbox dataset $cache_dir $experiment_config \
 	--check-split by-speaker \
 	--save-state
 
-printf "\nComputing total duration of dataset audio files\n"
+printf "\nComputing total duration of dataset audio files before augmentation\n"
+speechbox dataset $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--get-audio-durations
+
+printf "\nAugmenting dataset\n"
+speechbox dataset $cache_dir $experiment_config \
+	$verbosity \
+	--load-state \
+	--augment \
+	--save-state
+
+printf "\nComputing total duration of dataset audio files after augmentation\n"
 speechbox dataset $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
