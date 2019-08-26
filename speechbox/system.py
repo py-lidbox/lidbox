@@ -131,6 +131,12 @@ def write_features(sequence_features, target_path):
             record_writer.write(sequence_example.SerializeToString())
     return target_path
 
+def count_all_features(features_file):
+    import tensorflow as tf
+    with tf.device("/CPU:0"):
+        dataset, _ = load_features_as_dataset([features_file])
+        return int(dataset.reduce(0, lambda count, _: count + 1))
+
 def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)

@@ -87,8 +87,7 @@ class Preprocess(StatefulCommand):
                 continue
             num_features_by_label = {}
             for label, features_file in datagroup["features"].items():
-                dataset, _ = system.load_features_as_dataset([features_file])
-                num_features_by_label[label] = int(dataset.reduce(0, lambda count, _: count + 1))
+                num_features_by_label[label] = system.count_all_features(features_file)
             datagroup["num_features_by_label"] = num_features_by_label
             if args.verbosity:
                 print("Datagroup '{}' features count by label:".format(datagroup_name))
