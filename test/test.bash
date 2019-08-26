@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 common_voice_src=/m/data/speech/common-voice
-num_files_to_parse=500
+num_files_to_parse=200
 
 cache_dir=./test-cache
 experiment_config=./experiment.test.yaml
@@ -84,13 +84,15 @@ printf "\nCounting total amount of features\n"
 speechbox preprocess $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--count-features
+	--count-features \
+	--save-state
 
 printf "\nTraining simple LSTM model\n"
 speechbox model $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--train
+	--train \
+	--imbalanced-labels
 
 printf "\nEvaluating model\n"
 speechbox model $cache_dir $experiment_config \

@@ -16,9 +16,10 @@ features:
     resample_to: 16000
     # Try to remove silence from all files before starting feature extraction
     apply_vad: True
-    # Split all files into 3 second chunks
-    utterance_length_ms: 3000
-    # Use 0.5 second offset when extracting utterances, i.e. every utterance will share 2.5 seconds with the previous and next utterances
+    # Slide a 2 second window over all audio files of each label to produce utterances
+    # By default, audio file boundaries are ignored
+    utterance_length_ms: 2000
+    # Use 0.5 second offset when extracting utterances, i.e. every utterance will share 1.5 seconds with the previous and next utterances
     utterance_offset_ms: 500
     # Length of time-dependent input sequences for the LSTM layers
     sequence_length: 16
@@ -31,27 +32,42 @@ features:
 # Training and model hyperparameters
 experiment:
     # For naming directories etc, has no inherent meaning
-    name: lstm_1_layer_512_cells
+    name: lstm_3_layer_512_cells
     # Which Keras model module to load from speechbox.models
     model_definition:
-        # Single layer LSTM, nothing fancy
+        # 3-layer LSTM with 512, 256, and 128 cells (ordered from input to output)
         name: lstm
         kwargs:
-            num_layers: 1
             num_cells: 512
+            num_layers: 3
+            # Cut num_cells in half after each layer
+            narrowing: True
     optimizer:
         cls: Adam
+        kwargs:
+            learning_rate: 0.0001
     loss: categorical_crossentropy
     metrics:
         - accuracy
         - precision
         - recall
-    batch_size: 4
+    batch_size: 16
     epochs: 20
-    # How many batches per epoch
+    # Repeat samples from each label indefinitely
+    repeat: -1
+    # How many batches per epoch for training and validation
     steps_per_epoch: 500
     validation_steps: 50
-    # Size of shuffle buffer containing samples
+    # How many samples to draw from the dataset iterator into the shuffle buffer,
+    # from which we then draw samples uniformly at random used to train the model
     dataset_shuffle_size: 10000
-    # Always use CPU for evaluation
-    eval_device: "/CPU:0"
+
+evaluation:
+    features:
+        apply_vad: True
+        utterance_length_ms: 10000
+        utterance_offset_ms: 5000
+    metrics:
+        - accuracy
+        - precision
+        - recall
