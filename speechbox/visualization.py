@@ -10,7 +10,7 @@ import numpy as np
 # https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
 def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legend=True):
     num_labels = len(label_names)
-    assert cm.shape[0] == num_labels and cm.shape[1] == num_labels, "Invalid confusion matrix and/or labels"
+    assert cm.shape[1] == cm.shape[0] == num_labels, "Confusion matrix shape {} must match amount of labels {} both in columns and rows".format(cm.shape, num_labels)
     fig, ax = plt.subplots(figsize=(4, 4))
     if title:
         ax.set_title(title)

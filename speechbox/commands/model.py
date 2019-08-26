@@ -206,7 +206,8 @@ class Model(StatefulCommand):
             print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
             list(test_set_data["features"].values()),
-            eval_config
+            eval_config,
+            is_test=True
         )
         model.prepare(features_meta, eval_config)
         best_checkpoint = self.get_best_weights_checkpoint()
@@ -215,7 +216,9 @@ class Model(StatefulCommand):
             model.evaluate(test_set, steps=eval_config.get("steps"), verbose=eval_config.get("verbose", 2))
         elif args.evaluate_test_set == "confusion-matrix":
             if args.verbosity > 1:
-                print("Extracting features for all files in the test set")
+                print("Extracting features for all files in the test set with config:")
+                pprint.pprint(eval_config["features"])
+                print()
             paths = test_set_data["paths"]
             transformer = transformations.files_to_utterances(paths, eval_config["features"])
             test_labels = []

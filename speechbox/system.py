@@ -135,7 +135,7 @@ def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)
 
-def load_features_as_dataset(tfrecord_paths, training_config=None):
+def load_features_as_dataset(tfrecord_paths, training_config=None, is_test=False):
     import tensorflow as tf
     if training_config is None:
         training_config = {}
@@ -169,11 +169,15 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
     else:
         # All samples equally probable
         weights = [1.0 for path in tfrecord_paths]
-    # Assume each tfrecord file contains features only for a single label
-    label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
-    if "repeat" in training_config:
-        label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
-    dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
+    if is_test:
+        dataset = parse_compressed_tfrecords(tfrecord_paths)
+        assert "repeat" not in training_config, "Repeat dataset during evaluation of test set is not supported"
+    else:
+        # Assume each tfrecord file contains features only for a single label
+        label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
+        if "repeat" in training_config:
+            label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
+        dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
     if "dataset_shuffle_size" in training_config:
         dataset = dataset.shuffle(training_config["dataset_shuffle_size"])
     if "batch_size" in training_config:
