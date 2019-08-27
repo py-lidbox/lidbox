@@ -1,3 +1,5 @@
+import collections
+
 class UnknownDatasetException(Exception): pass
 class DatasetRecursionError(RecursionError): pass
 
@@ -28,6 +30,13 @@ def get_dataset_walker(dataset, config=None):
 
 def get_dataset_walker_cls(dataset):
     if dataset not in all_walkers:
-        error_msg = "'{}' has no SpeechDatasetWalker defined".format(dataset)
+        error_msg = "No SpeechDatasetWalker class defined for dataset '{}'".format(dataset)
         raise UnknownDatasetException(error_msg)
     return all_walkers[dataset]
+
+def group_paths_by_speaker(paths, dataset):
+    parse_speaker_id = get_dataset_walker_cls(dataset).parse_speaker_id
+    groups = collections.defaultdict(list)
+    for path in paths:
+        groups[parse_speaker_id(path)].append(path)
+    return groups

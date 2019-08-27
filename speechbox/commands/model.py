@@ -291,7 +291,7 @@ class Model(StatefulCommand):
         features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
         model.prepare(features_meta, eval_config["experiment"])
         model.load_weights(self.get_best_weights_checkpoint())
-        paths = list(system.load_audiofile_paths(args.predict))
+        paths = [path for path, _ in system.load_audiofile_paths(args.predict)]
         if args.verbosity:
             print("Extracting features from {} audio files".format(len(paths)))
         utterances = []

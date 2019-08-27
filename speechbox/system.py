@@ -8,6 +8,7 @@ import subprocess
 
 from audioread.exceptions import NoBackendError
 import librosa
+import numpy as np
 import sox
 import webrtcvad
 import yaml
@@ -74,10 +75,17 @@ def append_json(data, path):
 def load_audiofile_paths(pathlist_file):
     with open(pathlist_file) as f:
         for line in f:
-            line = line.strip()
-            wav, _ = read_wavfile(line)
+            split = line.split()
+            wavpath, rest = split[0].strip(), split[1:]
+            wav, _ = read_wavfile(wavpath)
             if wav is not None:
-                yield line
+                yield wavpath, rest
+
+def concatenate_wavs(wavs):
+    assert len(wavs) > 0, "Nothing to concatenate"
+    assert all(rate == wavs[0][1] for _, rate in wavs), "Cannot concatenate wavfiles with different sampling rates"
+    rate = wavs[0][0]
+    return np.concatenate([wav for wav, _ in wavs]), rate
 
 def sequence_to_example(sequence, onehot_label_vec):
     """
