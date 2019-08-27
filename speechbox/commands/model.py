@@ -121,8 +121,10 @@ class Model(StatefulCommand):
                 print("Additional parameters specified in the config to be used during evaluation, they will take precedence over existing config values used during training")
             for key, overrides in eval_config.pop("evaluation").items():
                 eval_config[key].update(overrides)
-        del eval_config["features"]["augmentation"]
-        del eval_config["experiment"]["repeat"]
+        if "augmentation" in eval_config["features"]:
+            del eval_config["features"]["augmentation"]
+        if "repeat" in eval_config["experiment"]:
+            del eval_config["experiment"]["repeat"]
         # Exhaust whole test set
         eval_config["experiment"]["validation_steps"] = None
         return eval_config
