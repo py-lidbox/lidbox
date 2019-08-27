@@ -19,15 +19,12 @@ def mfcc(utterance, normalize=True, mel_spec_power=None, **kwargs):
     # Extract MFCCs
     if mel_spec_power is not None:
         S = librosa.feature.melspectrogram(y=signal, sr=rate)
-        S = librosa.power_to_db(S**mel_spec_power, ref=np.max)
-        mfccs = librosa.feature.mfcc(y=signal, sr=rate, S=S, **kwargs)
-    else:
-        mfccs = librosa.feature.mfcc(y=signal, sr=rate, **kwargs)
-    mfccs = mfccs.T
+        kwargs["S"] = librosa.power_to_db(S**mel_spec_power, ref=np.max)
+    mfccs = librosa.feature.mfcc(y=signal, sr=rate, **kwargs)
     # Normalize each coefficient to 0 mean and 1 variance
     if normalize:
         mfccs = (mfccs - mfccs.mean(axis=0)) / mfccs.std(axis=0)
-    return mfccs
+    return mfccs.T
 
 def mfcc_deltas_012(utterance, **kwargs):
     """
