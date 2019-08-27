@@ -238,6 +238,7 @@ class Model(StatefulCommand):
                     "loss_function": experiment_config["loss"],
                     "metrics": named_metrics,
                     "model": best_checkpoint,
+                    "num_model_params": model.count_params()
                 })
             elif evaluation_type == "confusion-matrix":
                 if args.verbosity > 1:

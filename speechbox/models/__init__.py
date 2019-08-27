@@ -129,6 +129,10 @@ class KerasWrapper:
         real_labels = np.int8(real_labels)
         return tf.math.confusion_matrix(real_labels, predicted_labels).numpy()
 
+    @with_device
+    def count_params(self):
+        return sum(layer.count_params() for layer in self.model.layers)
+
     def __str__(self):
         string_stream = io.StringIO()
         def print_to_stream(*args, **kwargs):
