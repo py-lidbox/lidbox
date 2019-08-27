@@ -23,10 +23,11 @@ def mfcc(utterance, normalize=True, mel_spec_power=None, **kwargs):
         mfccs = librosa.feature.mfcc(y=signal, sr=rate, S=S, **kwargs)
     else:
         mfccs = librosa.feature.mfcc(y=signal, sr=rate, **kwargs)
+    mfccs = mfccs.T
     # Normalize each coefficient to 0 mean and 1 variance
     if normalize:
         mfccs = (mfccs - mfccs.mean(axis=0)) / mfccs.std(axis=0)
-    return mfccs.T
+    return mfccs
 
 def mfcc_deltas_012(utterance, **kwargs):
     """
