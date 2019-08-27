@@ -111,10 +111,6 @@ printf "\nEvaluating model\n"
 speechbox model $cache_dir $experiment_config \
 	$verbosity \
 	--load-state \
-	--evaluate-test-set loss
-
-printf "\nGenerating confusion matrix from predicting labels for all files in the test set\n"
-speechbox model $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--evaluate-test-set confusion-matrix
+	--evaluate-test-set loss \
+	--evaluate-test-set confusion-matrix \
+	--eval-result-dir evaluation

@@ -60,8 +60,6 @@ experiment:
     loss: categorical_crossentropy
     metrics:
         - accuracy
-        - precision
-        - recall
     batch_size: 16
     epochs: 20
     # Repeat samples from each label indefinitely
@@ -75,10 +73,11 @@ experiment:
 
 evaluation:
     features:
-        apply_vad: True
-        utterance_length_ms: 10000
-        utterance_offset_ms: 5000
-    metrics:
-        - accuracy
-        - precision
-        - recall
+        utterance_length_ms: 1000
+        utterance_offset_ms: 500
+    experiment:
+        tf_device_str: '/cpu:0'
+        metrics:
+            - accuracy
+            - precision
+            - recall

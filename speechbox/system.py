@@ -62,6 +62,15 @@ def dump_gzip_json(data, path):
     with gzip.open(path, "wb") as f:
         f.write(json.dumps(data, sort_keys=True, indent=2).encode('utf-8'))
 
+def append_json(data, path):
+    if os.path.exists(path):
+        with open(path) as f:
+            data_list = json.load(f)
+    else:
+        data_list = []
+    with open(path, "w") as f:
+        json.dump(data_list + [data], f)
+
 def load_audiofile_paths(pathlist_file):
     with open(pathlist_file) as f:
         for line in f:
@@ -177,7 +186,6 @@ def load_features_as_dataset(tfrecord_paths, training_config=None, is_test=False
         weights = [1.0 for path in tfrecord_paths]
     if is_test:
         dataset = parse_compressed_tfrecords(tfrecord_paths)
-        assert "repeat" not in training_config, "Repeat dataset during evaluation of test set is not supported"
     else:
         # Assume each tfrecord file contains features only for a single label
         label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]

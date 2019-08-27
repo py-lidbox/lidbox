@@ -34,9 +34,8 @@ class Model(StatefulCommand):
             action="store_true",
             help="Apply weighting on imbalanced labels during training by using a pre-calculated feature distribution.")
         parser.add_argument("--evaluate-test-set",
-            type=str,
             choices=("loss", "confusion-matrix"),
-            default="loss",
+            action="append",
             help="Evaluate model on test set")
         parser.add_argument("--confusion-matrix-path",
             type=str,
@@ -52,9 +51,13 @@ class Model(StatefulCommand):
         parser.add_argument("--reset-checkpoints",
             action="store_true",
             help="Delete checkpoints from previous runs for this model.")
+        parser.add_argument("--eval-result-dir",
+            type=str,
+            action=ExpandAbspath,
+            help="Write evaluation results into this directory. If --confusion-matrix-path is also given, that path takes precedence over this directory.")
         return parser
 
-    def create_model(self, model_id, training_config):
+    def create_model(self, model_id, config):
         args = self.args
         model_cache_dir = os.path.join(args.cache_dir, model_id)
         tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "log")
@@ -75,7 +78,7 @@ class Model(StatefulCommand):
                 "histogram_freq": 1,
                 "embeddings_freq": 1,
             })
-        tensorboard_config = dict(default_tensorboard_config, **training_config.get("tensorboard", {}))
+        tensorboard_config = dict(default_tensorboard_config, **config.get("tensorboard", {}))
         checkpoint_dir = os.path.join(model_cache_dir, "checkpoints")
         if args.reset_checkpoints and os.path.isdir(checkpoint_dir):
             if args.verbosity:
@@ -91,16 +94,16 @@ class Model(StatefulCommand):
             "save_best_only": True,
             "verbose": 0,
         }
-        checkpoints_config = dict(default_checkpoints_config, **training_config.get("checkpoints", {}))
+        checkpoints_config = dict(default_checkpoints_config, **config.get("checkpoints", {}))
         callbacks_kwargs = {
             "checkpoints": None if args.no_save_model else checkpoints_config,
-            "early_stopping": training_config.get("early_stopping"),
+            "early_stopping": config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
         if not args.train:
             if args.verbosity > 1:
                 print("Not training, will not use keras callbacks")
-            callbacks_kwargs = {"device_str": training_config.get("eval_device")}
+            callbacks_kwargs = {"device_str": config.get("tf_device_str")}
         else:
             self.make_named_dir(tensorboard_dir, "tensorboard")
             if not args.no_save_model:
@@ -109,7 +112,20 @@ class Model(StatefulCommand):
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
             print()
-        return models.KerasWrapper(model_id, training_config["model_definition"], **callbacks_kwargs)
+        return models.KerasWrapper(model_id, config["model_definition"], **callbacks_kwargs)
+
+    def get_eval_config(self):
+        eval_config = self.experiment_config.copy()
+        if "evaluation"in eval_config:
+            if self.args.verbosity:
+                print("Additional parameters specified in the config to be used during evaluation, they will take precedence over existing config values used during training")
+            for key, overrides in eval_config.pop("evaluation").items():
+                eval_config[key].update(overrides)
+        del eval_config["features"]["augmentation"]
+        del eval_config["experiment"]["repeat"]
+        # Exhaust whole test set
+        eval_config["experiment"]["validation_steps"] = None
+        return eval_config
 
     @staticmethod
     def get_loss_as_float(checkpoint_filename):
@@ -155,7 +171,7 @@ class Model(StatefulCommand):
             print("\nModel config is:")
             pprint.pprint(training_config)
             print()
-        model = self.state["model"]
+        model = self.create_model(self.model_id, training_config)
         # Load training set consisting of pre-extracted features
         training_set, features_meta = system.load_features_as_dataset(
             # List of all .tfrecord files containing all training set samples
@@ -183,19 +199,13 @@ class Model(StatefulCommand):
         args = self.args
         if args.verbosity:
             print("Preparing model for evaluation")
-        model = self.state["model"]
-        eval_config = {"features": self.experiment_config["features"]}
-        if "evaluation" in self.experiment_config:
-            special_config = self.experiment_config["evaluation"]
-            eval_config["features"].update(special_config["features"])
-        train_conf = self.experiment_config["experiment"]
-        needed_training_keys = ("loss", "metrics", "optimizer", "batch_size")
-        for key in needed_training_keys:
-            eval_config[key] = train_conf[key]
+        eval_config = self.get_eval_config()
         if args.verbosity > 1:
             print("Initializing model and extracting features for evaluation with config:")
             pprint.pprint(eval_config)
             print()
+        experiment_config = eval_config["experiment"]
+        model = self.create_model(self.model_id, experiment_config)
         if not self.state_data_ok():
             return 1
         if "test" not in self.state["data"]:
@@ -206,58 +216,77 @@ class Model(StatefulCommand):
             print("Test set has {} paths".format(len(test_set_data["paths"])))
         test_set, features_meta = system.load_features_as_dataset(
             list(test_set_data["features"].values()),
-            eval_config,
+            experiment_config,
             is_test=True
         )
-        model.prepare(features_meta, eval_config)
+        model.prepare(features_meta, experiment_config)
         best_checkpoint = self.get_best_weights_checkpoint()
         model.load_weights(best_checkpoint)
-        if args.evaluate_test_set == "loss":
-            model.evaluate(test_set, steps=eval_config.get("steps"), verbose=eval_config.get("verbose", 2))
-        elif args.evaluate_test_set == "confusion-matrix":
-            if args.verbosity > 1:
-                print("Extracting features for all files in the test set with config:")
-                pprint.pprint(eval_config["features"])
-                print()
-            paths = test_set_data["paths"]
-            transformer = transformations.files_to_utterances(paths, eval_config["features"])
-            test_labels = []
-            test_utterances = []
-            for label, (path, utterance) in zip(test_set_data["labels"], transformer):
-                if utterance is None:
-                    if args.verbosity > 1:
-                        print("Warning: could not extract features from (possibly too short) file '{}'".format(path))
+        for evaluation_type in args.evaluate_test_set:
+            if evaluation_type == "loss":
+                metrics = model.evaluate(test_set,
+                    steps=experiment_config.get("validation_steps"),
+                    verbose=experiment_config.get("verbose", 2)
+                )
+                metrics = [float(m) for m in metrics]
+                named_metrics = dict(zip(model.model.metrics_names, metrics))
+                if "eval_result" not in self.state:
+                    self.state["eval_result"] = {}
+                self.state["eval_result"].update({
+                    "loss_function": experiment_config["loss"],
+                    "metrics": named_metrics,
+                    "model": best_checkpoint,
+                })
+            elif evaluation_type == "confusion-matrix":
+                if args.verbosity > 1:
+                    print("Extracting features for all files in the test set with config:")
+                    pprint.pprint(eval_config["features"])
+                    print()
+                paths = test_set_data["paths"]
+                transformer = transformations.files_to_utterances(paths, eval_config["features"])
+                test_labels = []
+                test_utterances = []
+                for label, (path, utterance) in zip(test_set_data["labels"], transformer):
+                    if utterance is None:
+                        if args.verbosity > 1:
+                            print("Warning: could not extract features from (possibly too short) file '{}'".format(path))
+                    else:
+                        test_labels.append(label)
+                        test_utterances.append(utterance)
+                label_to_index = self.state["label_to_index"]
+                real_labels = [label_to_index[label] for label in test_labels]
+                cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
+                # Sort labels by index for labeling plot axes
+                label_names = sorted(label_to_index, key=lambda label: label_to_index[label])
+                fig, _ = visualization.draw_confusion_matrix(cm, label_names)
+                if args.confusion_matrix_path:
+                    cm_figure_path = args.confusion_matrix_path
                 else:
-                    test_labels.append(label)
-                    test_utterances.append(utterance)
-            label_to_index = self.state["label_to_index"]
-            real_labels = [label_to_index[label] for label in test_labels]
-            cm = model.evaluate_confusion_matrix(test_utterances, real_labels)
-            # Sort labels by index for labeling plot axes
-            label_names = sorted(label_to_index, key=lambda label: label_to_index[label])
-            fig, _ = visualization.draw_confusion_matrix(cm, label_names)
-            if args.confusion_matrix_path:
-                cm_figure_path = args.confusion_matrix_path
+                    figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
+                    cm_figure_path = os.path.join(args.eval_result_dir or args.cache_dir, figure_name)
+                if "eval_result" not in self.state:
+                    self.state["eval_result"] = {}
+                self.state["eval_result"]["confusion_matrix"] = cm_figure_path
+                self.state["eval_result"]["_cm_fig"] = fig
             else:
-                figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
-                cm_figure_path = os.path.join(args.cache_dir, figure_name)
-            fig.savefig(cm_figure_path)
-            if args.verbosity:
-                print("Wrote confusion matrix to '{}'".format(cm_figure_path))
-        else:
-            print("Error: unknown test set evaluation type '{}'".format(args.evaluate_test_set))
+                print("Error: unknown test set evaluation type '{}'".format(evaluation_type))
 
     def predict(self):
         args = self.args
         if args.verbosity:
             print("Predicting labels for audio files listed in '{}'".format(args.predict))
-        config = self.experiment_config
         if args.verbosity > 1:
             print("Preparing model for prediction")
-        training_config = config["model"]
-        model = self.state["model"]
+        eval_config = self.get_eval_config()
+        if args.verbosity:
+            print("Creating KerasWrapper '{}'".format(self.model_id))
+            if args.verbosity > 1:
+                print("Using config:")
+                pprint.pprint(eval_config)
+                print()
+        model = self.create_model(self.model_id, eval_config["experiment"])
         features_meta = system.load_features_meta(self.state["data"]["training"]["features"])
-        model.prepare(features_meta, training_config)
+        model.prepare(features_meta, eval_config["experiment"])
         model.load_weights(self.get_best_weights_checkpoint())
         paths = list(system.load_audiofile_paths(args.predict))
         if args.verbosity:
@@ -281,13 +310,29 @@ class Model(StatefulCommand):
                 print("{:8.3f}".format(p), end='')
             print()
 
-
     def run(self):
         super().run()
         args = self.args
-        training_config = self.experiment_config["experiment"]
-        self.model_id = args.model_id if args.model_id else training_config["name"]
-        if args.verbosity:
-            print("Creating KerasWrapper '{}'".format(self.model_id))
-        self.state["model"] = self.create_model(self.model_id, training_config)
+        experiment_name = self.experiment_config["experiment"]["name"]
+        self.model_id = args.model_id if args.model_id else experiment_name
         return self.run_tasks()
+
+    def exit(self):
+        args = self.args
+        if args.eval_result_dir:
+            self.make_named_dir(args.eval_result_dir, "evaluation results")
+        if "eval_result" in self.state:
+            results = self.state["eval_result"]
+            if "confusion_matrix" in results:
+                results.pop("_cm_fig").savefig(results["confusion_matrix"])
+                if args.verbosity:
+                    print("Wrote confusion matrix to '{}'".format(results["confusion_matrix"]))
+            if args.eval_result_dir:
+                self.make_named_dir(args.eval_result_dir, "evaluation results")
+                eval_result_path = os.path.join(args.eval_result_dir, "evaluation.json")
+                if args.verbosity:
+                    print("Writing evaluation results to '{}'".format(eval_result_path))
+                    if args.verbosity > 1:
+                        pprint.pprint(results)
+                system.append_json(results, eval_result_path)
+        super().exit()
