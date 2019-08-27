@@ -11,23 +11,26 @@ def extract_features(utterance_wav, extractor, config):
     assert features.ndim == 2, "Unexpected dimension {} for features, expected 2".format(features.ndim)
     return features
 
-def mfcc(utterance, normalize=False, mel_spec_power=1.0, **kwargs):
+def mfcc(utterance, normalize=True, mel_spec_power=None, **kwargs):
     """
-    MFCCs and normalize each coef by L2 norm.
+    MFCCs and normalize each coefficient to 0 mean and 1 variance.
     """
     signal, rate = utterance
     # Extract MFCCs
-    S = librosa.feature.melspectrogram(y=signal, sr=rate)
-    S = librosa.power_to_db(S**mel_spec_power, ref=np.max)
-    mfccs = librosa.feature.mfcc(y=signal, sr=rate, S=S, **kwargs)
-    # Normalize each coefficient such that the L2 norm for each coefficient over all frames is equal to 1
+    if mel_spec_power is not None:
+        S = librosa.feature.melspectrogram(y=signal, sr=rate)
+        S = librosa.power_to_db(S**mel_spec_power, ref=np.max)
+        mfccs = librosa.feature.mfcc(y=signal, sr=rate, S=S, **kwargs)
+    else:
+        mfccs = librosa.feature.mfcc(y=signal, sr=rate, **kwargs)
+    # Normalize each coefficient to 0 mean and 1 variance
     if normalize:
-        mfccs = librosa.util.normalize(mfccs, norm=2.0, axis=0)
+        mfccs = (mfccs - mfccs.mean(axis=0)) / mfccs.std(axis=0)
     return mfccs.T
 
 def mfcc_deltas_012(utterance, **kwargs):
     """
-    MFCCs, normalize each coef by L2 norm, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
+    MFCCs, normalize, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
     Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
     """
     mfccs = mfcc(utterance, **kwargs).T
