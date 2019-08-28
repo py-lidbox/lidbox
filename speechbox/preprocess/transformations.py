@@ -70,7 +70,7 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         onehot = np.zeros(len(label_to_index), dtype=np.float32)
         onehot[label_to_index[label]] = 1.0
         # Apply first extractor
-        extractor = extractors[0].copy()
+        extractor = extractors[0]
         feats = features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
         # If there are more extractors, apply them sequentially and append results to features
         #TODO extractors[1:], figuring out how to merge dimensions might get tricky
@@ -78,29 +78,33 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         for sequence in sequences:
             yield sequence, onehot
 
-def files_to_utterances(paths, config):
+def files_to_features(paths, labels, config, label_to_index):
     """
     Extract utterances from all audio files in the given iterator of paths, using parameters from the given experiment config.
     """
-    for path in paths:
+    for path, label in zip(paths, labels):
         utterance_chunks = speech_dataset_to_utterances(
-            [0], [path],
+            [label], [path],
             utterance_length_ms=config["utterance_length_ms"],
             utterance_offset_ms=config["utterance_offset_ms"],
             apply_vad=config.get("apply_vad", False),
             print_progress=config.get("print_progress", 0),
             resample_to=config.get("resample_to")
         )
-        features = utterances_to_features(
+        iter_features = utterances_to_features(
             utterance_chunks,
-            label_to_index=[0],
+            label_to_index=label_to_index,
             extractors=config["extractors"],
             sequence_length=config["sequence_length"]
         )
-        # Evaluate features generator while dropping dummy labels
-        features = [feat for feat, _ in features]
-        features = np.array(features) if features else None
-        yield path, features
+        features = []
+        targets = []
+        for feature, target in iter_features:
+            features.append(feature)
+            targets.append(target)
+        if features:
+            assert np.all(targets[0] == targets), "Expected label to stay unchanged within file '{}' but it had different labels".format(path)
+            yield path, np.array(features), targets[0]
 
 def dataset_split_samples(dataset_walker, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """

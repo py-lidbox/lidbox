@@ -38,7 +38,7 @@ def read_wavfile(path, **librosa_kwargs):
     except (EOFError, NoBackendError):
         return None, 0
 
-def write_wav(wav, path):
+def write_wav(path, wav):
     signal, rate = wav
     librosa.output.write_wav(path, signal, rate)
 
@@ -69,8 +69,28 @@ def append_json(data, path):
             data_list = json.load(f)
     else:
         data_list = []
+    data_list.append(data)
     with open(path, "w") as f:
-        json.dump(data_list + [data], f)
+        json.dump(data_list, f)
+
+def load_yaml(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+def write_utterance(utterance, basedir):
+    label, (wav, rate) = utterance
+    filename = hashlib.md5(bytes(wav)).hexdigest() + '.npy'
+    with open(os.path.join(basedir, filename), "wb") as out_file:
+        np.save(out_file, (label, (wav, rate)), allow_pickle=True, fix_imports=False)
+
+def load_utterance(path):
+    with open(path, "rb") as np_file:
+        data = np.load(np_file, allow_pickle=True, fix_imports=False)
+        return data[0], (data[1][0], data[1][1])
+
+def load_utterances(basedir):
+    for path in os.listdir(basedir):
+        yield load_utterance(os.path.join(basedir, path))
 
 def load_audiofile_paths(pathlist_file):
     with open(pathlist_file) as f:
@@ -84,8 +104,13 @@ def load_audiofile_paths(pathlist_file):
 def concatenate_wavs(wavs):
     assert len(wavs) > 0, "Nothing to concatenate"
     assert all(rate == wavs[0][1] for _, rate in wavs), "Cannot concatenate wavfiles with different sampling rates"
-    rate = wavs[0][0]
+    rate = wavs[0][1]
     return np.concatenate([wav for wav, _ in wavs]), rate
+
+def get_most_recent_file(directory):
+    # Get path object with greatest unix timestamp
+    files = (f for f in os.scandir(directory) if f.is_file())
+    return max(files, key=lambda d: d.stat().st_mtime).name
 
 def sequence_to_example(sequence, onehot_label_vec):
     """
@@ -158,7 +183,7 @@ def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)
 
-def load_features_as_dataset(tfrecord_paths, training_config=None, is_test=False):
+def load_features_as_dataset(tfrecord_paths, training_config=None):
     import tensorflow as tf
     if training_config is None:
         training_config = {}
@@ -192,14 +217,11 @@ def load_features_as_dataset(tfrecord_paths, training_config=None, is_test=False
     else:
         # All samples equally probable
         weights = [1.0 for path in tfrecord_paths]
-    if is_test:
-        dataset = parse_compressed_tfrecords(tfrecord_paths)
-    else:
-        # Assume each tfrecord file contains features only for a single label
-        label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
-        if "repeat" in training_config:
-            label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
-        dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
+    # Assume each tfrecord file contains features only for a single label
+    label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
+    if "repeat" in training_config:
+        label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
+    dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
     if "dataset_shuffle_size" in training_config:
         dataset = dataset.shuffle(training_config["dataset_shuffle_size"])
     if "batch_size" in training_config:
@@ -208,24 +230,15 @@ def load_features_as_dataset(tfrecord_paths, training_config=None, is_test=False
             dataset = dataset.prefetch(training_config["steps_per_epoch"])
     return dataset, features_meta
 
-def write_utterance(utterance, basedir):
-    label, (wav, rate) = utterance
-    filename = hashlib.md5(bytes(wav)).hexdigest() + '.npy'
-    with open(os.path.join(basedir, filename), "wb") as out_file:
-        np.save(out_file, (label, (wav, rate)), allow_pickle=True, fix_imports=False)
-
-def load_utterance(path):
-    with open(path, "rb") as np_file:
-        data = np.load(np_file, allow_pickle=True, fix_imports=False)
-        return data[0], (data[1][0], data[1][1])
-
-def load_utterances(basedir):
-    for path in os.listdir(basedir):
-        yield load_utterance(os.path.join(basedir, path))
-
-def load_yaml(path):
-    with open(path) as f:
-        return yaml.safe_load(f)
+def iter_log_events(tf_event_file):
+    import tensorflow as tf
+    from tensorflow.core.util.event_pb2 import Event
+    for event in tf.data.TFRecordDataset([tf_event_file]):
+        event = Event.FromString(event.numpy())
+        if event.summary.value:
+            assert len(event.summary.value) == 1, "Unexpected length for event summary"
+            value = event.summary.value[0]
+            yield value.tag, value.simple_value
 
 def remove_silence(wav, aggressiveness=0):
     """

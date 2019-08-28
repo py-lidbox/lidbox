@@ -34,9 +34,10 @@ def get_dataset_walker_cls(dataset):
         raise UnknownDatasetException(error_msg)
     return all_walkers[dataset]
 
-def group_paths_by_speaker(paths, dataset):
+def group_samples_by_speaker(samples, dataset):
     parse_speaker_id = get_dataset_walker_cls(dataset).parse_speaker_id
     groups = collections.defaultdict(list)
-    for path in paths:
-        groups[parse_speaker_id(path)].append(path)
-    return groups
+    for sample in samples:
+        path = sample[0]
+        groups[parse_speaker_id(path)].append(sample)
+    return iter(groups.items())

@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 plt.rcParams["svg.fonttype"] = "none"
 import numpy as np
 
+import speechbox.system as system
+
 
 # Modified from:
 # https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
@@ -39,6 +41,17 @@ def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legen
     plt.tight_layout()
     return fig, ax
 
+def draw_training_metrics_from_tf_events(event_data, xlabel, ylabel, title):
+    fig, ax = plt.subplots()
+    ax.set(ylabel=ylabel, xlabel=xlabel, title=title)
+    for data in event_data:
+        model_id, event_file, metric = data["model_id"], data["event_file"], data["metric"]
+        values = [value for key, value in system.iter_log_events(event_file) if key == metric]
+        epochs = list(range(len(values)))
+        ax.plot(epochs, values, label=model_id)
+    ax.legend()
+    plt.tight_layout()
+    return fig, ax
 
 def plot_overview(wav, figpath):
     """Plot as much visual information as possible for a wavfile."""

@@ -108,25 +108,31 @@ class KerasWrapper:
         )
 
     @with_device
-    def evaluate(self, test_set, steps, verbose):
-        return self.model.evaluate(
-            test_set,
-            steps=steps,
-            verbose=verbose
-        )
+    def evaluate(self, test_set, verbose):
+        metrics = {}
+        for path, data in test_set.items():
+            metrics[path] = self.model.evaluate(
+                [data["utterances"]],
+                [data["target"]],
+                verbose=verbose
+            )
+        return metrics
 
     @with_device
     def predict(self, utterances):
         expected_num_labels = self.model.layers[-1].output_shape[-1]
-        predictions = np.zeros((len(utterances), expected_num_labels))
+        predictions = np.zeros(expected_num_labels)
         for i, sequences in enumerate(utterances):
-            predictions[i] = self.model.predict(sequences).mean(axis=0)
-        return predictions
+            print("predicting", sequences.shape)
+            predictions[i] = self.model.predict(sequences)
+        print("predictions", predictions.shape)
+        return predictions.mean(axis=0)
 
     @with_device
     def evaluate_confusion_matrix(self, utterances, real_labels):
         predicted_labels = np.int8(self.predict(utterances).argmax(axis=1))
-        real_labels = np.int8(real_labels)
+        real_labels = np.int8(np.array(real_labels).argmax(axis=1))
+        print(predicted_labels, real_labels)
         return tf.math.confusion_matrix(real_labels, predicted_labels).numpy()
 
     @with_device
