@@ -512,6 +512,7 @@ class CommonVoiceWalker(SpeechDatasetWalker):
                 for row in csv.DictReader(f, delimiter='\t'):
                     self.file_to_speaker_id[row["path"].split(".mp3")[0]] = row["client_id"]
 
+    #FIXME should be static, or at least classmethod
     def parse_speaker_id(self, path):
         return self.file_to_speaker_id.get(os.path.basename(path).split(".wav")[0])
 

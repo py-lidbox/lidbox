@@ -1,6 +1,8 @@
+import itertools
+import os
 import pprint
-import time
 import sys
+import time
 
 from speechbox.commands import ExpandAbspath
 from speechbox.commands.base import Command
@@ -16,6 +18,7 @@ class System(Command):
         "get_unique_duration",
         "plot_melspectrogram",
         "watch",
+        "assert_disjoint",
     )
 
     @classmethod
@@ -40,6 +43,9 @@ class System(Command):
             type=str,
             action=ExpandAbspath,
             help="Apply transformations from this experiment config file  as they would be performed before feature extraction. Then play audio and visualize spectrograms.")
+        parser.add_argument("--assert-disjoint",
+            action="store_true",
+            help="Read list of paths from each infile, reduce paths to basenames, and assert that each list of basenames is disjoint with the basename lists from other files")
         return parser
 
     @staticmethod
@@ -121,6 +127,25 @@ class System(Command):
                     repeat = False
                 if err and args.verbosity:
                     print(err, file=sys.stderr)
+
+    def assert_disjoint(self):
+        args = self.args
+        if args.verbosity:
+            print("Checking that filelists contain disjoint sets of files")
+        path_lists = []
+        for infile in args.infile:
+            with open(infile) as f:
+                path_lists.append((infile, [line.strip().split()[0] for line in f]))
+        for (f1, l1), (f2, l2) in itertools.combinations(path_lists, r=2):
+            print(f1, "vs", f2, " ... ", end='')
+            common = set(os.path.basename(p) for p in l1) & set(os.path.basename(p) for p in l2)
+            if common:
+                print("fail, {} basenames in common".format(len(common)))
+                if args.verbosity > 2:
+                    for f in common:
+                        print(f)
+            else:
+                print("ok")
 
 
     def run(self):

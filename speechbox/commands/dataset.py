@@ -24,7 +24,8 @@ class Dataset(StatefulCommand):
         "compare_state",
         "augment",
         "swap_paths_prefix",
-        "get_audio_durations"
+        "get_audio_durations",
+        "dump_split",
     )
 
     @classmethod
@@ -37,6 +38,9 @@ class Dataset(StatefulCommand):
             type=str,
             action=ExpandAbspath,
             help="Write all (MD5-checksum, wavpath, label) pairs returned by the walk to this file. Columns are separated by a single space.")
+        parser.add_argument("--path-list",
+            type=str,
+            action=ExpandAbspath)
         parser.add_argument("--parse",
             action="store_true",
             help="TODO")
@@ -72,6 +76,9 @@ class Dataset(StatefulCommand):
         parser.add_argument("--get-audio-durations",
             action="store_true",
             help="Use SoX to compute durations of all audio files in the dataset.")
+        parser.add_argument("--dump-split",
+            type=str,
+            help="Write all paths and label pairs into stdout by split")
         return parser
 
     def walk(self):
@@ -83,13 +90,22 @@ class Dataset(StatefulCommand):
                 print("Using paths from state, gathered during some previous walk")
             walker_config = self.merge_datagroups_from_state()
         else:
-            if args.verbosity:
-                print("Gathering paths from directory '{}'.".format(args.src))
             if not self.args_src_ok():
                 return 1
             walker_config = {
                 "dataset_root": args.src,
             }
+            if args.path_list:
+                if args.verbosity:
+                    print("Gathering paths from list in file '{}'.".format(args.path_list))
+                paths, labels = system.parse_path_list(args.path_list)
+                walker_config["paths"] = paths
+                walker_config["labels"] = labels
+                #FIXME
+                walker_config["checksums"] = len(paths)*['']
+            else:
+                if args.verbosity:
+                    print("Gathering paths from directory '{}'.".format(args.src))
         walker_config["enabled_labels"] = self.experiment_config["dataset"]["labels"]
         sample_frequency = self.experiment_config["dataset"].get("sample_frequency")
         if sample_frequency:
@@ -488,6 +504,23 @@ class Dataset(StatefulCommand):
                 paths = [path for label, path in group]
                 duration_str = system.format_duration(system.get_total_duration(paths))
                 print("  {:s}: {duration_str:s}".format(label, duration_str=duration_str))
+
+
+    def dump_split(self):
+        args = self.args
+        if not self.state_data_ok():
+            return 1
+        if args.verbosity:
+            print("Writing current split into stdout")
+        if args.dump_split:
+            items = [(args.dump_split, self.state["data"][args.dump_split])]
+        else:
+            items = self.state["data"].items()
+        for datagroup_key, datagroup in items:
+            if args.verbosity:
+                print(datagroup_key)
+            for path, label in zip(datagroup["paths"], datagroup["labels"]):
+                print(path, label)
 
 
     def run(self):

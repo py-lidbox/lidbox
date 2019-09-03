@@ -1,4 +1,5 @@
 """File IO."""
+#TODO rewrite API with standard UNIX tools in mind to avoid redundancies
 import gzip
 import hashlib
 import itertools
@@ -294,3 +295,13 @@ def get_total_duration(paths):
 
 def format_duration(duration):
     return "{:02d}h {:02d}min {:02d}sec".format(*duration)
+
+def parse_path_list(path):
+    paths = []
+    labels = []
+    with open(path) as f:
+        for line in f:
+            path, label = line.strip().split()[:2]
+            paths.append(path)
+            labels.append(label)
+    return paths, labels
