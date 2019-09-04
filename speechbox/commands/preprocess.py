@@ -31,6 +31,10 @@ class Preprocess(StatefulCommand):
         if not self.state_data_ok():
             return 1
         config = self.experiment_config["features"]
+        if args.verbosity > 1:
+            print("Using feature extraction parameters:")
+            pprint.pprint(config)
+            print()
         label_to_index = self.state["label_to_index"]
         for datagroup_name, datagroup in self.state["data"].items():
             if args.verbosity:

@@ -26,6 +26,7 @@ class Dataset(StatefulCommand):
         "swap_paths_prefix",
         "get_audio_durations",
         "dump_split",
+        "init_datagroup",
     )
 
     @classmethod
@@ -79,6 +80,9 @@ class Dataset(StatefulCommand):
         parser.add_argument("--dump-split",
             type=str,
             help="Write all paths and label pairs into stdout by split")
+        parser.add_argument("--init-datagroup",
+            type=str,
+            help="Which key to use for datagroup when loading paths with --path-list.")
         return parser
 
     def walk(self):
@@ -134,6 +138,7 @@ class Dataset(StatefulCommand):
             for label, path, checksum in dataset_iter:
                 labels.append(label)
                 paths.append(path)
+                #TODO redundant?
                 checksums.append(system.md5sum(path))
             walk_data = {
                 "label_to_index": dataset_walker.make_label_to_index_dict(),
@@ -467,7 +472,7 @@ class Dataset(StatefulCommand):
                     if args.verbosity:
                         print("Warning: path not augmented: '{}'".format(src_path))
                     continue
-                addition["checksums"].extend(system.md5sum(path) for path in dst_paths)
+                addition["checksums"].extend(system.all_md5sums(dst_paths))
                 addition["labels"].extend(label for _ in dst_paths)
                 addition["paths"].extend(dst_paths)
             for key, vals in addition.items():
@@ -522,6 +527,31 @@ class Dataset(StatefulCommand):
             for path, label in zip(datagroup["paths"], datagroup["labels"]):
                 print(path, label)
 
+
+    def init_datagroup(self):
+        args = self.args
+        if args.verbosity:
+            print("Gathering paths from list in file '{}' into datagroup '{}'.".format(args.path_list, args.init_datagroup))
+        if "source_directory" not in self.state:
+            if args.src is None or not os.path.isdir(args.src):
+                print("Error: source directory '{}' does not exist. You must specify the source directory where the datagroup paths originated from".format(args.src))
+                return 1
+            self.state["source_directory"] = args.src
+        elif args.src and os.path.isdir(args.src):
+            print("Overwriting existing source directory '{}' with '{}'.".format(self.state["source_directory"], args.src))
+            self.state["source_directory"] = args.src
+        if "label_to_index" not in self.state:
+            if args.verbosity:
+                print("Using order of labels in the config file as a label_to_index mapping")
+            self.state["label_to_index"] = {label: i for i, label in enumerate(self.experiment_config["dataset"]["labels"])}
+        paths, labels = system.parse_path_list(args.path_list)
+        if "data" not in self.state:
+            self.state["data"] = {}
+        self.state["data"][args.init_datagroup] = {
+            "paths": paths,
+            "labels": labels,
+            "checksums": system.all_md5sums(paths),
+        }
 
     def run(self):
         super().run()

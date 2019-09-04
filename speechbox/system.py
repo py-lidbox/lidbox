@@ -56,6 +56,11 @@ def md5sum(path):
     with open(path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()
 
+def all_md5sums(paths, num_workers=32):
+    from multiprocessing import Pool
+    with Pool(num_workers) as pool:
+        return pool.map(md5sum, paths)
+
 def load_gzip_json(path):
     with gzip.open(path, mode="rt", encoding="utf-8") as f:
         return json.load(f)
