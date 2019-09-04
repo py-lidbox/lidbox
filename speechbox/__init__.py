@@ -6,7 +6,9 @@ import os
 def _get_unittest_data_dir():
     from speechbox import __path__
     speechbox_root = os.path.dirname(__path__[0])
-    return os.path.join(speechbox_root, "test", "data_common_voice")
+    datadir = os.path.join(speechbox_root, "test", "acoustic_data")
+    assert os.path.isdir(datadir), "Acoustic data has not yet been downloaded to '{}'".format(datadir)
+    return datadir
 
 def _get_random_wav():
     from random import choice
@@ -14,11 +16,6 @@ def _get_random_wav():
     data_root = _get_unittest_data_dir()
     label_dirs = [d for d in os.scandir(data_root) if d.is_dir()]
     label_dir = choice(label_dirs)
-    wavpaths = [f.path for f in os.scandir(label_dir.path) if f.is_file() and get_audio_type(f.path) == "wav"]
+    wavpaths = [f.path for f in os.scandir(os.path.join(label_dir, "wav")) if f.is_file() and get_audio_type(f.path) == "wav"]
     wavpath = choice(wavpaths)
     return label_dir.name, wavpath, read_wavfile(wavpath)
-
-def _get_random_wav_with_mfcc():
-    from speechbox.preprocess.features import extract_features
-    label, wavpath, wav = _get_random_wav()
-    return label, wavpath, wav, extract_features(wav, 'mfcc-deltas-012', {"n_mfcc": 13})

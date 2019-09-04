@@ -11,15 +11,12 @@ def extract_features(utterance_wav, extractor, config):
     assert features.ndim == 2, "Unexpected dimension {} for features, expected 2".format(features.ndim)
     return features
 
-def mfcc(utterance, normalize=True, mel_spec_power=None, **kwargs):
+def mfcc(utterance, normalize=True, **kwargs):
     """
     MFCCs and normalize each coefficient to 0 mean and 1 variance.
     """
     signal, rate = utterance
     # Extract MFCCs
-    if mel_spec_power is not None:
-        S = librosa.feature.melspectrogram(y=signal, sr=rate)
-        kwargs["S"] = librosa.power_to_db(S**mel_spec_power, ref=np.max)
     mfccs = librosa.feature.mfcc(y=signal, sr=rate, **kwargs)
     # Normalize each coefficient to 0 mean and 1 variance
     if normalize:
