@@ -16,6 +16,6 @@ def _get_random_wav():
     data_root = _get_unittest_data_dir()
     label_dirs = [d for d in os.scandir(data_root) if d.is_dir()]
     label_dir = choice(label_dirs)
-    wavpaths = [f.path for f in os.scandir(os.path.join(label_dir, "wav")) if f.is_file() and get_audio_type(f.path) == "wav"]
+    wavpaths = [f.path for f in os.scandir(os.path.join(label_dir.path, "wav")) if f.is_file() and get_audio_type(f.path) == "wav"]
     wavpath = choice(wavpaths)
     return label_dir.name, wavpath, read_wavfile(wavpath)
