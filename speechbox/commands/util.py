@@ -4,15 +4,13 @@ import pprint
 import sys
 import time
 
-from speechbox.commands import ExpandAbspath
-from speechbox.commands.base import Command
+from speechbox.commands.base import Command, ExpandAbspath
 import speechbox.system as system
 import speechbox.visualization as visualization
 
 
-class System(Command):
+class Util(Command):
     """CLI for IO functions in speechbox.system."""
-
     tasks = (
         "yaml_get",
         "get_unique_duration",
@@ -24,26 +22,29 @@ class System(Command):
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("infile",
+        required = parser.add_argument_group("util arguments")
+        required.add_argument("infile",
             type=str,
             nargs="*",
-            help="Path to one or more input files to apply the command for")
-        parser.add_argument("--yaml-get",
+            help="Paths to one or more input files to apply the command for")
+        optional = parser.add_argument_group("util options")
+        optional.add_argument("--yaml-get",
             type=str,
+            metavar="KEY",
             help="Parse yaml files and dump contents of given yaml key to stdout.")
-        parser.add_argument("--get-unique-duration",
+        optional.add_argument("--get-unique-duration",
             action="store_true",
             help="Group all files by MD5 sums and compute total duration for all unique, valid audio files. Files that cannot be opened as audio files are ignored. If there are duplicate files by MD5 sum, the first file is chosen in the same order as it was given as argument to this command.")
-        parser.add_argument("--plot-melspectrogram",
+        optional.add_argument("--plot-melspectrogram",
             action="store_true",
             help="Plot mel spectrograms for all given files. Blocks control until all figures are manually closed.")
-        parser.add_argument("--watch",
+        optional.add_argument("--watch",
             action="store_true")
-        parser.add_argument("--transform",
+        optional.add_argument("--transform",
             type=str,
             action=ExpandAbspath,
             help="Apply transformations from this experiment config file  as they would be performed before feature extraction. Then play audio and visualize spectrograms.")
-        parser.add_argument("--assert-disjoint",
+        optional.add_argument("--assert-disjoint",
             action="store_true",
             help="Read list of paths from each infile, reduce paths to basenames, and assert that each list of basenames is disjoint with the basename lists from other files")
         return parser
@@ -150,3 +151,8 @@ class System(Command):
 
     def run(self):
         return self.run_tasks()
+
+
+command_tree = [
+    (Util, []),
+]

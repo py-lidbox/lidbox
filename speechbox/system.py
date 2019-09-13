@@ -180,10 +180,18 @@ def write_features(sequence_features, target_path):
     return target_path
 
 def count_all_features(features_file):
-    import tensorflow as tf
-    with tf.device("/CPU:0"):
+    from tensorflow import device
+    with device("/CPU:0"):
         dataset, _ = load_features_as_dataset([features_file])
         return int(dataset.reduce(0, lambda count, _: count + 1))
+
+def count_all_features_parallel(labels, features_files, num_workers=None):
+    from multiprocessing import Pool
+    assert len(labels) == len(features_files)
+    if num_workers is None:
+        num_workers = len(features_files)
+    with Pool(num_workers) as pool:
+        return zip(labels, pool.map(count_all_features, features_files))
 
 def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
@@ -267,19 +275,16 @@ def remove_silence(wav, aggressiveness=0):
 
 def apply_sox_transformer(src_paths, dst_paths, transform_steps):
     t = sox.Transformer()
-    for config in transform_steps:
-        if "normalize" in config:
-            db = float(config["normalize"])
-            t = t.norm(db)
-        if "volume" in config:
-            amplitude = float(config["volume"])
-            t = t.vol(amplitude, gain_type="amplitude")
-        if "speed" in config:
-            factor = float(config["speed"])
-            t = t.speed(factor)
-        if "reverse" in config and config["reverse"]:
+    for transform, value in transform_steps:
+        if transform == "normalize":
+            t = t.norm(float(value))
+        elif transform == "volume":
+            t = t.vol(float(value), gain_type="amplitude")
+        elif transform == "speed":
+            t = t.speed(float(value))
+        elif transform == "reverse" and value:
             t = t.reverse()
-    # Try to apply transformation on every src_path, building output files into every dst_path
+    # Try to apply the transformation on every src_path, building output files into every dst_path
     for src, dst in zip(src_paths, dst_paths):
         if t.build(src, dst):
             yield src, dst

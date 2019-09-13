@@ -3,28 +3,20 @@ import os
 import pprint
 import sys
 
-from speechbox.commands.base import StatefulCommand
+from speechbox.commands.base import State, Command, StatefulCommand
 import speechbox.system as system
 import speechbox.preprocess.transformations as transformations
 
 
-class Preprocess(StatefulCommand):
+class Features(Command):
     """Feature extraction and feature analysis."""
+    pass
 
-    tasks = ("extract_features", "count_features")
 
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        parser.add_argument("--extract-features",
-            action="store_true",
-            help="Perform feature extraction on whole dataset.")
-        parser.add_argument("--count-features",
-            action="store_true",
-            help="Count the amount of extracted features in every datagroup.")
-        return parser
+class Extract(StatefulCommand):
+    requires_state = State.has_paths
 
-    def extract_features(self):
+    def extract(self):
         args = self.args
         if args.verbosity:
             print("Starting feature extraction")
@@ -36,7 +28,8 @@ class Preprocess(StatefulCommand):
             pprint.pprint(config)
             print()
         label_to_index = self.state["label_to_index"]
-        for datagroup_name, datagroup in self.state["data"].items():
+        for datagroup_name in config["datagroups"]:
+            datagroup = self.state["data"][datagroup_name]
             if args.verbosity:
                 print("Datagroup '{}' has {} audio files".format(datagroup_name, len(datagroup["paths"])))
             if "features" in datagroup:
@@ -65,7 +58,6 @@ class Preprocess(StatefulCommand):
                     utterance_offset_ms=config["utterance_offset_ms"],
                     apply_vad=config.get("apply_vad", False),
                     print_progress=config.get("print_progress", 0),
-                    resample_to=config.get("resample_to"),
                     slide_over_all=config.get("slide_over_all", True),
                 )
                 features = transformations.utterances_to_features(
@@ -80,7 +72,15 @@ class Preprocess(StatefulCommand):
                 if args.verbosity:
                     print("Wrote '{}' features to '{}'".format(datagroup_name, wrote_path))
 
-    def count_features(self):
+    def run(self):
+        super().run()
+        return self.extract()
+
+
+class Count(StatefulCommand):
+    requires_state = State.has_features
+
+    def count(self):
         args = self.args
         if args.verbosity:
             print("Counting all extracted features by datagroup and label")
@@ -90,15 +90,19 @@ class Preprocess(StatefulCommand):
             if "features" not in datagroup:
                 print("Error: No features extracted for datagroup '{}', cannot count features".format(datagroup_name), file=sys.stderr)
                 continue
-            num_features_by_label = {}
-            for label, features_file in datagroup["features"].items():
-                num_features_by_label[label] = system.count_all_features(features_file)
+            labels, feature_files = list(zip(*datagroup["features"].items()))
+            num_features_by_label = dict(system.count_all_features_parallel(labels, feature_files))
             datagroup["num_features_by_label"] = num_features_by_label
-            print("Datagroup '{}' features count by label:".format(datagroup_name))
-            for label, num_features in num_features_by_label.items():
-                print("  {}: {}".format(label, num_features))
-
+            if args.verbosity:
+                print("Datagroup '{}' features count by label:".format(datagroup_name))
+                for label, num_features in num_features_by_label.items():
+                    print("  {}: {}".format(label, num_features))
 
     def run(self):
         super().run()
-        return self.run_tasks()
+        return self.count()
+
+
+command_tree = [
+    (Features, [Extract, Count]),
+]

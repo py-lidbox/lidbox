@@ -5,8 +5,7 @@ import pprint
 import shutil
 import sys
 
-from speechbox.commands import ExpandAbspath
-from speechbox.commands.base import StatefulCommand
+from speechbox.commands.base import Command, State, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.models as models
 import speechbox.preprocess.transformations as transformations
@@ -14,75 +13,27 @@ import speechbox.system as system
 import speechbox.visualization as visualization
 
 
-class Model(StatefulCommand):
-    """Model training and evaluation."""
-
-    tasks = ("train", "evaluate_test_set", "predict", "plot_progress", "count_model_params")
+class Train(StatefulCommand):
+    requires_state = State.has_features
 
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("--no-save-model",
-            action="store_true",
-            help="Do not save model state, such as epoch checkpoints, into the cache directory.")
-        parser.add_argument("--model-id",
-            action="append",
-            help="Use this value as the model name instead of the one in the experiment yaml-file. Can be specified multiple times for the tasks that support it. If a task does not support multiple model ids, only the first one is used and rest are ignored.")
-        parser.add_argument("--train",
-            action="store_true",
-            help="Run model training using configuration from the experiment yaml.  Checkpoints are written at every epoch into the cache dir, unless --no-save-model was given.")
-        parser.add_argument("--imbalanced-labels",
+        optional = parser.add_argument_group("train options")
+        optional.add_argument("--imbalanced-labels",
             action="store_true",
             help="Apply weighting on imbalanced labels during training by using a pre-calculated feature distribution.")
-        parser.add_argument("--evaluate-test-set",
-            choices=("loss", "confusion-matrix"),
-            action="append",
-            help="Evaluate model on test set")
-        parser.add_argument("--group-by-speaker",
-            action="store_true",
-            help="Concatenate all audio files from the same speaker using the order they appear in the list of test set paths.")
-        parser.add_argument("--confusion-matrix-path",
-            type=str,
-            action=ExpandAbspath,
-            help="Alternative, full path of the confusion matrix output.")
-        parser.add_argument("--predict",
-            type=str,
-            action=ExpandAbspath,
-            help="Predict labels for all audio files listed in the given file, one per line.")
-        parser.add_argument("--reset-tensorboard",
+        optional.add_argument("--reset-tensorboard",
             action="store_true",
             help="Delete tensorboard directory from previous runs for this model.")
-        parser.add_argument("--count-model-params",
-            action="store_true",
-            help="Count total amount of parameters in all layers of given models.")
-        parser.add_argument("--reset-checkpoints",
+        optional.add_argument("--reset-checkpoints",
             action="store_true",
             help="Delete checkpoints from previous runs for this model.")
-        parser.add_argument("--eval-result-dir",
-            type=str,
-            action=ExpandAbspath,
-            help="Write evaluation results into this directory. If --confusion-matrix-path is also given, that path takes precedence over this directory.")
-        parser.add_argument("--plot-progress",
-            type=str,
-            help="Load metrics from the most recent tensorboard event file and write progress plots with this figure name (not path).")
-        parser.add_argument("--plot-title", type=str)
         return parser
 
-    #FIXME
-    def count_model_params(self):
-        training_config = self.experiment_config["experiment"]
-        for model_id in self.model_ids:
-            model = self.create_model(model_id, training_config)
-            _, features_meta = system.load_features_as_dataset(
-                list(self.state["data"]["training"]["features"].values()),
-                training_config
-            )
-            model.prepare(features_meta, training_config)
-            print(model_id, model.count_params())
-
-    def create_model(self, model_id, config):
+    def create_model(self, config):
         args = self.args
-        model_cache_dir = os.path.join(args.cache_dir, model_id)
+        model_cache_dir = os.path.join(self.cache_dir, self.model_id)
         tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "log")
         if args.reset_tensorboard and os.path.isdir(tensorboard_log_dir):
             if args.verbosity:
@@ -119,54 +70,23 @@ class Model(StatefulCommand):
         }
         checkpoints_config = dict(default_checkpoints_config, **config.get("checkpoints", {}))
         callbacks_kwargs = {
-            "checkpoints": None if args.no_save_model else checkpoints_config,
+            "checkpoints": checkpoints_config,
             "early_stopping": config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
-        if not args.train:
+        # if not args.train:
+        if False:
             if args.verbosity > 1:
                 print("Not training, will not use keras callbacks")
             callbacks_kwargs = {"device_str": config.get("tf_device_str")}
         else:
             self.make_named_dir(tensorboard_dir, "tensorboard")
-            if not args.no_save_model:
-                self.make_named_dir(checkpoint_dir, "checkpoints")
+            self.make_named_dir(checkpoint_dir, "checkpoints")
         if args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
             print()
-        return models.KerasWrapper(model_id, config["model_definition"], **callbacks_kwargs)
-
-    def get_eval_config(self):
-        eval_config = self.experiment_config.copy()
-        if "evaluation"in eval_config:
-            if self.args.verbosity:
-                print("Additional parameters specified in the config to be used during evaluation, they will take precedence over existing config values used during training")
-            for key, overrides in eval_config.pop("evaluation").items():
-                eval_config[key].update(overrides)
-        if "augmentation" in eval_config["features"]:
-            del eval_config["features"]["augmentation"]
-        if "repeat" in eval_config["experiment"]:
-            del eval_config["experiment"]["repeat"]
-        # Exhaust whole test set
-        eval_config["experiment"]["validation_steps"] = None
-        return eval_config
-
-    @staticmethod
-    def get_loss_as_float(checkpoint_filename):
-        return float(checkpoint_filename.split("loss")[-1].split(".hdf5")[0])
-
-    def get_best_weights_checkpoint(self):
-        args = self.args
-        checkpoints_dir = os.path.join(args.cache_dir, self.model_ids[0], "checkpoints")
-        all_checkpoints = os.listdir(checkpoints_dir)
-        if not all_checkpoints:
-            print("Error: Cannot load model weights since there are no keras checkpoints in '{}'".format(checkpoints_dir), file=sys.stderr)
-            return 1
-        best_checkpoint = os.path.join(checkpoints_dir, min(all_checkpoints, key=self.get_loss_as_float))
-        if args.verbosity:
-            print("Loading weights from keras checkpoint '{}'".format(best_checkpoint))
-        return best_checkpoint
+        return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
     def train(self):
         args = self.args
@@ -196,8 +116,7 @@ class Model(StatefulCommand):
             print("\nModel config is:")
             pprint.pprint(training_config)
             print()
-        model_id = self.model_ids[0]
-        model = self.create_model(model_id, training_config)
+        model = self.create_model(training_config)
         # Load training set consisting of pre-extracted features
         training_set, features_meta = system.load_features_as_dataset(
             # List of all .tfrecord files containing all training set samples
@@ -220,6 +139,133 @@ class Model(StatefulCommand):
         model.fit(training_set, validation_set, training_config)
         if args.verbosity:
             print("\nTraining finished\n")
+
+    def run(self):
+        super().run()
+        self.model_id = self.experiment_config["experiment"]["name"]
+        return self.train()
+
+    def exit(self):
+        args = self.args
+        if args.eval_result_dir:
+            self.make_named_dir(args.eval_result_dir, "evaluation results")
+        if "eval_result" in self.state:
+            results = self.state["eval_result"]
+            if "confusion_matrix" in results:
+                results.pop("_cm_fig").savefig(results["confusion_matrix"])
+                if args.verbosity:
+                    print("Wrote confusion matrix to '{}'".format(results["confusion_matrix"]))
+            if args.eval_result_dir:
+                self.make_named_dir(args.eval_result_dir, "evaluation results")
+                eval_result_path = os.path.join(args.eval_result_dir, "evaluation.json")
+                if args.verbosity:
+                    print("Writing evaluation results to '{}'".format(eval_result_path))
+                    if args.verbosity > 1:
+                        pprint.pprint(results)
+                system.append_json(results, eval_result_path)
+        super().exit()
+
+
+#TODO
+class Inspect(StatefulCommand):
+    """Analysis of trained models."""
+
+#TODO
+class Model(StatefulCommand):
+
+    # @classmethod
+    # def create_argparser(cls, subparsers):
+    #     parser = super().create_argparser(subparsers)
+    #     parser.add_argument("--no-save-model",
+    #         action="store_true",
+    #         help="Do not save model state, such as epoch checkpoints, into the cache directory.")
+    #     parser.add_argument("--model-id",
+    #         action="append",
+    #         help="Use this value as the model name instead of the one in the experiment yaml-file. Can be specified multiple times for the tasks that support it. If a task does not support multiple model ids, only the first one is used and rest are ignored.")
+    #     parser.add_argument("--train",
+    #         action="store_true",
+    #         help="Run model training using configuration from the experiment yaml.  Checkpoints are written at every epoch into the cache dir, unless --no-save-model was given.")
+    #     parser.add_argument("--imbalanced-labels",
+    #         action="store_true",
+    #         help="Apply weighting on imbalanced labels during training by using a pre-calculated feature distribution.")
+    #     parser.add_argument("--evaluate-test-set",
+    #         choices=("loss", "confusion-matrix"),
+    #         action="append",
+    #         help="Evaluate model on test set")
+    #     parser.add_argument("--group-by-speaker",
+    #         action="store_true",
+    #         help="Concatenate all audio files from the same speaker using the order they appear in the list of test set paths.")
+    #     parser.add_argument("--confusion-matrix-path",
+    #         type=str,
+    #         action=ExpandAbspath,
+    #         help="Alternative, full path of the confusion matrix output.")
+    #     parser.add_argument("--predict",
+    #         type=str,
+    #         action=ExpandAbspath,
+    #         help="Predict labels for all audio files listed in the given file, one per line.")
+    #     parser.add_argument("--reset-tensorboard",
+    #         action="store_true",
+    #         help="Delete tensorboard directory from previous runs for this model.")
+    #     parser.add_argument("--count-model-params",
+    #         action="store_true",
+    #         help="Count total amount of parameters in all layers of given models.")
+    #     parser.add_argument("--reset-checkpoints",
+    #         action="store_true",
+    #         help="Delete checkpoints from previous runs for this model.")
+    #     parser.add_argument("--eval-result-dir",
+    #         type=str,
+    #         action=ExpandAbspath,
+    #         help="Write evaluation results into this directory. If --confusion-matrix-path is also given, that path takes precedence over this directory.")
+    #     parser.add_argument("--plot-progress",
+    #         type=str,
+    #         help="Load metrics from the most recent tensorboard event file and write progress plots with this figure name (not path).")
+    #     parser.add_argument("--plot-title", type=str)
+    #     return parser
+
+    #FIXME
+    def count_model_params(self):
+        training_config = self.experiment_config["experiment"]
+        for model_id in self.model_ids:
+            model = self.create_model(model_id, training_config)
+            _, features_meta = system.load_features_as_dataset(
+                list(self.state["data"]["training"]["features"].values()),
+                training_config
+            )
+            model.prepare(features_meta, training_config)
+            print(model_id, model.count_params())
+
+
+    def get_eval_config(self):
+        eval_config = self.experiment_config.copy()
+        if "evaluation"in eval_config:
+            if self.args.verbosity:
+                print("Additional parameters specified in the config to be used during evaluation, they will take precedence over existing config values used during training")
+            for key, overrides in eval_config.pop("evaluation").items():
+                eval_config[key].update(overrides)
+        if "augmentation" in eval_config["features"]:
+            del eval_config["features"]["augmentation"]
+        if "repeat" in eval_config["experiment"]:
+            del eval_config["experiment"]["repeat"]
+        # Exhaust whole test set
+        eval_config["experiment"]["validation_steps"] = None
+        return eval_config
+
+    @staticmethod
+    def get_loss_as_float(checkpoint_filename):
+        return float(checkpoint_filename.split("loss")[-1].split(".hdf5")[0])
+
+    def get_best_weights_checkpoint(self):
+        args = self.args
+        checkpoints_dir = os.path.join(self.cache_dir, self.model_ids[0], "checkpoints")
+        all_checkpoints = os.listdir(checkpoints_dir)
+        if not all_checkpoints:
+            print("Error: Cannot load model weights since there are no keras checkpoints in '{}'".format(checkpoints_dir), file=sys.stderr)
+            return 1
+        best_checkpoint = os.path.join(checkpoints_dir, min(all_checkpoints, key=self.get_loss_as_float))
+        if args.verbosity:
+            print("Loading weights from keras checkpoint '{}'".format(best_checkpoint))
+        return best_checkpoint
+
 
     #FIXME a horrible mess
     def evaluate_test_set(self):
@@ -253,7 +299,7 @@ class Model(StatefulCommand):
         if args.group_by_speaker:
             if args.verbosity:
                 print("Grouping test set paths by speaker for concatenation")
-            output_dir = os.path.join(args.cache_dir, "test", "wav")
+            output_dir = os.path.join(self.cache_dir, "test", "wav")
             self.make_named_dir(output_dir)
             # Keep labels paired up with the paths
             test_set = zip(test_set_paths, test_set_labels)
@@ -325,7 +371,7 @@ class Model(StatefulCommand):
                     cm_figure_path = args.confusion_matrix_path
                 else:
                     figure_name = "confusion-matrix_test-set_model-{}.svg".format(os.path.basename(best_checkpoint))
-                    cm_figure_path = os.path.join(args.eval_result_dir or args.cache_dir, figure_name)
+                    cm_figure_path = os.path.join(args.eval_result_dir or self.cache_dir, figure_name)
                 if "eval_result" not in self.state:
                     self.state["eval_result"] = {}
                 self.state["eval_result"]["confusion_matrix"] = cm_figure_path
@@ -379,7 +425,7 @@ class Model(StatefulCommand):
         model_ids = sorted(self.model_ids, key=lambda k: (int(k.split("_")[1]), int(k.split("_")[3])))
         event_data = [
             {"model_id": model_id,
-             "logdir": os.path.join(args.cache_dir, model_id, "tensorboard", "log")}
+             "logdir": os.path.join(self.cache_dir, model_id, "tensorboard", "log")}
             for model_id in model_ids
         ]
         for data in event_data:
@@ -414,7 +460,7 @@ class Model(StatefulCommand):
             title=args.plot_title or args.plot_progress
         )
         figure_name = args.plot_progress + ".svg"
-        figure_path = os.path.join(args.eval_result_dir or args.cache_dir, figure_name)
+        figure_path = os.path.join(args.eval_result_dir or self.cache_dir, figure_name)
         fig.savefig(figure_path)
         if args.verbosity:
             print("Wrote metrics plot to '{}'".format(figure_path))
@@ -445,3 +491,8 @@ class Model(StatefulCommand):
                         pprint.pprint(results)
                 system.append_json(results, eval_result_path)
         super().exit()
+
+
+command_tree = [
+    (Model, [Train, Inspect]),
+]

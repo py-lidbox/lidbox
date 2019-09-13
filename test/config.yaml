@@ -1,6 +1,10 @@
+# Directory for experiment state and all generated output
+cache: ./test-cache
+
 # Dataset metadata
 dataset:
     key: common-voice
+    src: /m/data/speech/common-voice
     labels:
         - bre
         - est
@@ -8,23 +12,21 @@ dataset:
         - tur
 
 # How often to print progress, for operations that take a long time
-print_progress: 25
+print_progress: 1000
+
+# Augment the training set by creating new audio files from speed and volume transformations
+augmentation:
+    datagroups:
+        - training
+    cartesian_product:
+        volume: [0.25, 1.0, 2.0]
+        speed: [0.9, 1.0, 1.1]
 
 # Feature extraction
 features:
-    # Augment the training and validation sets by creating new audio files from speed and volume transformations
-    augmentation:
-        datagroups:
-            - training
-            - validation
-        # Use only augmented files for training and validation
-        ignore_src_files: True
-        # Create 9 different combinations of all pairs
-        cartesian_product:
-            volume: [0.25, 1.0, 2.0]
-            speed: [0.9, 1.0, 1.1]
-    # Before extracting features, resample the file to this freq regardless of the native rate
-    resample_to: 16000
+    datagroups:
+        - training
+        - validation
     # Try to remove silence from all files before starting feature extraction
     apply_vad: True
     # Slide a 2 second window over all audio files of each label to produce utterances
@@ -32,25 +34,29 @@ features:
     utterance_length_ms: 2000
     # Use 0.5 second offset when extracting utterances, i.e. every utterance will share 1.5 seconds with the previous and next utterances
     utterance_offset_ms: 500
+    # Do not concatenate files to form utterances
+    slide_over_all: False
     # Length of time-dependent input sequences for the LSTM layers
-    sequence_length: 16
-    # Extract 20 MFCCs using librosa
+    sequence_length: 32
+    # Use librosa to extract 40 MFCCs with a 512 frame window, using 128 frames offset
     extractors:
         - name: mfcc
           kwargs:
-              n_mfcc: 20
+              n_mfcc: 40
+              n_fft: 512
+              hop_length: 128
 
 # Training and model hyperparameters
 experiment:
     # For naming directories etc, has no inherent meaning
-    name: lstm_3_layer_512_cells
+    name: lstm_2_layer_512_cells
     # Which Keras model module to load from speechbox.models
     model_definition:
-        # 3-layer LSTM with 512, 256, and 128 cells (ordered from input to output)
+        # 2-layer LSTM with 512 and 256 cells
         name: lstm
         kwargs:
             num_cells: 512
-            num_layers: 3
+            num_layers: 2
             # Cut num_cells in half after each layer
             narrowing: True
     optimizer:
@@ -60,8 +66,8 @@ experiment:
     loss: categorical_crossentropy
     metrics:
         - accuracy
-    batch_size: 16
-    epochs: 20
+    batch_size: 8
+    epochs: 100
     # Repeat samples from each label indefinitely
     repeat: -1
     # How many batches per epoch for training and validation
@@ -69,12 +75,9 @@ experiment:
     validation_steps: 50
     # How many samples to draw from the dataset iterator into the shuffle buffer,
     # from which we then draw samples uniformly at random used to train the model
-    dataset_shuffle_size: 10000
+    dataset_shuffle_size: 50000
 
 evaluation:
-    features:
-        utterance_length_ms: 1000
-        utterance_offset_ms: 500
     experiment:
         tf_device_str: '/cpu:0'
         metrics:

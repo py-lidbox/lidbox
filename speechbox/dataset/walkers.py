@@ -18,7 +18,7 @@ class SpeechDatasetWalker:
     # Metadata for each label, should be defined in subclasses inheriting this class
     default_label_definitions = collections.OrderedDict()
 
-    def __init__(self, dataset_root=None, paths=None, labels=None, checksums=None, sample_frequency=None, enabled_labels=None):
+    def __init__(self, dataset_root=None, paths=None, labels=None, sample_frequency=None, enabled_labels=None):
         if enabled_labels is None:
             enabled_labels = []
         # Where to start an os.walk from (unless paths and labels explicitly given)
@@ -33,17 +33,15 @@ class SpeechDatasetWalker:
             self.label_definitions[label] = self.default_label_definitions[label].copy()
         for label, definition in self.label_definitions.items():
             definition["sample_dirs"] = [self.join_root(*paths) for paths in self.dataset_tree[label]]
-        if any(l is not None for l in [paths, labels, checksums]):
-            assert all(l is not None for l in [paths, labels, checksums])
+        if any(l is not None for l in [paths, labels]):
+            assert all(l is not None for l in [paths, labels])
             # Iterate over given paths instead of searching for all wavs from sample_dirs
             for label_def in self.label_definitions.values():
                 label_def["sample_dirs"] = []
                 label_def["sample_files"] = []
-                label_def["sample_file_checksums"] = []
             # Set all given wavpaths
-            for label, path, checksum in zip(labels, paths, checksums):
+            for label, path in zip(labels, paths):
                 self.label_definitions[label]["sample_files"].append(path)
-                self.label_definitions[label]["sample_file_checksums"].append(checksum)
 
     def join_root(self, *paths):
         return os.path.join(self.dataset_root, *paths)
@@ -62,7 +60,7 @@ class SpeechDatasetWalker:
 
     def count_files_per_speaker_by_label(self):
         c = {label: collections.Counter() for label in self.label_definitions}
-        for label, path, _ in iter(self):
+        for label, path in iter(self):
             speaker_id = self.parse_speaker_id(path)
             c[label][speaker_id] += 1
         return c
@@ -96,7 +94,7 @@ class SpeechDatasetWalker:
     # If there's some inefficient checks that should be run for every file when the corpus is traversed the first time, those checks belong in this function.
     def walk(self, check_duplicates=False, check_read=False, followlinks=True, verbosity=0):
         """
-        Walk over all files in the dataset and yield (label, filepath, md5sum) pairs.
+        Walk over all files in the dataset and yield (label, filepath) pairs.
         Reads the contents of all audio files in all directories but does not write anything.
         Only files ending with .wav, containing valid WAVE headers will be returned.
 
@@ -169,7 +167,7 @@ class SpeechDatasetWalker:
                         num_walked += 1
                         wavpath = self.join_root(parent, f)
                         if audiofile_ok(wavpath, label):
-                            yield label, wavpath, md5sum(wavpath)
+                            yield label, wavpath
             # Then yield all directly specified wavpaths
             sample_files = self.label_definitions[label].get("sample_files", [])
             if verbosity > 2 and sample_files:
@@ -177,7 +175,7 @@ class SpeechDatasetWalker:
             for wavpath in sample_files:
                 num_walked += 1
                 if audiofile_ok(wavpath, label):
-                    yield label, wavpath, md5sum(wavpath)
+                    yield label, wavpath
         if verbosity > 1:
             print("Walk finished by walker:", str(self))
         if verbosity:
@@ -514,7 +512,7 @@ class CommonVoiceWalker(SpeechDatasetWalker):
 
     #FIXME should be static, or at least classmethod
     def parse_speaker_id(self, path):
-        return self.file_to_speaker_id.get(os.path.basename(path).split(".wav")[0])
+        return self.file_to_speaker_id[os.path.basename(path).split(".wav")[0]]
 
 
 all_walkers = collections.OrderedDict({

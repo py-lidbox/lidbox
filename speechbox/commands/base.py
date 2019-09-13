@@ -1,57 +1,56 @@
+import argparse
 import itertools
 import os
 import pprint
 import sys
 
-from speechbox.commands import ExpandAbspath
 import speechbox.system as system
 
 
+class ExpandAbspath(argparse.Action):
+    """Simple argparse action to expand path arguments to full paths using os.path.abspath."""
+    def __call__(self, parser, namespace, path, *args, **kwargs):
+        setattr(namespace, self.dest, os.path.abspath(path))
+
+
+class State:
+    none = "no-state"
+    has_paths = "has-paths"
+    has_features = "has-features"
+    has_model = "has-model"
+
+
 class Command:
-    """Stateless, minimal command skeleton."""
+    """Stateless command base class."""
 
     tasks = tuple()
 
     @classmethod
     def create_argparser(cls, subparsers):
-        parser = subparsers.add_parser(cls.__name__.lower(), description=cls.__doc__)
-        parser.add_argument("--verbosity", "-v",
+        parser = subparsers.add_parser(
+            cls.__name__.lower(),
+            description=cls.__doc__,
+            add_help=False
+        )
+        group = parser.add_argument_group("global options", description="Optional, global arguments for all subcommands and tasks.")
+        group.add_argument("--help", "-h",
+            action="help",
+            help="Show this message and exit.")
+        group.add_argument("--verbosity", "-v",
             action="count",
             default=0,
-            help="Increases verbosity of output for each -v supplied (up to 4).")
-        parser.add_argument("--debug",
+            help="Increases output verbosity for each -v supplied up to 4 (-vvvv).")
+        group.add_argument("--debug",
             action="store_true",
             default=False,
             help="Set maximum verbosity and enable extra debugging information regardless of performance impacts.")
-        parser.add_argument("--run-cProfile",
+        group.add_argument("--run-cProfile",
             action="store_true",
-            help="Do profiling on all commands and write results into a file in the working directory.")
+            help="Do profiling on all Python function calls and write results into a file in the working directory.")
         return parser
 
     def __init__(self, args):
         self.args = args
-
-    def args_src_ok(self):
-        args = self.args
-        ok = True
-        if not args.src:
-            print("Error: Specify dataset source directory", file=sys.stderr)
-            ok = False
-        elif not os.path.isdir(args.src):
-            print("Error: Source directory '{}' does not exist.".format(args.src), file=sys.stderr)
-            ok = False
-        return ok
-
-    def args_dst_ok(self):
-        args = self.args
-        ok = True
-        if not args.dst:
-            #TODO self.error that prints usage
-            print("Error: Specify dataset destination directory with", file=sys.stderr)
-            ok = False
-        else:
-            self.make_named_dir(args.dst, "destination")
-        return ok
 
     def make_named_dir(self, path, name=None):
         if not os.path.isdir(path):
@@ -85,127 +84,67 @@ class StatefulCommand(Command):
     """Base command with state that can be loaded and saved between runs."""
 
     tasks = tuple()
-    valid_datagroup_keys = ("paths", "labels", "checksums")
+    requires_state = State.none
 
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        parser.add_argument("cache_dir",
+        required_args = parser.add_argument_group("state definition", description="Required arguments for defining state updates.")
+        required_args.add_argument("experiment_config",
             type=str,
             action=ExpandAbspath,
-            help="Speechbox cache for storing intermediate output such as extracted features.")
-        parser.add_argument("experiment_config",
-            type=str,
-            action=ExpandAbspath,
-            help="Path to a yaml-file containing the experiment configuration, e.g. hyperparameters, feature extractors etc.")
-        parser.add_argument("--src",
-            type=str,
-            action=ExpandAbspath,
-            help="Source directory, depends on context.")
-        parser.add_argument("--dst",
-            type=str,
-            action=ExpandAbspath,
-            help="Target directory, depends on context.")
-        parser.add_argument("--load-state",
-            action="store_true",
-            help="Load command state from the cache directory.")
-        parser.add_argument("--save-state",
+            help="Path to a yaml-file containing the experiment configuration, e.g. path to the cache directory, feature extractors, model hyperparameters etc.")
+        suboptions = parser.add_argument_group("state interaction")
+        suboptions.add_argument("--save-state",
             action="store_true",
             help="Save command state to the cache directory.")
         return parser
 
     def __init__(self, args):
-        self.args = args
+        super().__init__(args)
         self.dataset_id = None
+        self.cache_dir = None
         self.experiment_config = {}
         self.state = {}
 
-    def args_src_ok(self):
-        args = self.args
-        ok = True
-        if not args.src:
-            print("Error: Specify dataset source directory with --src.", file=sys.stderr)
-            ok = False
-        elif not os.path.isdir(args.src):
-            print("Error: Source directory '{}' does not exist.".format(args.src), file=sys.stderr)
-            ok = False
-        return ok
-
-    def args_dst_ok(self):
-        args = self.args
-        ok = True
-        if not args.dst:
-            print("Error: Specify dataset destination directory with --dst.", file=sys.stderr)
-            ok = False
-        else:
-            self.make_named_dir(args.dst, "destination")
-        return ok
-
     def state_data_ok(self):
         ok = True
-        if not self.has_state() or "data" not in self.state:
+        if "data" not in self.state:
             error_msg = (
                 "Error: self.state does not have a 'data' key containing filepaths and labels."
-                " Either load an existing dataset definition from the cache with '--load-state' or load a dataset from disk by using a dataset walker."
                 "\nSee e.g. 'speechbox dataset --help'."
             )
             print(error_msg, file=sys.stderr)
             ok = False
         return ok
 
-    def has_state(self):
+    def state_ok(self):
         ok = True
-        if not self.state:
-            print("Error: No current state loaded, you need to use '--load-state' to load existing state from some cache directory.", file=sys.stderr)
+        if self.state["state"] != self.requires_state:
+            print("Error: command '{}' has incorrect state '{}' when '{}' was required".format(self), self.state["state"], self.requires_state, file=sys.stderr)
             ok = False
-        return ok
-
-    def split_is_valid(self, original, split):
-        """
-        Check that all values from 'original' exist in 'split' and all values in 'split' are from 'original'.
-        """
-        ok = True
-        train, val, test = split["training"], split["validation"], split["test"]
-        for key in self.valid_datagroup_keys:
-            val_original = set(original[key])
-            val_splitted = set(train[key]) | set(val[key]) | set(test[key])
-            if val_original != val_splitted:
-                ok = False
-                error_msg = "Error: key '{}' has an invalid split, some information was probably lost during the split.".format(key)
-                error_msg += "\nValues in the original data but not in the split:\n"
-                error_msg += ' '.join(str(o) for o in val_original - val_splitted)
-                error_msg += "\nValues in the split but not in the original data:\n"
-                error_msg += ' '.join(str(s) for s in val_splitted - val_original)
-                print(error_msg, file=sys.stderr)
         return ok
 
     def load_state(self):
         args = self.args
-        state_path = os.path.join(args.cache_dir, "speechbox_state.json.gz")
+        state_path = os.path.join(self.cache_dir, "speechbox_state.json.gz")
         if args.verbosity:
             print("Loading state from '{}'".format(state_path))
         self.state = system.load_gzip_json(state_path)
 
     def save_state(self):
         args = self.args
-        self.make_named_dir(args.cache_dir, "cache")
-        state_path = os.path.join(args.cache_dir, "speechbox_state.json.gz")
+        self.make_named_dir(self.cache_dir, "cache")
+        state_path = os.path.join(self.cache_dir, "speechbox_state.json.gz")
         if args.verbosity:
             print("Saving state to '{}'".format(state_path))
         system.dump_gzip_json(self.state, state_path)
-
-    def merge_datagroups_from_state(self):
-        data = self.state["data"]
-        return {
-            key: list(itertools.chain(*(datagroup[key] for datagroup in data.values())))
-            for key in self.valid_datagroup_keys
-        }
 
     def run(self):
         super().run()
         args = self.args
         if args.verbosity > 1:
-            print("Running tool '{}' with arguments:".format(self.__class__.__name__.lower()))
+            print("Running subcommand '{}' with arguments:".format(self.__class__.__name__.lower()))
             pprint.pprint(vars(args))
             print()
         if args.verbosity:
@@ -215,8 +154,11 @@ class StatefulCommand(Command):
             print("Experiment config is:")
             pprint.pprint(self.experiment_config)
             print()
+        self.cache_dir = os.path.abspath(self.experiment_config["cache"])
+        if args.verbosity > 1:
+            print("Cache dir is '{}'".format(self.cache_dir))
         self.dataset_id = self.experiment_config["dataset"]["key"]
-        if args.load_state:
+        if self.requires_state != State.none:
             self.load_state()
         if args.verbosity > 1:
             print("Running with initial state:")

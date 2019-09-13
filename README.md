@@ -1,8 +1,8 @@
 # speechbox
 
-Command line toolbox for managing speech data classification experiments.
+Command line toolbox for managing the state of speech data classification experiments.
 
-The slightly more sane alternative to a legacy shell script spaghetti of hard-coded paths.
+Currently a terrible mess.
 
 ## Installing
 

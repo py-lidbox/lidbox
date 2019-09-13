@@ -2,13 +2,10 @@
 set -e
 cd "$(dirname "$0")"
 
-common_voice_src=/m/data/speech/common-voice
-num_files_to_parse=100
-
 cache_dir=./test-cache
-experiment_config=./experiment.test.yaml
+experiment_config=./config.yaml
 parsed_common_voice_dir=./acoustic_data
-verbosity='-vv'
+verbosity='-vvv'
 
 function check_prerequisities {
 	error=0
@@ -16,101 +13,76 @@ function check_prerequisities {
 		echo "Command 'speechbox' not found, did you install the Python package?"
 		error=1
 	fi
-	if [ ! -d "$common_voice_src" ]; then
-		echo "Directory '$common_voice_src' does not exist."
-		echo "It should contain directories named by the ISO 639-3 identifier matching the language of each extracted Common Voice dataset."
+	if [ ! -d "$parsed_common_voice_dir" ]; then
+		echo "Directory '$parsed_common_voice_dir' does not exist."
+		echo "Run the prepare.bash script first."
 		error=1
 	fi
 	if [ $error -ne 0 ]; then
 		exit $error
 	fi
 }
-
 check_prerequisities
 
-# Enable line buffering to flush all output as soon it becomes available
-if [ -z $PYTHONUNBUFFERED ]; then
-	export PYTHONUNBUFFERED=1
-fi
-
-if [ ! -d "$parsed_common_voice_dir" ]; then
-	printf "'${parsed_common_voice_dir}' does not exist, parsing all downloaded Common Voice dataset mp3 files\n"
-	enabled_labels=$(speechbox system --yaml-get dataset.labels "$experiment_config")
-	for label in $enabled_labels; do
-		src="${common_voice_src}/${label}"
-		dst="${parsed_common_voice_dir}/${label}/wav"
-		printf "Parsing from '$src' to '$dst'\n"
-		if [ -z "$(find "$src" -type f -name '*.mp3')" ]; then
-			printf "Error, '$src' does not contain any mp3 files\n"
-			continue
-		fi
-		speechbox parser --parse common-voice --limit $num_files_to_parse $verbosity "$src" "$dst"
-		cp --verbose "${src}/validated.tsv" "${dst}/.."
-	done
-else
-	printf "'${parsed_common_voice_dir}' exists, assuming all required Common Voice datasets have been parsed into the directory.\n"
-fi
-
 printf "\nReading all audio files from speech corpus in ${parsed_common_voice_dir}\n"
-speechbox dataset $cache_dir $experiment_config \
+speechbox dataset gather \
+	$experiment_config \
 	$verbosity \
-	--src $parsed_common_voice_dir \
-	--walk \
+	--walk-dir $parsed_common_voice_dir \
 	--check \
 	--save-state
 
-printf "\nCreating random training-test split by speaker ID\n"
-speechbox dataset $cache_dir $experiment_config \
+printf "\nInspecting extracted paths\n"
+speechbox dataset inspect \
+	$experiment_config \
 	$verbosity \
-	--load-state \
-	--split by-speaker \
-	--check-split by-speaker \
+	--dump-datagroup all
+
+printf "\nCreating random training-test split by speaker ID\n"
+speechbox dataset split \
+	$experiment_config \
+	by-speaker \
+	$verbosity \
+	--random \
 	--save-state
+
+printf "\nChecking split is disjoint\n"
+speechbox dataset split \
+	$experiment_config \
+	by-speaker \
+	$verbosity \
+	--check
 
 printf "\nComputing total duration of dataset audio files before augmentation\n"
-speechbox dataset $cache_dir $experiment_config \
+speechbox dataset inspect \
+	$experiment_config \
 	$verbosity \
-	--load-state \
 	--get-audio-durations
 
-printf "\nAugmenting dataset\n"
-speechbox dataset $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--augment \
-	--save-state
+# printf "\nAugmenting dataset\n"
+# speechbox dataset augment \
+# 	$experiment_config \
+# 	$verbosity \
+# 	--save-state
 
-printf "\nComputing total duration of dataset audio files after augmentation\n"
-speechbox dataset $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--get-audio-durations
+# printf "\nComputing total duration of dataset audio files after augmentation\n"
+# speechbox dataset inspect \
+# 	$experiment_config \
+# 	$verbosity \
+# 	--get-audio-durations
 
 printf "\nExtracting features\n"
-speechbox preprocess $cache_dir $experiment_config \
+speechbox features extract \
+	$experiment_config \
 	$verbosity \
-	--load-state \
-	--extract-features \
 	--save-state
 
 printf "\nCounting total amount of features\n"
-speechbox preprocess $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--count-features \
-	--save-state
+speechbox features count \
+	$experiment_config \
+	$verbosity
 
 printf "\nTraining simple LSTM model\n"
-speechbox model $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--train \
-	--imbalanced-labels
-
-printf "\nEvaluating model\n"
-speechbox model $cache_dir $experiment_config \
-	$verbosity \
-	--load-state \
-	--evaluate-test-set loss \
-	--evaluate-test-set confusion-matrix \
-	--eval-result-dir evaluation
+speechbox model train \
+	$experiment_config \
+	$verbosity

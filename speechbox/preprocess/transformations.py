@@ -28,7 +28,7 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
-def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, resample_to=None, slide_over_all=True):
+def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=True):
     """
     Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.
     If slide_over_all is given and False, every audio file will be concatenated and utterances yielded from a window that slides over every file, regardless of utterance boundaries.
@@ -36,7 +36,8 @@ def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_o
     # Working memory for incomplete utterances
     label_to_wav = {label: np.zeros((0,)) for label in set(labels)}
     for i, (label, wavpath) in enumerate(zip(labels, paths), start=1):
-        wav, rate = system.read_wavfile(wavpath, sr=resample_to)
+        # Read file using native rate
+        wav, rate = system.read_wavfile(wavpath)
         if apply_vad:
             wav, _ = system.remove_silence((wav, rate))
         # If we are merging, prepend partial utterance from end of previous file
@@ -106,104 +107,64 @@ def files_to_features(paths, labels, config, label_to_index):
             assert np.all(targets[0] == targets), "Expected label to stay unchanged within file '{}' but it had different labels".format(path)
             yield path, np.array(features), targets[0]
 
-def dataset_split_samples(dataset_walker, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
+def dataset_split_samples(samples, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """
-    Collect all wavpaths with the given dataset_walker and perform a random training-validation-test split.
-    Returns a 3-tuple of (paths, labels, checksums) pairs for each split.
+    Perform random training-validation-test split for samples.
     """
-    all_labels, all_paths, all_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
     # training-test split from whole dataset
-    training_paths, test_paths, training_labels, test_labels, training_checksums, test_checksums = sklearn.model_selection.train_test_split(
-        all_paths,
-        all_labels,
-        all_checksums,
+    training_samples, test_samples = sklearn.model_selection.train_test_split(
+        samples,
         random_state=random_state,
         test_size=test_ratio
     )
     # training-validation split from training set
-    split = sklearn.model_selection.train_test_split(
-        training_paths,
-        training_labels,
-        training_checksums,
+    training_samples, validation_samples = sklearn.model_selection.train_test_split(
+        training_samples,
         random_state=random_state,
         test_size=validation_ratio / (1.0 - test_ratio)
     )
     return {
-        "training": {
-            "paths": split[0],
-            "labels": split[2],
-            "checksums": split[4],
-        },
-        "validation": {
-            "paths": split[1],
-            "labels": split[3],
-            "checksums": split[5],
-        },
-        "test": {
-            "paths": test_paths,
-            "labels": test_labels,
-            "checksums": test_checksums,
-        }
+        "training": training_samples,
+        "validation": validation_samples,
+        "test": test_samples,
     }
 
-def dataset_split_samples_by_speaker(dataset_walker, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
+def dataset_split_samples_by_speaker(samples, parse_speaker_id, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """
-    Same as dataset_split_samples, but the training-set split will be disjoint by speaker ID.
+    Same as dataset_split_samples, but the split will be disjoint by speaker ID.
     In this case, test_ratio is the ratio of unique speakers in the test set to unique speakers in the training set (and similarily for the validation_ratio).
     The amount of samples per speaker should be approximately equal for all speakers to avoid inbalanced amount of samples in the resulting split.
     """
-    training_speakers = {}
-    test_speakers = {}
-    for label, speaker_ids in dataset_walker.speaker_ids_by_label().items():
-        train_split, test_split = sklearn.model_selection.train_test_split(
-            speaker_ids,
-            random_state=random_state,
-            test_size=test_ratio
-        )
-        training_speakers[label] = train_split
-        test_speakers[label] = test_split
-    # Set dataset_walker to return only files by training-set speaker IDs
-    dataset_walker.set_speaker_filter(training_speakers)
-    training_labels, training_paths, training_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
-    # Perform training-validation split by sample, i.e. one speaker may or may not have samples in both sets
-    split = sklearn.model_selection.train_test_split(
-        training_paths,
-        training_labels,
-        training_checksums,
+    speakers = list(set(parse_speaker_id(sample[0]) for sample in samples))
+    training_speakers, test_speakers = sklearn.model_selection.train_test_split(
+        speakers,
+        random_state=random_state,
+        test_size=test_ratio
+    )
+    training_speakers, validation_speakers = sklearn.model_selection.train_test_split(
+        training_speakers,
         random_state=random_state,
         test_size=validation_ratio / (1.0 - test_ratio)
     )
-    # Set dataset_walker to return only files by test-set speaker IDs
-    dataset_walker.set_speaker_filter(test_speakers)
-    test_labels, test_paths, test_checksums = tuple(zip(*dataset_walker.walk(verbosity=verbosity)))
     return {
-        "training": {
-            "paths": split[0],
-            "labels": split[2],
-            "checksums": split[4],
-        },
-        "validation": {
-            "paths": split[1],
-            "labels": split[3],
-            "checksums": split[5],
-        },
-        "test": {
-            "paths": test_paths,
-            "labels": test_labels,
-            "checksums": test_checksums,
-        }
+        key: [sample for sample in samples if parse_speaker_id(sample[0]) in set(split_speakers)]
+        for key, split_speakers in (
+            ("training", training_speakers),
+            ("validation", validation_speakers),
+            ("test", test_speakers),
+        )
     }
 
 def dataset_split_parse_predefined(dataset_walker, verbosity=0):
+    raise NotImplementedError("rewrite todo")
     assert hasattr(dataset_walker, "datagroup_patterns"), "The given dataset walker, '{}', does not seem to support parsing predefined datagroup splits".format(repr(dataset_walker))
     expected_datagroups = tuple(key for key, _ in dataset_walker.datagroup_patterns)
     split = {datagroup_key: collections.defaultdict(list) for datagroup_key in expected_datagroups}
-    for label, wavpath, md5sum in dataset_walker.walk(verbosity=verbosity):
+    for label, wavpath in dataset_walker.walk(verbosity=verbosity):
         datagroup_key = dataset_walker.parse_datagroup(wavpath)
         if datagroup_key is None:
             error_msg = "dataset walker '{}' was unable to parse datagroup key for path '{}'".format(repr(dataset_walker), wavpath)
             assert False, error_msg
         split[datagroup_key]["labels"].append(label)
         split[datagroup_key]["paths"].append(wavpath)
-        split[datagroup_key]["checksums"].append(md5sum)
     return split

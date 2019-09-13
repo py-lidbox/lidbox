@@ -4,18 +4,22 @@ Speech dataset parsers and cleaning tools.
 import collections
 import csv
 import os
+import sys
 
 import sox
 
 
 class DatasetParser:
     """Base parser that can transform wavfiles in some directory."""
-    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None, fail_early=False):
+    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None, fail_early=False, min_duration_ms=None):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.output_count_limit = output_count_limit
         self.resampling_freq = resampling_freq
         self.fail_early = fail_early
+        self.min_duration = min_duration_ms
+        if self.min_duration is not None:
+            self.min_duration *= 1e-3
 
     def iter_wavfiles_at_root(self):
         """Yield all wavfiles at self.dataset_root."""
@@ -47,7 +51,7 @@ class DatasetParser:
             yield src_path, self.build(t, src_path, dst_path)
 
     def __repr__(self):
-        return "<{}: src='{}' dst='{}'>".format(self.__class__.__name__, self.dataset_root, self.output_dir)
+        return "{}(dataset_root='{}', output_dir='{}')".format(self.__class__.__name__, self.dataset_root, self.output_dir)
 
 
 class CommonVoiceParser(DatasetParser):
@@ -71,9 +75,12 @@ class CommonVoiceParser(DatasetParser):
             t = t.rate(self.resampling_freq)
         for sample in samples:
             src_path = os.path.join(self.dataset_root, "clips", sample["path"])
+            if self.min_duration and sox.file_info.duration(src_path) < self.min_duration:
+                print("Warning: Skipping '{}' because it is too short".format(src_path), file=sys.stderr)
+                continue
             dst_path = os.path.join(output_dir, sample["path"].split(".mp3")[0] + ".wav")
             if os.path.exists(dst_path):
-                print("Warning: Skipping '{}' because it already exists".format(dst_path))
+                print("Warning: Skipping '{}' because it already exists".format(dst_path), file=sys.stderr)
                 continue
             yield src_path, self.build(t, src_path, dst_path)
 
