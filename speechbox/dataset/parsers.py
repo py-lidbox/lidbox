@@ -11,10 +11,11 @@ import sox
 
 class DatasetParser:
     """Base parser that can transform wavfiles in some directory."""
-    def __init__(self, dataset_root, output_dir, output_count_limit=None, resampling_freq=None, fail_early=False, min_duration_ms=None):
+    def __init__(self, dataset_root, output_dir, output_count_limit=None, output_duration_limit=None, resampling_freq=None, fail_early=False, min_duration_ms=None):
         self.dataset_root = dataset_root
         self.output_dir = output_dir
         self.output_count_limit = output_count_limit
+        self.output_duration_limit = output_duration_limit
         self.resampling_freq = resampling_freq
         self.fail_early = fail_early
         self.min_duration = min_duration_ms
@@ -73,11 +74,17 @@ class CommonVoiceParser(DatasetParser):
                 .set_output_format(file_type="wav"))
         if self.resampling_freq:
             t = t.rate(self.resampling_freq)
+        total_duration = 0.0
         for sample in samples:
             src_path = os.path.join(self.dataset_root, "clips", sample["path"])
-            if self.min_duration and sox.file_info.duration(src_path) < self.min_duration:
-                print("Warning: Skipping '{}' because it is too short".format(src_path), file=sys.stderr)
+            duration = sox.file_info.duration(src_path)
+            if self.min_duration is not None and duration < self.min_duration:
+                print("Skipping '{}' because it is too short".format(src_path), file=sys.stderr)
                 continue
+            if self.output_duration_limit is not None and total_duration >= self.output_duration_limit:
+                print("Stopping parse, {:.3f} second limit reached at {:.3f} seconds".format(self.output_duration_limit, total_duration))
+                break
+            total_duration += duration
             dst_path = os.path.join(output_dir, sample["path"].split(".mp3")[0] + ".wav")
             if os.path.exists(dst_path):
                 print("Warning: Skipping '{}' because it already exists".format(dst_path), file=sys.stderr)

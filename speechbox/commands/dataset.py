@@ -550,6 +550,9 @@ class Parse(Command):
         optional.add_argument("--limit",
             type=int,
             help="Only parse this many audio files, starting from the files with the highest |num_upvotes - num_downvotes| value.")
+        optional.add_argument("--duration-limit-sec",
+            type=int,
+            help="Maximum total duration of all parsed files. I.e. stop parsing when this many seconds of audio have been parsed.")
         optional.add_argument("--fail-early",
             action="store_true",
             default=False,
@@ -567,10 +570,11 @@ class Parse(Command):
             "resampling_freq": args.resample_to,
             "min_duration_ms": args.min_duration_ms,
             "output_count_limit": args.limit,
+            "output_duration_limit": args.duration_limit_sec,
             "fail_early": args.fail_early,
         }
         parser = dataset.get_dataset_parser(args.dataset, parser_config)
-        if args.verbosity > 1:
+        if args.verbosity:
             print("Starting parse with parser", repr(parser))
         num_parsed = 0
         if not args.verbosity:

@@ -3,7 +3,8 @@ set -e
 cd "$(dirname "$0")"
 
 common_voice_src=
-num_files_to_parse=6000
+# 10 h
+num_seconds_to_parse=36000
 resampling_rate=16000
 min_duration_ms=2000
 
@@ -51,7 +52,7 @@ for label in $enabled_labels; do
 		$verbosity \
 		--resample-to $resampling_rate \
 		--min-duration-ms $min_duration_ms \
-		--limit $num_files_to_parse \
+		--duration-limit-sec $num_seconds_to_parse \
 		common-voice "$src" "$dst"
 	cp --verbose "${src}/validated.tsv" "${dst}/.."
 done
