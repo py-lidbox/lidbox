@@ -6,10 +6,10 @@ import itertools
 import os
 
 import speechbox
-import speechbox.commands.dataset as dataset
-import speechbox.commands.features as features
-import speechbox.commands.util as util
-import speechbox.commands.model as model
+from . import dataset
+from . import features
+from . import util
+from . import model
 
 
 def create_argparser():
@@ -32,7 +32,7 @@ def create_argparser():
         if not subcommands:
             group_argparser.set_defaults(cmd_class=command_group)
         else:
-            group_subparsers = group_argparser.add_subparsers(title="subcommands", required=True, dest="subcommand")
+            group_subparsers = group_argparser.add_subparsers(title="subcommands", dest="subcommand")
             for subcommand in subcommands:
                 subparser = subcommand.create_argparser(group_subparsers)
                 # Use the class cmd for initializing a runnable command object for this subcommand

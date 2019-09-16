@@ -171,7 +171,7 @@ class Inspect(StatefulCommand):
     """Analysis of trained models."""
 
 #TODO
-class Model(StatefulCommand):
+class Model(Command):
 
     # @classmethod
     # def create_argparser(cls, subparsers):
