@@ -4,11 +4,11 @@ cache: ./test-cache
 # Dataset metadata
 dataset:
     key: common-voice
-    src: /m/data/speech/common-voice
+    src: /m/data/common-voice
     labels:
-        - bre
         - est
         - mon
+        - nld
         - tur
 
 # How often to print progress, for operations that take a long time
