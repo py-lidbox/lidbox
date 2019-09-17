@@ -28,11 +28,11 @@ speechbox dataset gather \
 	--check \
 	--save-state
 
-echo "Inspecting extracted paths"
-speechbox dataset inspect \
-	$experiment_config \
-	$verbosity \
-	--dump-datagroup all
+# echo "Inspecting extracted paths"
+# speechbox dataset inspect \
+# 	$experiment_config \
+# 	$verbosity \
+# 	--dump-datagroup all
 
 echo "Creating random training-test split by speaker ID"
 speechbox dataset split \
@@ -40,6 +40,7 @@ speechbox dataset split \
 	by-speaker \
 	$verbosity \
 	--random \
+	--ratio 0.05 \
 	--save-state
 
 echo "Checking split is disjoint"

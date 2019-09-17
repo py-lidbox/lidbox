@@ -76,10 +76,16 @@ experiment:
     # How many samples to draw from the dataset iterator into the shuffle buffer,
     # from which we then draw samples uniformly at random used to train the model
     dataset_shuffle_size: 50000
+    # Save checkpoints every time we get the highest validation accuracy
+    checkpoints:
+        save_best_only: True
+        monitor: val_accuracy
+        format: "epoch{epoch:06d}__val_loss{val_loss:.12f}__val_accuracy{val_accuracy:.3f}.hdf5"
 
+#TODO
 evaluation:
+    print_progress: 500
     experiment:
-        tf_device_str: '/cpu:0'
         metrics:
             - accuracy
             - precision

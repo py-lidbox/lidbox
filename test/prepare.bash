@@ -31,10 +31,6 @@ if [ ! -d "$common_voice_src" ]; then
 	echo "It should contain directories named by the ISO 639-3 identifier matching the language of each extracted Common Voice dataset."
 	error=1
 fi
-if [ -d "$parsed_common_voice_dir" ]; then
-	echo "Error: '$parsed_common_voice_dir' already exists"
-	error=1
-fi
 if [ $error -ne 0 ]; then
 	exit $error
 fi
@@ -46,6 +42,10 @@ for label in $enabled_labels; do
 	dst="${parsed_common_voice_dir}/${label}/wav"
 	if [ -z "$(find "$src" -type f -name '*.mp3')" ]; then
 		echo "Error, '$src' does not contain any mp3 files"
+		continue
+	fi
+	if [ -d "$dst" ]; then
+		echo "Error: '$dst' already exists"
 		continue
 	fi
 	speechbox dataset parse \
