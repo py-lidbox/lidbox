@@ -6,7 +6,6 @@ import os
 import numpy as np
 import tensorflow as tf
 
-
 # Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
 def with_device(method):
     @functools.wraps(method)
@@ -17,6 +16,37 @@ def with_device(method):
         else:
             return method(self, *args, **kwargs)
     return wrapped
+
+def parse_checkpoint_value(tf_checkpoint_path, key):
+    return tf_checkpoint_path.split(key)[-1].split("__")[0].split(".hdf5")[0]
+
+def get_best_checkpoint(checkpoints, key="epoch"):
+    key_fn = lambda p: parse_checkpoint_value(p, key)
+    if key == "epoch":
+        # Greatest epoch value
+        return max(checkpoints, key=lambda p: int(key_fn(p)))
+    elif key == "val_loss":
+        # Smallest validation loss value
+        return min(checkpoints, key=lambda p: float(key_fn(p)))
+    elif key == "val_accuracy":
+        # Greatest validation accuracy value
+        return max(checkpoints, key=lambda p: float(key_fn(p)))
+
+def parse_metrics(metrics):
+    keras_metrics = []
+    for m in metrics:
+        metric = None
+        if m == "accuracy":
+            #FIXME why aren't Accuracy instances working?
+            # metric = tf.keras.metrics.Accuracy()
+            metric = m
+        elif m == "precision":
+            metric = tf.keras.metrics.Precision()
+        elif m == "recall":
+            metric = tf.keras.metrics.Recall()
+        assert metric is not None, "Invalid metric {}".format(m)
+        keras_metrics.append(metric)
+    return keras_metrics
 
 
 class KerasWrapper:
@@ -29,6 +59,7 @@ class KerasWrapper:
         self.model_id = model_id
         self.device_str = device_str
         self.model = None
+        self.initial_epoch = 0
         import_path = "speechbox.models." + model_definition["name"]
         self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition["kwargs"])
         self.callbacks = []
@@ -60,23 +91,6 @@ class KerasWrapper:
         dataset = dataset.enumerate().map(inspect_batches)
         return metrics_dir, dataset
 
-    @staticmethod
-    def parse_metrics(metrics):
-        keras_metrics = []
-        for m in metrics:
-            metric = None
-            if m == "accuracy":
-                #FIXME why aren't Accuracy instances working?
-                # metric = tf.keras.metrics.Accuracy()
-                metric = m
-            elif m == "precision":
-                metric = tf.keras.metrics.Precision()
-            elif m == "recall":
-                metric = tf.keras.metrics.Recall()
-            assert metric is not None, "Invalid metric {}".format(m)
-            keras_metrics.append(metric)
-        return keras_metrics
-
     @with_device
     def prepare(self, features_meta, training_config):
         input_shape = features_meta["sequence_length"], features_meta["num_features"]
@@ -87,53 +101,35 @@ class KerasWrapper:
         self.model.compile(
             loss=training_config["loss"],
             optimizer=optimizer,
-            metrics=self.parse_metrics(training_config["metrics"])
+            metrics=parse_metrics(training_config["metrics"])
         )
 
     @with_device
     def load_weights(self, path):
+        self.initial_epoch = int(parse_checkpoint_value(path, key="epoch"))
         self.model.load_weights(path)
 
     @with_device
     def fit(self, training_set, validation_set, model_config):
         self.model.fit(
             training_set,
-            validation_data=validation_set,
-            epochs=model_config["epochs"],
-            steps_per_epoch=model_config.get("steps_per_epoch"),
-            validation_steps=model_config.get("validation_steps"),
             callbacks=self.callbacks,
-            verbose=model_config.get("verbose", 2),
             class_weight=model_config.get("class_weight"),
+            epochs=model_config["epochs"],
+            initial_epoch=self.initial_epoch,
+            steps_per_epoch=model_config.get("steps_per_epoch"),
+            validation_data=validation_set,
+            validation_steps=model_config.get("validation_steps"),
+            verbose=model_config.get("verbose", 2),
         )
-
-    @with_device
-    def evaluate(self, test_set, verbose):
-        metrics = {}
-        for path, data in test_set.items():
-            metrics[path] = self.model.evaluate(
-                [data["utterances"]],
-                [data["target"]],
-                verbose=verbose
-            )
-        return metrics
 
     @with_device
     def predict(self, utterances):
         expected_num_labels = self.model.layers[-1].output_shape[-1]
-        predictions = np.zeros(expected_num_labels)
+        predictions = np.zeros((len(utterances), expected_num_labels))
         for i, sequences in enumerate(utterances):
-            print("predicting", sequences.shape)
-            predictions[i] = self.model.predict(sequences)
-        print("predictions", predictions.shape)
-        return predictions.mean(axis=0)
-
-    @with_device
-    def evaluate_confusion_matrix(self, utterances, real_labels):
-        predicted_labels = np.int8(self.predict(utterances).argmax(axis=1))
-        real_labels = np.int8(np.array(real_labels).argmax(axis=1))
-        print(predicted_labels, real_labels)
-        return tf.math.confusion_matrix(real_labels, predicted_labels).numpy()
+            predictions[i] = self.model.predict(sequences).mean(axis=0)
+        return predictions
 
     @with_device
     def count_params(self):

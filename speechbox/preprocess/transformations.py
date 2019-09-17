@@ -79,33 +79,35 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         for sequence in sequences:
             yield sequence, onehot
 
-def files_to_features(paths, labels, config, label_to_index):
+def utterances_to_features_no_labels(utterances, extractors, sequence_length):
+    assert len(extractors) > 0, "No extractors defined"
+    for utterance in utterances:
+        extractor = extractors[0]
+        feats = features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
+        yield from partition_into_sequences(feats, sequence_length)
+
+def files_to_features(paths, config):
     """
     Extract utterances from all audio files in the given iterator of paths, using parameters from the given experiment config.
     """
-    for path, label in zip(paths, labels):
+    for path in paths:
+        # One file into chunks, using dummy label None
         utterance_chunks = speech_dataset_to_utterances(
-            [label], [path],
+            [None], [path],
             utterance_length_ms=config["utterance_length_ms"],
             utterance_offset_ms=config["utterance_offset_ms"],
             apply_vad=config.get("apply_vad", False),
             print_progress=config.get("print_progress", 0),
-            resample_to=config.get("resample_to")
         )
-        iter_features = utterances_to_features(
+        # Drop dummy labels
+        utterance_chunks = (utterance for _, utterance in utterance_chunks)
+        # Extract features from utterance chunks and partition into model input sequences
+        sequences = utterances_to_features_no_labels(
             utterance_chunks,
-            label_to_index=label_to_index,
             extractors=config["extractors"],
             sequence_length=config["sequence_length"]
         )
-        features = []
-        targets = []
-        for feature, target in iter_features:
-            features.append(feature)
-            targets.append(target)
-        if features:
-            assert np.all(targets[0] == targets), "Expected label to stay unchanged within file '{}' but it had different labels".format(path)
-            yield path, np.array(features), targets[0]
+        yield np.array(list(sequences))
 
 def dataset_split_samples(samples, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """

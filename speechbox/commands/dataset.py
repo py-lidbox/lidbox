@@ -85,17 +85,18 @@ class Gather(StatefulCommand):
     @classmethod
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("gather options")
-        optional.add_argument("--walk-dir",
+        tasks = parser.add_argument_group("gather tasks", description="Different ways to gather filepaths from a dataset")
+        tasks.add_argument("--walk-dir",
             type=str,
             action=ExpandAbspath,
             metavar="DATASET_DIR",
             help="Walk over a dataset starting at this directory, gathering audio file paths and labels. All paths and labels are written into experiment state under key 'all'.")
-        optional.add_argument("--load-from-list",
+        tasks.add_argument("--load-from-list",
             type=str,
             action=ExpandAbspath,
             metavar="PATH_LIST",
             help="Load path list from this file. Every line must contain atleast two columns, separated by space or tab, such that the first column is an absolute path and the second column is the label.")
+        optional = parser.add_argument_group("gather options")
         optional.add_argument("--check",
             action="store_true",
             help="Check that every file is unique and contains audio. Might take a long time since every file will be opened briefly with sox and/or librosa.")
@@ -204,9 +205,14 @@ class Split(StatefulCommand):
         optional.add_argument("--check",
             action="store_true",
             help="Check that all datagroups are disjoint by the given split type.")
+        optional.add_argument("--ratio",
+            type=float,
+            default=0.1,
+            help="Test and validation set size as a fraction of the whole dataset.")
         return parser
 
-    def split_is_a_partition(self, original, split):
+    @staticmethod
+    def split_is_a_partition(original, split):
         """
         Check that all values from 'original' exist in 'split' and all values in 'split' are from 'original'.
         """
@@ -252,9 +258,20 @@ class Split(StatefulCommand):
         data = datagroups["all"]
         samples = list(zip(data["paths"], data["labels"]))
         if args.split_type == "by-speaker":
-            split = transformations.dataset_split_samples_by_speaker(samples, dataset_walker.parse_speaker_id, verbosity=args.verbosity)
+            split = transformations.dataset_split_samples_by_speaker(
+                samples,
+                dataset_walker.parse_speaker_id,
+                validation_ratio=args.ratio,
+                test_ratio=args.ratio,
+                verbosity=args.verbosity
+            )
         else:
-            split = transformations.dataset_split_samples(samples, verbosity=args.verbosity)
+            split = transformations.dataset_split_samples(
+                samples,
+                validation_ratio=args.ratio,
+                test_ratio=args.ratio,
+                verbosity=args.verbosity
+            )
         split_data = {}
         for key, datagroup in split.items():
             paths, labels = [], []
@@ -368,8 +385,9 @@ class Split(StatefulCommand):
 
 
 class Inspect(StatefulCommand):
-    """Perform non-mutating actions on dataset paths loaded into state."""
+    """Perform non-modifying actions on dataset paths loaded into state."""
     tasks = (
+        "count_files",
         "dump_datagroup",
         "get_audio_durations",
     )
@@ -378,15 +396,35 @@ class Inspect(StatefulCommand):
     @classmethod
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("inspect options")
-        optional.add_argument("--dump-datagroup",
+        tasks = parser.add_argument_group("inspection tasks", description="Different ways to inspect the dataset")
+        tasks.add_argument("--count-files",
+            action="store_true",
+            help="Count files by label of all datagroups and write results to stdout.")
+        tasks.add_argument("--dump-datagroup",
             type=str,
             metavar="DATAGROUP_KEY",
-            help="Write all paths and label pairs of given datagroup into stdout")
-        optional.add_argument("--get-audio-durations",
+            help="Write all paths and label pairs of given datagroup into stdout.")
+        tasks.add_argument("--get-audio-durations",
             action="store_true",
-            help="Run SoXi on all paths in all datagroups to compute durations of wav-files by label")
+            help="Run SoXi on all paths in all datagroups to compute durations of wav-files by label.")
         return parser
+
+    @staticmethod
+    def paths_by_label(d):
+        label_key_fn = lambda pair: pair[0]
+        paths_sorted_by_label = sorted(zip(d["labels"], d["paths"]), key=label_key_fn)
+        return itertools.groupby(paths_sorted_by_label, label_key_fn)
+
+    def count_files(self):
+        args = self.args
+        if not self.state_data_ok():
+            return 1
+        if args.verbosity:
+            print("Computing amount of files by label")
+        for datagroup_key, datagroup in self.state["data"].items():
+            print("datagroup '{}'".format(datagroup_key))
+            for label, group in self.paths_by_label(datagroup):
+                print("  {:s}: {:d}".format(label, len(list(group))))
 
     def dump_datagroup(self):
         args = self.args
@@ -404,11 +442,9 @@ class Inspect(StatefulCommand):
             return 1
         if args.verbosity:
             print("Computing durations of all audio files")
-        label_key_fn = lambda pair: pair[0]
         for datagroup_key, datagroup in self.state["data"].items():
-            paths_sorted_by_label = sorted(zip(datagroup["labels"], datagroup["paths"]), key=label_key_fn)
             print("datagroup '{}'".format(datagroup_key))
-            for label, group in itertools.groupby(paths_sorted_by_label, label_key_fn):
+            for label, group in self.paths_by_label(datagroup):
                 paths = [path for label, path in group]
                 duration_str = system.format_duration(system.get_total_duration(paths))
                 print("  {:s}: {duration_str:s}".format(label, duration_str=duration_str))
