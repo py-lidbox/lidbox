@@ -62,12 +62,22 @@ class Command:
             os.makedirs(path)
 
     def run_tasks(self):
-        given_tasks = [getattr(self, task_name) for task_name in self.__class__.tasks if getattr(self.args, task_name)]
+        given_tasks = [
+            getattr(self, task_name)
+            for task_name in self.__class__.tasks
+            if getattr(self.args, task_name)
+        ]
         if not given_tasks:
             print("Error: No tasks given, doing nothing", file=sys.stderr)
             return 2
         for task in given_tasks:
-            ret = task()
+            # The user might pipe output of some command to e.g. UNIX 'head' or 'tail',
+            # which may send a SIGPIPE back to tell us there is no need to print more data.
+            # Python throws a BrokenPipeError when it receives that signal so let's just exit with code 0 in that case.
+            try:
+                ret = task()
+            except BrokenPipeError:
+                return 0
             if ret:
                 return ret
 
