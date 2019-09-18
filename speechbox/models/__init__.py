@@ -48,6 +48,15 @@ def parse_metrics(metrics):
         keras_metrics.append(metric)
     return keras_metrics
 
+class EpochModelCheckpoint(tf.keras.callbacks.Callback):
+    def __init__(self, epoch_interval, filepath, **kwargs):
+        self.epoch_interval = epoch_interval
+        self.checkpoint_path = filepath
+
+    def on_epoch_end(self, epoch, logs=None, **kwargs):
+        if epoch and epoch % self.epoch_interval == 0:
+            self.model.save(self.checkpoint_path.format(epoch=epoch, **logs))
+
 
 class KerasWrapper:
 
@@ -68,6 +77,8 @@ class KerasWrapper:
         if early_stopping:
             self.callbacks.append(tf.keras.callbacks.EarlyStopping(**early_stopping))
         if checkpoints:
+            if "epoch_interval" in checkpoints:
+                self.callbacks.append(EpochModelCheckpoint(checkpoints.pop("epoch_interval"), checkpoints["filepath"]))
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
 
     @with_device
