@@ -105,6 +105,9 @@ class StatefulCommand(Command):
             action=ExpandAbspath,
             help="Path to a yaml-file containing the experiment configuration, e.g. path to the cache directory, feature extractors, model hyperparameters etc.")
         suboptions = parser.add_argument_group("state interaction")
+        suboptions.add_argument("--load-state",
+            action="store_true",
+            help="Load state from cache regardless of command. Only required if a command has required_state != State.none.")
         suboptions.add_argument("--save-state",
             action="store_true",
             help="Save command state to the cache directory.")
@@ -168,7 +171,7 @@ class StatefulCommand(Command):
         if args.verbosity > 1:
             print("Cache dir is '{}'".format(self.cache_dir))
         self.dataset_id = self.experiment_config["dataset"]["key"]
-        if self.requires_state != State.none:
+        if args.load_state or self.requires_state != State.none:
             self.load_state()
         if args.verbosity > 1:
             print("Running with initial state:")

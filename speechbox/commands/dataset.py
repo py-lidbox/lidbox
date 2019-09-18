@@ -169,6 +169,9 @@ class Gather(StatefulCommand):
         paths, labels = system.parse_path_list(path_list)
         if "data" not in self.state:
             self.state["data"] = {}
+        elif args.datagroup in self.state["data"]:
+            if args.verbosity:
+                print("Warning: Overwriting existing datagroup '{}' in state".format(args.datagroup))
         self.state["data"][args.datagroup] = {
             "paths": paths,
             "labels": labels,
