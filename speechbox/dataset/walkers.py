@@ -247,40 +247,6 @@ class OGIWalker(SpeechDatasetWalker):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        datagroup_keys = {
-            "devtest.lst": "validation",
-            "evaltest.lst": "test",
-            "train.lst": "training"
-        }
-        split_def_dir = os.path.join(kwargs["dataset_root"], "trn_test")
-        assert all(os.path.exists(os.path.join(split_def_dir, d)) for d in datagroup_keys), "Training-validation-test split definition files not found in '{}'".format(split_def_dir)
-        self.datagroup_patterns = []
-        for split_fname, datagroup_key in datagroup_keys.items():
-            patterns = set()
-            with open(os.path.join(split_def_dir, split_fname)) as split_f:
-                for line in split_f:
-                    cols = line.split(' ')
-                    # Make sure all lines contain what we expect
-                    assert cols[0].strip().isdigit(), "row is '{}'".format(cols)
-                    assert cols[-2].strip().isdigit(), "row is '{}'".format(cols)
-                    assert cols[-1].strip() == "files", "row is '{}'".format(cols)
-                    # Slice useful cols
-                    cols = cols[1:-2]
-                    if len(cols[0]) == 0:
-                        # Drop separator (it is not always present)
-                        cols = cols[1:]
-                    # Generate utterance id patterns
-                    speaker_id = cols[0]
-                    for p in cols[1:]:
-                        patterns.add(speaker_id + p)
-            self.datagroup_patterns.append((datagroup_key, patterns))
-
-    def parse_datagroup(self, wavpath):
-        utt_id = os.path.basename(wavpath).split(".wav")[0]
-        print("parsing datagroup for", wavpath, utt_id)
-        for datagroup_key, patterns in self.datagroup_patterns:
-            if utt_id in patterns:
-                return datagroup_key
 
     @staticmethod
     def parse_speaker_id(path):
