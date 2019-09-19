@@ -484,7 +484,7 @@ class Augment(StatefulCommand):
             print("Writing augmentation output into '{}'".format(output_dir))
         augment_params = []
         if "list" in augment_config:
-            augment_params = augment_config["list"]
+            augment_params = [list(d.items()) for d in augment_config["list"]]
         elif "cartesian_product" in augment_config:
             all_kwargs = augment_config["cartesian_product"].items()
             flattened_kwargs = [
