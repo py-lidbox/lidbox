@@ -139,7 +139,8 @@ class KerasWrapper:
         expected_num_labels = self.model.layers[-1].output_shape[-1]
         predictions = np.zeros((len(utterances), expected_num_labels))
         for i, sequences in enumerate(utterances):
-            predictions[i] = self.model.predict(sequences).mean(axis=0)
+            prob_by_frame = self.model.predict(sequences)
+            predictions[i] = prob_by_frame.mean(axis=0)
         return predictions
 
     @with_device

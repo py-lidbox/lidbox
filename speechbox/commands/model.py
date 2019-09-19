@@ -5,6 +5,8 @@ import pprint
 import shutil
 import sys
 
+import sklearn.metrics
+
 from speechbox.commands.base import Command, State, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.models as models
@@ -208,10 +210,10 @@ class Evaluate(StatefulCommand):
 
     def predict_paths(self, paths):
         args = self.args
+        eval_config = self.get_eval_config()
         if args.verbosity > 1:
             print("Preparing model for prediction using evaluation config:")
-            pprint.pprint(self.experiment_config.get("evaluation", {}))
-        eval_config = self.get_eval_config()
+            pprint.pprint(eval_config)
         if args.verbosity:
             print("Creating KerasWrapper '{}'".format(self.model_id))
         model = models.KerasWrapper(self.model_id, eval_config["experiment"]["model_definition"], device_str=eval_config["experiment"].get("tf_device_str"))
@@ -249,16 +251,43 @@ class Evaluate(StatefulCommand):
         for path, prediction in self.predict_paths(paths):
             print("'{}':".format(path))
             print(("{:>8s}" * len(index_to_label)).format(*index_to_label.values()))
-            for p in prediction:
-                print("{:8.3f}".format(p), end='')
+            amax = prediction.argmax()
+            for i, p in enumerate(prediction):
+                p_str = "{:8.3f}".format(p)
+                if i == amax:
+                    # This is the maximum likelihood, add ANSI code for bold text
+                    p_str = "\x1b[1m" + p_str + "\x1b[0m"
+                print(p_str, end='')
             print()
 
     def evaluate_test_set(self):
-        pass
+        args = self.args
+        if args.verbosity:
+            print("Evaluating test set")
+        test_set = self.state["data"]["test"]
+        label_to_index = self.state["label_to_index"]
+        path_to_label = {p: label_to_index[l] for p, l in zip(test_set["paths"], test_set["labels"])}
+        pred_labels = []
+        true_labels = []
+        for path, prediction in self.predict_paths(test_set["paths"]):
+            pred_labels.append(prediction.argmax())
+            true_labels.append(path_to_label[path])
+        cm = sklearn.metrics.confusion_matrix(true_labels, pred_labels)
+        label_names = sorted(label_to_index.keys(), key=lambda l: label_to_index[l])
+        fig, _ = visualization.draw_confusion_matrix(cm, label_names)
+        figpath = os.path.join(self.eval_dir, "test-set-evaluation.svg")
+        if args.confusion_matrix_path:
+            figpath = args.confusion_matrix_path
+        fig.savefig(figpath)
 
     def run(self):
         super().run()
         self.model_id = self.experiment_config["experiment"]["name"]
+        args = self.args
+        self.eval_dir = os.path.join(args.cache_dir, "evaluations")
+        if args.eval_result_dir:
+            self.eval_dir = args.eval_result_dir
+        self.make_named_dir(self.eval_dir, "evaluation output")
         return self.run_tasks()
 
 
