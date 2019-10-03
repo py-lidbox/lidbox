@@ -28,14 +28,16 @@ def mfcc_deltas_012(utterance, **kwargs):
     MFCCs, normalize, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
     Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
     """
-    mfccs = mfcc(utterance, **kwargs).T
+    return deltas_012(mfcc(utterance, **kwargs).T)
+
+def deltas_012(frames):
     # Compute deltas and delta-deltas and interleave them for every frame
     # i.e. for frames f_i, the features are:
     # f_0, d(f_0), d(d(f_0)), f_1, d(f_1), d(d(f_1)), f_2, d(f_2), ...
-    features = np.empty((3 * mfccs.shape[0], mfccs.shape[1]), dtype=mfccs.dtype)
-    features[0::3] = mfccs
-    features[1::3] = librosa.feature.delta(mfccs, order=1, width=3)
-    features[2::3] = librosa.feature.delta(mfccs, order=2, width=5)
+    features = np.empty((3 * frames.shape[0], frames.shape[1]), dtype=frames.dtype)
+    features[0::3] = frames
+    features[1::3] = librosa.feature.delta(frames, order=1, width=3)
+    features[2::3] = librosa.feature.delta(frames, order=2, width=5)
     return features.T
 
 def sdc(frames, d, P, k, **kwargs):
@@ -51,7 +53,7 @@ def sdc(frames, d, P, k, **kwargs):
     num_frames = frames.shape[0]
     frames = np.pad(frames, pad_width=((0, d + k*P), (0, 0)), mode='constant', constant_values=0)
     #TODO without loop expression
-    return np.concatenate([frames[i+2*d::P][:k] - frames[i::P][:k] for i in range(num_frames)])
+    return np.concatenate([frames[i+2*d::P][:k] - frames[i::P][:k] for i in range(num_frames)]).T
 
 all_extractors = collections.OrderedDict([
     ("mfcc", mfcc),
