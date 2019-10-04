@@ -40,20 +40,26 @@ def deltas_012(frames):
     features[2::3] = librosa.feature.delta(frames, order=2, width=5)
     return features.T
 
-def sdc(frames, d, P, k, **kwargs):
+def sdc(frames, Z, d, P, k, **kwargs):
     """
     Shifted-delta coefficients from
     Torres-Carrasquillo, P. A. el al. (2002).
     https://www.isca-speech.org/archive/icslp_2002/i02_0089.html
-
-    N is assumed to be frames.shape[1].
     """
-    assert d > 0 and P > 0 and k > 0, "invalid sdc parameters d = {}, P = {}, k = {}".format(d, P, k)
-    assert frames.ndim > 1, "invalid dimensions for feature frames: {}".format(frames.ndim)
+    args = (Z, d, P, k)
+    assert all(x > 0 for x in args), "invalid sdc parameters Z = {}, d = {}, P = {}, k = {}".format(*args)
+    assert frames.ndim == 2, "invalid dimensions for feature frames {}, expected 2".format(frames.ndim)
     num_frames = frames.shape[0]
-    frames = np.pad(frames, pad_width=((0, d + k*P), (0, 0)), mode='constant', constant_values=0)
+    # Use only Z first static features
+    frames = frames[:,:Z]
+    frames = np.pad(
+        frames,
+        pad_width=((0, d + k*P), (0, 0)),
+        mode='constant',
+        constant_values=0
+    )
     #TODO without loop expression
-    return np.concatenate([frames[i+2*d::P][:k] - frames[i::P][:k] for i in range(num_frames)]).T
+    return np.concatenate([frames[i+2*d::P][:k] - frames[i::P][:k] for i in range(num_frames)])
 
 all_extractors = collections.OrderedDict([
     ("mfcc", mfcc),
