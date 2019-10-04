@@ -14,6 +14,7 @@ class Features(Command):
 
 
 class Extract(StatefulCommand):
+    """Extract features from audio files using parameters from the config yaml."""
     requires_state = State.has_paths
 
     def extract(self):
@@ -78,6 +79,7 @@ class Extract(StatefulCommand):
 
 
 class Count(StatefulCommand):
+    """Count amount of extracted features by label."""
     requires_state = State.has_features
 
     def count(self):
