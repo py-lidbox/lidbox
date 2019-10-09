@@ -28,17 +28,13 @@ def mfcc_deltas_012(utterance, **kwargs):
     MFCCs, normalize, compute 1st and 2nd order deltas on MFCCs and append them to the "0th order delta".
     Return an array of (0th, 1st, 2nd) deltas for each sample in utterance.
     """
-    return deltas_012(mfcc(utterance, **kwargs).T)
+    return deltas_012(mfcc(utterance, **kwargs).T).T
 
 def deltas_012(frames):
-    # Compute deltas and delta-deltas and interleave them for every frame
-    # i.e. for frames f_i, the features are:
-    # f_0, d(f_0), d(d(f_0)), f_1, d(f_1), d(d(f_1)), f_2, d(f_2), ...
-    features = np.empty((3 * frames.shape[0], frames.shape[1]), dtype=frames.dtype)
-    features[0::3] = frames
-    features[1::3] = librosa.feature.delta(frames, order=1, width=3)
-    features[2::3] = librosa.feature.delta(frames, order=2, width=5)
-    return features.T
+    delta0 = frames
+    delta1 = librosa.feature.delta(frames, order=1, width=3)
+    delta2 = librosa.feature.delta(frames, order=2, width=5)
+    return np.concatenate((delta0, delta1, delta2))
 
 def sdc(frames, Z, d, P, k, **kwargs):
     """
