@@ -85,7 +85,7 @@ class Extract(StatefulCommand):
             tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
             self.make_named_dir(tfrecords_dir)
             if args.verbosity:
-                print("Extracting features by label")
+                print("Extracting '{}' features by label using {} parallel workers".format(datagroup_name, args.num_workers))
             # The zip is very important here so as not to mess up the ordering of label-path pairs
             paths_sorted_by_label = sorted(zip(datagroup["labels"], datagroup["paths"]))
             # Group all paths by label
