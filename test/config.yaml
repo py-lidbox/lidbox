@@ -18,9 +18,9 @@ print_progress: 1000
 augmentation:
     datagroups:
         - training
-    cartesian_product:
-        volume: [0.25, 1.0, 2.0]
-        speed: [0.9, 1.0, 1.1]
+    list:
+        - speed: 0.9
+        - speed: 1.1
 
 # Feature extraction
 features:
@@ -29,50 +29,55 @@ features:
         - validation
     # Try to remove silence from all files before starting feature extraction
     apply_vad: True
-    # Slide a 2 second window over all audio files of each label to produce utterances
+    # Slide a 4 second window over all audio files of each label to produce utterances
     # By default, audio file boundaries are ignored
-    utterance_length_ms: 2000
-    # Use 0.5 second offset when extracting utterances, i.e. every utterance will share 1.5 seconds with the previous and next utterances
-    utterance_offset_ms: 500
-    # Do not concatenate files to form utterances
+    utterance_length_ms: 4000
+    # Use 2 second offset when extracting utterances, i.e. all consecutive utterances will overlap by 50%
+    utterance_offset_ms: 2000
+    # Slide 4 second window over each utterance separately, instead of creating one large utterance by concatenating all utterances
     slide_over_all: False
-    # Length of time-dependent input sequences for the LSTM layers
+    # Length of time-dependent input sequences for the RNN model
     sequence_length: 32
-    # Use librosa to extract 40 MFCCs with a 512 frame window, using 128 frames offset
+    # Use librosa to extract 20 MFCCs and concatenate them with their deltas and delta-deltas
+    # This yields feature vectors with 60 elements for every window
     extractors:
-        - name: mfcc
+        - name: mfcc-deltas-012
           kwargs:
-              n_mfcc: 40
-              n_fft: 512
+              n_mfcc: 20
+              n_fft: 1024
               hop_length: 128
+              fmin: 50
+              fmax: 7000
+              n_mels: 40
+              power: 2.5
 
 # Training and model hyperparameters
 experiment:
     # For naming directories etc, has no inherent meaning
-    name: lstm_2_layer_512_cells
+    name: blstm_2_layer
     # Which Keras model module to load from speechbox.models
     model_definition:
-        # 2-layer LSTM with 512 and 256 cells
-        name: lstm
+        # 2-layer BLSTM with 200 and 100 units
+        name: blstm
         kwargs:
-            num_cells: 512
+            num_cells: 100
             num_layers: 2
             # Cut num_cells in half after each layer
             narrowing: True
     optimizer:
         cls: Adam
         kwargs:
-            learning_rate: 0.0001
+            learning_rate: 0.0002
     loss: categorical_crossentropy
     metrics:
         - accuracy
     batch_size: 8
-    epochs: 100
+    epochs: 2000
     # Repeat samples from each label indefinitely
     repeat: -1
     # How many batches per epoch for training and validation
-    steps_per_epoch: 500
-    validation_steps: 50
+    steps_per_epoch: 5000
+    validation_steps: 500
     # How many samples to draw from the dataset iterator into the shuffle buffer,
     # from which we then draw samples uniformly at random used to train the model
     dataset_shuffle_size: 50000
@@ -81,12 +86,3 @@ experiment:
         save_best_only: True
         monitor: val_accuracy
         format: "epoch{epoch:06d}__val_loss{val_loss:.12f}__val_accuracy{val_accuracy:.3f}.hdf5"
-
-#TODO
-evaluation:
-    print_progress: 500
-    experiment:
-        metrics:
-            - accuracy
-            - precision
-            - recall

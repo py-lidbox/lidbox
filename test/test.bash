@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -e
-cd "$(dirname "$0")"
 
-experiment_config=./config.yaml
-parsed_common_voice_dir=./acoustic_data
-verbosity='-vvv'
+self_dir=$(dirname $0)
+config=${self_dir}/config.yaml
+parsed_common_voice_dir=${self_dir}/acoustic_data
+verbosity='-vv'
+feature_extract_workers=8
 
 error=0
 if [ -z $(command -v speechbox) ]; then
@@ -20,66 +21,32 @@ if [ $error -ne 0 ]; then
 	exit $error
 fi
 
-echo "Reading all audio files from speech corpus in ${parsed_common_voice_dir}"
-speechbox dataset gather \
-	$experiment_config \
-	$verbosity \
-	--walk-dir $parsed_common_voice_dir \
-	--check \
-	--save-state
+# echo "Reading all audio files from speech corpus in ${parsed_common_voice_dir}"
+# speechbox dataset gather $config $verbosity --walk-dir $parsed_common_voice_dir --check --save-state
 
-# echo "Inspecting extracted paths"
-# speechbox dataset inspect \
-# 	$experiment_config \
-# 	$verbosity \
-# 	--dump-datagroup all
+# echo "Counting amount of extracted paths"
+# speechbox dataset inspect $config $verbosity --dump-datagroup all | wc --lines
 
-echo "Creating random training-test split by speaker ID"
-speechbox dataset split \
-	$experiment_config \
-	by-speaker \
-	$verbosity \
-	--random \
-	--ratio 0.05 \
-	--save-state
+# echo "Creating random training-test split by speaker ID"
+# speechbox dataset split $config by-speaker $verbosity --random --ratio 0.05 --save-state
 
-echo "Checking split is disjoint"
-speechbox dataset split \
-	$experiment_config \
-	by-speaker \
-	$verbosity \
-	--check
+# echo "Checking that the split is disjoint"
+# speechbox dataset split $config by-speaker $verbosity --check
 
-echo "Computing total duration of dataset audio files"
-speechbox dataset inspect \
-	$experiment_config \
-	$verbosity \
-	--get-audio-durations
+# echo "Computing total duration of all audio files in each split group"
+# speechbox dataset inspect $config $verbosity --get-audio-durations
 
 # echo "Augmenting dataset"
-# speechbox dataset augment \
-# 	$experiment_config \
-# 	$verbosity \
-# 	--save-state
+# speechbox dataset augment $config $verbosity --save-state
 
-# echo "Computing total duration of dataset audio files after augmentation"
-# speechbox dataset inspect \
-# 	$experiment_config \
-# 	$verbosity \
-# 	--get-audio-durations
+# echo "Computing total duration after augmentation"
+# speechbox dataset inspect $config $verbosity --get-audio-durations
 
-echo "Extracting features"
-speechbox features extract \
-	$experiment_config \
-	$verbosity \
-	--save-state
+# echo "Extracting features"
+# speechbox features extract $config $verbosity --num-workers $feature_extract_workers --save-state
 
-echo "Counting total amount of features"
-speechbox features count \
-	$experiment_config \
-	$verbosity
+# echo "Counting total amount of features"
+# speechbox features count $config $verbosity
 
-echo "Training simple LSTM model"
-speechbox model train \
-	$experiment_config \
-	$verbosity
+echo "Training model"
+speechbox model train $config $verbosity
