@@ -592,6 +592,9 @@ class Parse(Command):
         optional.add_argument("--duration-limit-sec",
             type=int,
             help="Maximum total duration of all parsed files. I.e. stop parsing when this many seconds of audio have been parsed.")
+        optional.add_argument("--normalize-volume",
+            type=float,
+            help="Use SoX to normalize volume of parsed files to given dBFS, e.g. -3.0.")
         optional.add_argument("--fail-early",
             action="store_true",
             default=False,
@@ -605,6 +608,7 @@ class Parse(Command):
         self.make_named_dir(args.dst, "parse output")
         parser_config = {
             "dataset_root": args.src,
+            "verbosity": args.verbosity,
             "output_dir": args.dst,
             "resampling_freq": args.resample_to,
             "min_duration_ms": args.min_duration_ms,
@@ -612,6 +616,9 @@ class Parse(Command):
             "output_duration_limit": args.duration_limit_sec,
             "fail_early": args.fail_early,
         }
+        if args.normalize_volume is not None:
+            assert args.normalize_volume <= 0, "Expected normalization parameter to be negative, i.e. decibels relative to full scale, but {} was given".format(args.normalize_volume)
+            parser_config["normalize_volume"] = args.normalize_volume
         parser = dataset.get_dataset_parser(args.dataset, parser_config)
         if args.verbosity:
             print("Starting parse with parser", repr(parser))
