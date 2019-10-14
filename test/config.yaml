@@ -25,8 +25,8 @@ augmentation:
 # Feature extraction
 features:
     datagroups:
-        - training
-        - validation
+        - test
+    opensmile_config: /l/src/opensmile-2.3.0/config/MFCC12_0_D_A.conf
     # Try to remove silence from all files before starting feature extraction
     apply_vad: True
     # Slide a 4 second window over all audio files of each label to produce utterances
@@ -37,6 +37,7 @@ features:
     # Slide 4 second window over each utterance separately, instead of creating one large utterance by concatenating all utterances
     slide_over_all: False
     # Length of time-dependent input sequences for the RNN model
+    #TODO this should be defined in the model config
     sequence_length: 32
     # Use librosa to extract 20 MFCCs and concatenate them with their deltas and delta-deltas
     # This yields feature vectors with 60 elements for every window

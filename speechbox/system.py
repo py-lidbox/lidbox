@@ -1,5 +1,4 @@
 """File IO."""
-#TODO rewrite API with standard UNIX tools in mind to avoid redundancies
 import gzip
 import hashlib
 import itertools
@@ -8,6 +7,7 @@ import os
 import subprocess
 
 from audioread.exceptions import NoBackendError
+from scipy.io import arff
 import librosa
 import numpy as np
 import sox
@@ -18,17 +18,20 @@ import yaml
 TFRECORD_COMPRESSION = "GZIP"
 SUBPROCESS_BATCH_SIZE = 5000
 
+def run_command(cmd):
+    process = subprocess.run(
+        cmd.split(" "),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    return process.stdout.decode("utf-8").strip()
+
 def run_for_files(cmd, filepaths):
     # Run in batches
     for begin in range(0, len(filepaths), SUBPROCESS_BATCH_SIZE):
         batch = ' '.join(filepaths[begin:begin+SUBPROCESS_BATCH_SIZE])
-        process = subprocess.run(
-            (cmd + ' ' + batch).split(' '),
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        yield process.stdout.decode("utf-8").strip()
+        yield run_command(cmd + ' ' + batch)
 
 def read_wavfile(path, **librosa_kwargs):
     if "sr" not in librosa_kwargs:
@@ -38,6 +41,12 @@ def read_wavfile(path, **librosa_kwargs):
         return librosa.core.load(path, **librosa_kwargs)
     except (EOFError, NoBackendError):
         return None, 0
+
+def read_arff_features(path, key_pattern):
+    data, meta = arff.loadarff(path)
+    keys = [key for key in meta.names() if key_pattern in key]
+    feats = np.vstack([data[key] for key in keys])
+    return feats.T
 
 def write_wav(path, wav):
     signal, rate = wav
