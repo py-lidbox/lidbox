@@ -136,6 +136,7 @@ class KerasWrapper:
 
     @with_device
     def predict(self, utterances):
+        #TODO compute all inside the tf graph
         expected_num_labels = self.model.layers[-1].output_shape[-1]
         predictions = np.zeros((len(utterances), expected_num_labels))
         for i, sequences in enumerate(utterances):
