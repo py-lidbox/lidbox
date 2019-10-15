@@ -191,8 +191,8 @@ def write_features(sequence_features, target_path):
 def count_all_features(features_file):
     from tensorflow import device
     with device("/CPU:0"):
-        dataset, _ = load_features_as_dataset([features_file])
-        return int(dataset.reduce(0, lambda count, _: count + 1))
+        dataset, meta = load_features_as_dataset([features_file])
+        return int(dataset.reduce(0, lambda count, _: count + 1)), meta
 
 def count_all_features_parallel(labels, features_files, num_workers=None):
     from multiprocessing import Pool

@@ -145,8 +145,8 @@ class Count(StatefulCommand):
             datagroup["num_features_by_label"] = num_features_by_label
             if args.verbosity:
                 print("Datagroup '{}' features count by label:".format(datagroup_name))
-                for label, num_features in num_features_by_label.items():
-                    print("  {}: {}".format(label, num_features))
+                for label, (num_features, metadata) in num_features_by_label.items():
+                    print("  {}: {}, meta: {}".format(label, num_features, metadata))
 
     def run(self):
         super().run()
