@@ -45,7 +45,7 @@ class Train(StatefulCommand):
     def create_model(self, config):
         args = self.args
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
-        tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "log")
+        tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "logs")
         if args.reset_tensorboard and os.path.isdir(tensorboard_log_dir):
             if args.verbosity:
                 print("Clearing tensorboard directory '{}'".format(tensorboard_log_dir))
@@ -54,14 +54,13 @@ class Train(StatefulCommand):
         tensorboard_dir = os.path.join(tensorboard_log_dir, now_str)
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
-            "write_graph": True,
-            "update_freq": "epoch",
+            "profile_batch": 0,
+            "histogram_freq": 1,
         }
         if args.debug:
             default_tensorboard_config.update({
                 "update_freq": "batch",
                 "histogram_freq": 1,
-                "embeddings_freq": 1,
             })
         tensorboard_config = dict(default_tensorboard_config, **config.get("tensorboard", {}))
         checkpoint_dir = self.get_checkpoint_dir()
