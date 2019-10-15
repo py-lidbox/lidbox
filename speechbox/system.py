@@ -84,7 +84,8 @@ def load_gzip_json(path):
 
 def dump_gzip_json(data, path):
     with gzip.open(path, "wb") as f:
-        f.write(json.dumps(data, sort_keys=True, indent=2).encode('utf-8'))
+        json_str = json.dumps(data, sort_keys=True, indent=2) + "\n"
+        f.write(json_str.encode("utf-8"))
 
 def append_json(data, path):
     if os.path.exists(path):
