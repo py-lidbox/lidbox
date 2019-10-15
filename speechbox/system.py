@@ -42,10 +42,18 @@ def read_wavfile(path, **librosa_kwargs):
     except (EOFError, NoBackendError):
         return None, 0
 
-def read_arff_features(path, key_pattern):
+def read_arff_features(path, include_keys=None, exclude_keys=None, types=None):
+    if types is None:
+        types = {"numeric"}
+    if exclude_keys is None:
+        exclude_keys = {"frameTime"}
     data, meta = arff.loadarff(path)
-    keys = [key for key in meta.names() if key_pattern in key]
-    feats = np.vstack([data[key] for key in keys])
+    keys = [
+        key for key, type in zip(meta.names(), meta.types())
+        if (include_keys is None or key in include_keys) and key not in exclude_keys and type in types
+    ]
+    assert all(data[key].shape == data[keys[0]].shape for key in keys), "inconsistent dimensions in arff file, expected all to have shape {}".format(data[keys[0]].shape)
+    feats = np.vstack([data[key] for key in keys if not np.any(np.isnan(data[key]))])
     return feats.T
 
 def write_wav(path, wav):
