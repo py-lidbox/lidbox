@@ -84,7 +84,7 @@ def load_gzip_json(path):
 
 def dump_gzip_json(data, path):
     with gzip.open(path, "wb") as f:
-        json_str = json.dumps(data, sort_keys=True, indent=2) + "\n"
+        json_str = json.dumps(data, sort_keys=True, indent=2)
         f.write(json_str.encode("utf-8"))
 
 def append_json(data, path):
@@ -188,6 +188,7 @@ def write_features(sequence_features, target_path):
     }
     with open(target_path + ".meta.json", 'w') as meta_file:
         json.dump(features_meta, meta_file)
+        meta_file.write("\n")
     # Put back the first sample
     sequence_features = itertools.chain([(sequence, onehot_label)], sequence_features)
     # Write all samples
