@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False):
+def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, batch_normalize=False):
     lstm_layers = []
     lstm_1 = tf.keras.layers.LSTM(
         num_units,
@@ -19,5 +19,11 @@ def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False):
             return_sequences=i < num_layers
         )
         lstm_layers.append(lstm_i)
+    if batch_normalize:
+        layers = []
+        for i, lstm in enumerate(lstm_layers, start=1):
+            bn = tf.keras.layers.BatchNormalization(name="batchnorm_{}".format(i))
+            layers.extend([lstm, bn])
+        lstm_layers = layers
     output = tf.keras.layers.Dense(output_shape, activation='softmax')
     return tf.keras.models.Sequential(lstm_layers + [output])
