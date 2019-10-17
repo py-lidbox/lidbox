@@ -44,6 +44,9 @@ def parse_metrics(metrics):
             metric = tf.keras.metrics.Precision()
         elif m == "recall":
             metric = tf.keras.metrics.Recall()
+        elif m == "C_avg":
+            #TODO
+            pass
         assert metric is not None, "Invalid metric {}".format(m)
         keras_metrics.append(metric)
     return keras_metrics
