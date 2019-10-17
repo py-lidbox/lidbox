@@ -7,14 +7,14 @@ import speechbox.system as system
 from speechbox.preprocess.transformations import partition_into_sequences
 
 
-def speech_dataset_to_features(labels, paths, opensmile_conf_path, label_to_index, sequence_length):
+def speech_dataset_to_features(labels, paths, opensmile_conf_path, label_to_index, sequence_length, tmpdir):
     smilextract_cmd = (
         "SMILExtract -nologfile"
         " -configfile " + opensmile_conf_path
         + " -I {path} -O {tmpout}"
     )
     for i, (label, wavpath) in enumerate(zip(labels, paths), start=1):
-        tmpout = "{label}-{i}.arff".format(label=label, i=i)
+        tmpout = os.path.join(tmpdir, "{label}-{i}.arff".format(label=label, i=i))
         system.run_command(smilextract_cmd.format(path=wavpath, tmpout=tmpout))
         feats = system.read_arff_features(tmpout)
         os.remove(tmpout)

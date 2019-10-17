@@ -47,7 +47,12 @@ def extract_features_from_task_opensmile(task):
         paths.append(p)
     assert all(l == label for l in labels), "Failed to group paths by label, expected all labels to be equal to '{}' but at least one was not".format(label)
     features = opensmile.speech_dataset_to_features(
-        labels, paths, config["opensmile_config"], label_to_index, config["sequence_length"]
+        labels,
+        paths,
+        config["opensmile_config"],
+        label_to_index,
+        config["sequence_length"],
+        config["tmp_out_dir"]
     )
     return label, system.write_features(features, os.path.join(tfrecords_dir, label))
 
@@ -120,6 +125,7 @@ class Extract(StatefulCommand):
                 datagroup["features"][label] = wrote_path
                 if args.verbosity:
                     print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
+
 
     def run(self):
         super().run()
@@ -201,6 +207,9 @@ class SMILExtract(StatefulCommand):
             datagroup["features"] = {}
             tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
             self.make_named_dir(tfrecords_dir)
+            tmp_out_dir = os.path.join(tfrecords_dir, "tmp_out")
+            self.make_named_dir(tmp_out_dir)
+            config["tmp_out_dir"] = tmp_out_dir
             if args.verbosity:
                 print("Extracting '{}' features by label using {} parallel workers".format(datagroup_name, args.num_workers))
             # The zip is very important here so as not to mess up the ordering of label-path pairs
@@ -220,6 +229,7 @@ class SMILExtract(StatefulCommand):
                 datagroup["features"][label] = wrote_path
                 if args.verbosity:
                     print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
+            shutil.rmtree(tmp_out_dir)
 
 
     def run(self):
