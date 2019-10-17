@@ -95,8 +95,9 @@ class KerasWrapper:
         summary_writer = tf.summary.create_file_writer(metrics_dir)
         summary_writer.set_as_default()
         def inspect_batches(batch_idx, batch):
-            targets = batch[1]
-            print("\nLogger enabled for dataset '{}', targets of shape {} from each batch will be written as histograms for TensorBoard".format(dataset_name, targets.shape[1:]))
+            inputs, targets = batch[:2]
+            print("\nLogger enabled for dataset '{}', batch data will be written as histograms for TensorBoard".format(dataset_name))
+            tf.summary.histogram("{}-inputs".format(dataset_name), tf.reshape(inputs, [-1]), step=batch_idx)
             tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
             return batch
         dataset = dataset.enumerate().map(inspect_batches)
