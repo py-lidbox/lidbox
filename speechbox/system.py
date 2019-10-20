@@ -247,14 +247,15 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
             draw_prob[os.path.basename(path).split(".tfrecord")[0]]
             for path in tfrecord_paths
         ]
+        # Assume each tfrecord file contains features only for a single label
+        label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
+        if "repeat" in training_config:
+            label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
+        dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
     else:
-        # All samples equally probable
-        weights = [1.0 for path in tfrecord_paths]
-    # Assume each tfrecord file contains features only for a single label
-    label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
-    if "repeat" in training_config:
-        label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
-    dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
+        dataset = parse_compressed_tfrecords(tfrecord_paths)
+        if "repeat" in training_config:
+            dataset = dataset.repeat(count=training_config["repeat"])
     if "dataset_shuffle_size" in training_config:
         dataset = dataset.shuffle(training_config["dataset_shuffle_size"])
     if "batch_size" in training_config:
