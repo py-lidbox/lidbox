@@ -3,10 +3,12 @@ Toolbox containing various speech data analysis tools.
 """
 import os
 
-def _get_unittest_data_dir():
+def get_package_root():
     from speechbox import __path__
-    speechbox_root = os.path.dirname(__path__[0])
-    datadir = os.path.join(speechbox_root, "test", "acoustic_data")
+    return os.path.abspath(os.path.dirname(__path__[0]))
+
+def _get_unittest_data_dir():
+    datadir = os.path.join(get_package_root(), "test", "acoustic_data")
     assert os.path.isdir(datadir), "Acoustic data has not yet been downloaded to '{}'".format(datadir)
     return datadir
 
