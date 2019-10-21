@@ -62,7 +62,7 @@ def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_o
         if print_progress and i % print_progress == 0:
             print(i, "done")
 
-def utterances_to_features(utterances, label_to_index, extractors, sequence_length):
+def utterances_to_features(utterances, label_to_index, extractors):
     """
     Iterate over utterances, extracting features from each utterance with given extractors and yield the features as sequences and corresponding labels.
     """
@@ -75,16 +75,13 @@ def utterances_to_features(utterances, label_to_index, extractors, sequence_leng
         feats = features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
         # If there are more extractors, apply them sequentially and append results to features
         #TODO extractors[1:], figuring out how to merge dimensions might get tricky
-        sequences = partition_into_sequences(feats, sequence_length)
-        for sequence in sequences:
-            yield sequence, onehot
+        yield feats, onehot
 
-def utterances_to_features_no_labels(utterances, extractors, sequence_length):
+def utterances_to_features_no_labels(utterances, extractors):
     assert len(extractors) > 0, "No extractors defined"
     for utterance in utterances:
         extractor = extractors[0]
-        feats = features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
-        yield from partition_into_sequences(feats, sequence_length)
+        return features.extract_features(utterance, extractor["name"], extractor.get("kwargs"))
 
 def files_to_features(paths, config):
     """
@@ -101,13 +98,15 @@ def files_to_features(paths, config):
         )
         # Drop dummy labels
         utterance_chunks = (utterance for _, utterance in utterance_chunks)
-        # Extract features from utterance chunks and partition into model input sequences
-        sequences = utterances_to_features_no_labels(
+        # Extract features from utterance chunks
+        features = utterances_to_features_no_labels(
             utterance_chunks,
             extractors=config["extractors"],
-            sequence_length=config["sequence_length"]
         )
-        yield np.array(list(sequences))
+        sequence_length = config.get("sequence_length", 0)
+        if sequence_length > 0:
+            features = transformations.partition_into_sequences(features, sequence_length)
+        yield np.array(list(features))
 
 def dataset_split_samples(samples, validation_ratio=0.10, test_ratio=0.10, random_state=None, verbosity=0):
     """

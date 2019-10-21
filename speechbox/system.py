@@ -54,7 +54,7 @@ def read_arff_features(path, include_keys=None, exclude_keys=None, types=None):
     ]
     assert all(data[key].shape == data[keys[0]].shape for key in keys), "inconsistent dimensions in arff file, expected all to have shape {}".format(data[keys[0]].shape)
     feats = np.vstack([data[key] for key in keys if not np.any(np.isnan(data[key]))])
-    return feats.T
+    return feats.T, keys
 
 def write_wav(path, wav):
     signal, rate = wav
@@ -176,7 +176,7 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     )
     return sequence["inputs"], context["target"]
 
-def write_features(sequence_features, target_path):
+def write_sequence_features(sequence_features, target_path):
     import tensorflow as tf
     target_path += ".tfrecord"
     # Peek the dimensions from the first sample
@@ -196,6 +196,44 @@ def write_features(sequence_features, target_path):
         for sequence, onehot_label in sequence_features:
             sequence_example = sequence_to_example(sequence, onehot_label)
             record_writer.write(sequence_example.SerializeToString())
+    return target_path
+
+def features_to_example(features, onehot_label_vec):
+    import tensorflow as tf
+    def float_vec_to_float_features(v):
+        return tf.train.Feature(float_list=tf.train.FloatList(value=v))
+    features_definition = {
+        "input": float_vec_to_float_features(features),
+        "target": float_vec_to_float_features(onehot_label_vec),
+    }
+    return tf.train.Example(features=tf.train.Features(feature=features_definition))
+
+def example_to_model_input(example_string, num_labels, num_features):
+    import tensorflow as tf
+    features_definition = {
+        "input": tf.io.FixedLenFeature(shape=[num_features], dtype=tf.float32),
+        "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
+    }
+    example = tf.io.parse_single_example(example_string, features_definition)
+    return example["input"], example["target"]
+
+def write_features(features, target_path):
+    import tensorflow as tf
+    target_path += ".tfrecord"
+    feat, onehot_label = next(features)
+    assert feat.ndim == 1, "Unexpected dimensions '{}' for 1-dim vector features".format(feat.ndim)
+    features_meta = {
+        "num_features": feat.size,
+        "num_labels": len(onehot_label)
+    }
+    with open(target_path + ".meta.json", 'w') as meta_file:
+        json.dump(features_meta, meta_file)
+        meta_file.write("\n")
+    features = itertools.chain([(feat, onehot_label)], features)
+    with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
+        for feat, onehot_label in features:
+            example = features_to_example(feat, onehot_label)
+            record_writer.write(example.SerializeToString())
     return target_path
 
 def count_all_features(features_file):
@@ -225,14 +263,16 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
     assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
     num_labels = features_meta["num_labels"]
     num_features =  features_meta["num_features"]
-    def parse_sequence_example(seq_example_string):
-        return sequence_example_to_model_input(seq_example_string, num_labels, num_features)
+    if training_config.get("sequence_length", 0) > 0:
+        example_parser_fn = lambda example_str: sequence_example_to_model_input(example_str, num_labels, num_features)
+    else:
+        example_parser_fn = lambda example_str: example_to_model_input(example_str, num_labels, num_features)
     def parse_compressed_tfrecords(paths):
         d = tf.data.TFRecordDataset(paths, compression_type=TFRECORD_COMPRESSION)
         if "parallel_parse" in training_config:
-            d = d.map(parse_sequence_example, num_parallel_calls=training_config["parallel_parse"])
+            d = d.map(example_parser_fn, num_parallel_calls=training_config["parallel_parse"])
         else:
-            d = d.map(parse_sequence_example)
+            d = d.map(example_parser_fn)
         return d
     label_weights = training_config.get("label_weights")
     if label_weights:

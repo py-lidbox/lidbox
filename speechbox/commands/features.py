@@ -33,10 +33,15 @@ def extract_features_from_task(task):
     features = transformations.utterances_to_features(
         utterances,
         label_to_index=label_to_index,
-        extractors=config["extractors"],
-        sequence_length=config["sequence_length"]
+        extractors=config["extractors"]
     )
-    return label, system.write_features(features, os.path.join(tfrecords_dir, label))
+    output_dir = os.path.join(tfrecords_dir, label)
+    sequence_length = config.get("sequence_length", 0)
+    if sequence_length > 0:
+        features = transformations.partition_into_sequences(features, sequence_length)
+        return label, system.write_sequence_features(features, output_dir)
+    else:
+        return label, system.write_features(features, output_dir)
 
 def extract_features_from_task_opensmile(task):
     (label, group), (tfrecords_dir, config, label_to_index) = task
@@ -51,10 +56,17 @@ def extract_features_from_task_opensmile(task):
         paths,
         config["opensmile_config"],
         label_to_index,
-        config["sequence_length"],
         config["tmp_out_dir"]
     )
-    return label, system.write_features(features, os.path.join(tfrecords_dir, label))
+    # Drop opensmile meta
+    features = ((feat, label) for feat, label, keys in features)
+    output_dir = os.path.join(tfrecords_dir, label)
+    sequence_length = config.get("sequence_length", 0)
+    if sequence_length > 0:
+        features = transformations.partition_into_sequences(features, sequence_length)
+        return label, system.write_sequence_features(features, output_dir)
+    else:
+        return label, system.write_features(features, output_dir)
 
 
 def check_datagroup(datagroup, datagroup_name):
@@ -125,7 +137,6 @@ class Extract(StatefulCommand):
                 datagroup["features"][label] = wrote_path
                 if args.verbosity:
                     print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
-
 
     def run(self):
         super().run()
