@@ -41,8 +41,7 @@ def extract_features_from_task(task):
     output_dir = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        features = transformations.partition_into_sequences(features, sequence_length)
-        return label, system.write_sequence_features(features, output_dir)
+        return label, system.write_sequence_features(features, output_dir, sequence_length)
     else:
         return label, system.write_features(features, output_dir)
 
@@ -66,8 +65,7 @@ def extract_features_from_task_opensmile(task):
     output_dir = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        features = transformations.partition_into_sequences(features, sequence_length)
-        return label, system.write_sequence_features(features, output_dir)
+        return label, system.write_sequence_features(features, output_dir, sequence_length)
     else:
         return label, system.write_features(features, output_dir)
 
@@ -89,8 +87,7 @@ def extract_features_from_task_spherediar(task):
     output_dir = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        features = transformations.partition_into_sequences(features, sequence_length)
-        return label, system.write_sequence_features(features, output_dir)
+        return label, system.write_sequence_features(features, output_dir, sequence_length)
     else:
         return label, system.write_features(features, output_dir)
 

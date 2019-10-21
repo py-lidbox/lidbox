@@ -28,6 +28,12 @@ def partition_into_sequences(data, sequence_length):
     resized.resize((num_sequences, sequence_length, data.shape[1]))
     return resized
 
+def partition_features_into_sequences(features, sequence_length):
+    """Partition dataset of features into sequences."""
+    for sample, onehot_label in features:
+        for sequence in partition_into_sequences(sample, sequence_length):
+            yield sequence, onehot_label
+
 def speech_dataset_to_utterances(labels, paths, utterance_length_ms, utterance_offset_ms, apply_vad, print_progress, slide_over_all=True):
     """
     Iterate over all paths and labels the in given dataset group yielding utterances of specified, fixed length.

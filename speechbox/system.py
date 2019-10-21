@@ -14,6 +14,8 @@ import sox
 import webrtcvad
 import yaml
 
+import speechbox.preprocess.transformations as transformations
+
 
 TFRECORD_COMPRESSION = "GZIP"
 SUBPROCESS_BATCH_SIZE = 5000
@@ -175,9 +177,9 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     )
     return sequence["inputs"], context["target"]
 
-def write_sequence_features(sequence_features, target_path):
+def write_sequence_features(features, target_path, sequence_length):
     import tensorflow as tf
-    target_path += ".tfrecord"
+    sequence_features = transformations.partition_features_into_sequences(features, sequence_length)
     # Peek the dimensions from the first sample
     sequence, onehot_label = next(sequence_features)
     features_meta = {
@@ -185,6 +187,7 @@ def write_sequence_features(sequence_features, target_path):
         "num_features": sequence.shape[1],
         "num_labels": len(onehot_label)
     }
+    target_path += ".tfrecord"
     with open(target_path + ".meta.json", 'w') as meta_file:
         json.dump(features_meta, meta_file)
         meta_file.write("\n")
@@ -262,7 +265,7 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
     assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
     num_labels = features_meta["num_labels"]
     num_features =  features_meta["num_features"]
-    if training_config.get("sequence_length", 0) > 0:
+    if features_meta.get("sequence_length", 0) > 0:
         example_parser_fn = lambda example_str: sequence_example_to_model_input(example_str, num_labels, num_features)
     else:
         example_parser_fn = lambda example_str: example_to_model_input(example_str, num_labels, num_features)
