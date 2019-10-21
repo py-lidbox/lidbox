@@ -9,6 +9,9 @@ from speechbox.commands.base import State, Command, StatefulCommand
 import speechbox.system as system
 import speechbox.preprocess.transformations as transformations
 import speechbox.preprocess.opensmile as opensmile
+import speechbox.preprocess.spherediar as spherediar
+
+#TODO reduce repetition
 
 
 def extract_features_from_task(task):
@@ -68,6 +71,28 @@ def extract_features_from_task_opensmile(task):
     else:
         return label, system.write_features(features, output_dir)
 
+def extract_features_from_task_spherediar(task):
+    (label, group), (tfrecords_dir, config, label_to_index) = task
+    labels = []
+    paths = []
+    for l, p in group:
+        labels.append(l)
+        paths.append(p)
+    assert all(l == label for l in labels), "Failed to group paths by label, expected all labels to be equal to '{}' but at least one was not".format(label)
+    features = spherediar.speech_dataset_to_embeddings(
+        labels,
+        paths,
+        label_to_index,
+        config["tmp_out_dir"],
+        config["spherediar_python"]
+    )
+    output_dir = os.path.join(tfrecords_dir, label)
+    sequence_length = config.get("sequence_length", 0)
+    if sequence_length > 0:
+        features = transformations.partition_into_sequences(features, sequence_length)
+        return label, system.write_sequence_features(features, output_dir)
+    else:
+        return label, system.write_features(features, output_dir)
 
 def check_datagroup(datagroup, datagroup_name):
     print("Datagroup '{}' has {} audio files".format(datagroup_name, len(datagroup["paths"])))
@@ -248,6 +273,56 @@ class SMILExtract(StatefulCommand):
         return self.extract()
 
 
+class SDExtract(StatefulCommand):
+    """
+    Use SphereDiar (https://github.com/Livefull/SphereDiar) to extract speaker recognition embeddings from audio files.
+    """
+    requires_state = State.has_paths
+
+    def has_spherediar(self):
+        config = self.experiment_config["features"]
+        ok = True
+        if not os.path.exists(config["spherediar_python"]):
+            print("Error: Python binary for SphereDiar does not exist: '{}'".format(config["spherediar_python"]), file=sys.stderr)
+            ok = False
+        return ok
+
+    def extract(self):
+        args = self.args
+        if args.verbosity:
+            print("Starting feature extraction using SphereDiar")
+        if not self.state_data_ok():
+            return 1
+        if not self.has_spherediar():
+            return 1
+        config = self.experiment_config["features"]
+        for datagroup_name in config["datagroups"]:
+            datagroup = self.state["data"][datagroup_name]
+            if args.verbosity:
+                check_datagroup(datagroup, datagroup_name)
+            datagroup["features"] = {}
+            tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
+            self.make_named_dir(tfrecords_dir)
+            tmp_out_dir = os.path.join(tfrecords_dir, "tmp_out")
+            self.make_named_dir(tmp_out_dir)
+            config["tmp_out_dir"] = tmp_out_dir
+            paths_sorted_by_label = sorted(zip(datagroup["labels"], datagroup["paths"]))
+            label_groups = itertools.groupby(paths_sorted_by_label, key=lambda pair: pair[0])
+            task_args = (tfrecords_dir, config, self.state["label_to_index"])
+            features = (extract_features_from_task_spherediar((group, task_args)) for group in label_groups)
+            if args.verbosity:
+                print("Extracting features")
+            for label, wrote_path in features:
+                datagroup["features"][label] = wrote_path
+                if args.verbosity:
+                    print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
+            shutil.rmtree(tmp_out_dir)
+
+    def run(self):
+        super().run()
+        return self.extract()
+
+
 command_tree = [
-    (Features, [Extract, Count, SMILExtract]),
+    (Features, [Extract, Count, SMILExtract, SDExtract]),
 ]

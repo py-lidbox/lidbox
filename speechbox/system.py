@@ -22,15 +22,14 @@ def run_command(cmd):
     process = subprocess.run(
         cmd.split(" "),
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stdout=subprocess.PIPE
     )
-    return process.stdout.decode("utf-8").strip()
+    return process.stdout.decode("utf-8").rstrip()
 
-def run_for_files(cmd, filepaths):
+def run_for_files(cmd, filepaths, batch_size=SUBPROCESS_BATCH_SIZE):
     # Run in batches
-    for begin in range(0, len(filepaths), SUBPROCESS_BATCH_SIZE):
-        batch = ' '.join(filepaths[begin:begin+SUBPROCESS_BATCH_SIZE])
+    for begin in range(0, len(filepaths), batch_size):
+        batch = ' '.join(filepaths[begin:begin+batch_size])
         yield run_command(cmd + ' ' + batch)
 
 def read_wavfile(path, **librosa_kwargs):
