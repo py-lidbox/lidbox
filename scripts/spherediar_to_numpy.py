@@ -21,7 +21,8 @@ if __name__ == "__main__":
         _ = spherediar.extract_features(wav)
         embedding = spherediar.get_embeddings()
         output_path = os.path.join(args.output_dir, os.path.basename(wavpath).split(".wav")[0])
-        np.save(output_path + ".npy", embedding, allow_pickle=False, fix_imports=False)
+        output_path += ".npy"
+        np.save(output_path, embedding, allow_pickle=False, fix_imports=False)
         path_to_numpyfile[wavpath] = output_path
         spherediar.embeddings_ = []
         spherediar.X_ = []
