@@ -14,14 +14,16 @@ from speechbox import get_package_root
 def speech_dataset_to_embeddings(labels, paths, label_to_index, tmpdir, spherediar_python, spherediar_stderr):
     spherediar_script = os.path.join(get_package_root(), "scripts", "spherediar_to_numpy.sh")
     spherediar_cmd = "{} {} {} {}".format(spherediar_script, spherediar_stderr, spherediar_python, tmpdir)
-    path_to_numpyfile = {}
+    paths_to_numpyfiles = {}
     for res in system.run_for_files(spherediar_cmd, paths):
         batch = json.loads(res)
-        intersection = batch.keys() & path_to_numpyfile.keys()
+        intersection = batch.keys() & paths_to_numpyfiles.keys()
         assert not intersection, "system.run_for_files failed, it returned some paths that already have results: {}".format(' '.join(intersection))
-        path_to_numpyfile.update(batch)
+        paths_to_numpyfiles.update(batch)
     for label, wavpath in zip(labels, paths):
-        embedding = np.load(path_to_numpyfile[wavpath], allow_pickle=False, fix_imports=False)
+        numpyfile = paths_to_numpyfiles[wavpath]
+        embedding = np.load(numpyfile, allow_pickle=False, fix_imports=False)
+        os.remove(numpyfile)
         onehot = np.zeros(len(label_to_index), dtype=np.float32)
         onehot[label_to_index[label]] = 1.0
         yield embedding, onehot
