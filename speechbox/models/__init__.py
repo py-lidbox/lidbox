@@ -6,6 +6,8 @@ import os
 import numpy as np
 import tensorflow as tf
 
+import speechbox.metrics
+
 # Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
 def with_device(method):
     @functools.wraps(method)
@@ -44,10 +46,11 @@ def parse_metrics(metrics):
             metric = tf.keras.metrics.Precision()
         elif m == "recall":
             metric = tf.keras.metrics.Recall()
+        elif m == "equal_error_rate":
+            metric = speechbox.metrics.EqualErrorRate()
         elif m == "C_avg":
-            #TODO
-            pass
-        assert metric is not None, "Invalid metric {}".format(m)
+            metric = speechbox.metrics.AverageDetectionCost()
+        assert metric is not None, "metric not implemented: '{}'".format(m)
         keras_metrics.append(metric)
     return keras_metrics
 
