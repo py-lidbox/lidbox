@@ -18,7 +18,7 @@ if __name__ == "__main__":
     for wavpath in args.wavpath:
         wav, sample_rate = librosa.core.load(wavpath, sr=None)
         assert sample_rate == 16000, "SphereDiar supports only 16 kHz sample rates"
-        _ = spherediar.extract_features(wav)
+        _ = spherediar.extract_features(wav, frame_len=max(2.0, wav.size / sample_rate))
         embedding = spherediar.get_embeddings()
         output_path = os.path.join(args.output_dir, os.path.basename(wavpath).split(".wav")[0])
         output_path += ".npy"
