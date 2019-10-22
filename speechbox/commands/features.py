@@ -82,7 +82,8 @@ def extract_features_from_task_spherediar(task):
         paths,
         label_to_index,
         config["tmp_out_dir"],
-        config["spherediar_python"]
+        config["spherediar_python"],
+        config.get("spherediar_stderr", "/dev/null"),
     )
     output_dir = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)

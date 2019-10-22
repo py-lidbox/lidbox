@@ -11,9 +11,8 @@ import speechbox.system as system
 from speechbox import get_package_root
 
 
-def speech_dataset_to_embeddings(labels, paths, label_to_index, tmpdir, spherediar_python):
+def speech_dataset_to_embeddings(labels, paths, label_to_index, tmpdir, spherediar_python, spherediar_stderr):
     spherediar_script = os.path.join(get_package_root(), "scripts", "spherediar_to_numpy.sh")
-    spherediar_stderr = "/dev/null"
     spherediar_cmd = "{} {} {} {}".format(spherediar_script, spherediar_stderr, spherediar_python, tmpdir)
     path_to_numpyfile = {}
     for res in system.run_for_files(spherediar_cmd, paths):
