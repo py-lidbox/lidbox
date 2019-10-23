@@ -298,12 +298,12 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
         dataset = parse_compressed_tfrecords(tfrecord_paths)
         if "repeat" in training_config:
             dataset = dataset.repeat(count=training_config["repeat"])
-    if "dataset_shuffle_size" in training_config:
-        dataset = dataset.shuffle(training_config["dataset_shuffle_size"])
+    if "shuffle_buffer_size" in training_config:
+        dataset = dataset.shuffle(training_config["shuffle_buffer_size"])
     if "batch_size" in training_config:
         dataset = dataset.batch(training_config["batch_size"])
-        if "prefetch" in training_config:
-            dataset = dataset.prefetch(training_config["steps_per_epoch"])
+    if "prefetch" in training_config:
+        dataset = dataset.prefetch(training_config["prefetch"])
     return dataset, features_meta
 
 def iter_log_events(tf_event_file):
