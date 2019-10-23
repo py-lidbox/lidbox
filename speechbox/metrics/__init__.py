@@ -1,5 +1,5 @@
-import tensorflow as tf
-from tf.keras.metrics import Metric, TruePositives, TrueNegatives, FalsePositives, FalseNegatives
+from tensorflow.keras.metrics import Metric, TruePositives, TrueNegatives, FalsePositives, FalseNegatives
+from tensorflow import math as tf_math
 
 
 class EqualErrorRate(Metric):
@@ -26,8 +26,8 @@ class EqualErrorRate(Metric):
 
     def result(self):
         tp, tn, fp, fn = [m.result() for m in self]
-        fp_rate = tf.math.divide_no_nan(fp, fp + tn)
-        fn_rate = tf.math.divide_no_nan(fn, fn + tp)
+        fp_rate = tf_math.divide_no_nan(fp, fp + tn)
+        fn_rate = tf_math.divide_no_nan(fn, fn + tp)
         return 0.5 * (fp_rate + fn_rate)
 
 
