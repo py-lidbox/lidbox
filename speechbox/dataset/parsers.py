@@ -83,7 +83,11 @@ class CommonVoiceParser(DatasetParser):
         total_duration = 0.0
         for sample in samples:
             src_path = os.path.join(self.dataset_root, "clips", sample["path"])
-            duration = sox.file_info.duration(src_path)
+            try:
+                duration = sox.file_info.duration(src_path)
+            except sox.core.SoxiError:
+                print("Skipping '{}' due to SoXI error".format(src_path))
+                continue
             if self.min_duration is not None and duration < self.min_duration:
                 if self.verbosity > 2:
                     print("Skipping '{}' because it is too short".format(src_path), file=sys.stderr)
