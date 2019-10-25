@@ -6,10 +6,10 @@ import shutil
 import sys
 
 from speechbox.commands.base import State, Command, StatefulCommand
-import speechbox.system as system
-import speechbox.preprocess.transformations as transformations
 import speechbox.preprocess.opensmile as opensmile
 import speechbox.preprocess.spherediar as spherediar
+import speechbox.preprocess.transformations as transformations
+import speechbox.system as system
 
 #TODO reduce repetition
 
@@ -38,12 +38,12 @@ def extract_features_from_task(task):
         label_to_index=label_to_index,
         extractors=config["extractors"]
     )
-    output_dir = os.path.join(tfrecords_dir, label)
+    output_path = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        return label, system.write_sequence_features(features, output_dir, sequence_length)
+        return label, system.write_sequence_features(features, output_path, sequence_length)
     else:
-        return label, system.write_features(features, output_dir)
+        return label, system.write_features(features, output_path)
 
 def extract_features_from_task_opensmile(task):
     (label, group), (tfrecords_dir, config, label_to_index) = task
@@ -62,12 +62,12 @@ def extract_features_from_task_opensmile(task):
     )
     # Drop opensmile meta
     features = ((feat, label) for feat, label, keys in features)
-    output_dir = os.path.join(tfrecords_dir, label)
+    output_path = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        return label, system.write_sequence_features(features, output_dir, sequence_length)
+        return label, system.write_sequence_features(features, output_path, sequence_length)
     else:
-        return label, system.write_features(features, output_dir)
+        return label, system.write_features(features, output_path)
 
 def extract_features_from_task_spherediar(task):
     (label, group), (tfrecords_dir, config, label_to_index) = task
@@ -85,12 +85,12 @@ def extract_features_from_task_spherediar(task):
         config["spherediar_python"],
         config.get("spherediar_stderr", "/dev/null"),
     )
-    output_dir = os.path.join(tfrecords_dir, label)
+    output_path = os.path.join(tfrecords_dir, label)
     sequence_length = config.get("sequence_length", 0)
     if sequence_length > 0:
-        return label, system.write_sequence_features(features, output_dir, sequence_length)
+        return label, system.write_sequence_features(features, output_path, sequence_length)
     else:
-        return label, system.write_features(features, output_dir)
+        return label, system.write_features(features, output_path)
 
 def check_datagroup(datagroup, datagroup_name):
     print("Datagroup '{}' has {} audio files".format(datagroup_name, len(datagroup["paths"])))
