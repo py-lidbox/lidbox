@@ -4,10 +4,21 @@ import os
 import pprint
 import sys
 
+import kaldiio
+import numpy as np
+
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
+
+
+def parse_lines(path):
+    with open(path) as f:
+        for l in f:
+            l = l.strip()
+            if l:
+                yield l.split()
 
 
 class Dataset(Command):
@@ -79,6 +90,7 @@ class Gather(StatefulCommand):
     tasks = (
         "walk_dir",
         "load_from_list",
+        "load_kaldi_files",
     )
     requires_state = State.none
 
@@ -96,6 +108,9 @@ class Gather(StatefulCommand):
             action=ExpandAbspath,
             metavar="PATH_LIST",
             help="Load path list from this file. Every line must contain atleast two columns, separated by space or tab, such that the first column is an absolute path and the second column is the label.")
+        tasks.add_argument("--load-kaldi-files",
+            action="store_true",
+            help="Load all paths, labels and pre-extracted features from kaldi files specified in the config file.")
         optional = parser.add_argument_group("gather options")
         optional.add_argument("--check",
             action="store_true",
@@ -107,6 +122,23 @@ class Gather(StatefulCommand):
             type=str,
             help="Which key to use for datagroup when loading paths with --load-from-list.")
         return parser
+
+    def kaldi_files_ok(self):
+        ok = True
+        config = self.experiment_config["features"].get("kaldi")
+        if config is None:
+            print("Error: kaldi files need to be defined in the config file in a list at key features.kaldi")
+            ok = False
+        else:
+            for kaldi in config:
+                for f in ("datagroup", "feats-ark", "wav-scp", "utt2label"):
+                    if f not in kaldi:
+                        print("Error: '{}' not defined in config file".format(f))
+                        ok = False
+                    elif f != "datagroup" and not os.path.exists(kaldi[f]):
+                        print("Error: '{}' does not exist: '{}'".format(f, kaldi[f]))
+                        ok = False
+        return ok
 
     def walk_dir(self):
         args = self.args
@@ -179,6 +211,75 @@ class Gather(StatefulCommand):
         self.state["state"] = State.has_paths
         # if args.compute_checksums:
         #     self.state["data"][args.datagroup]["checksums"] = system.all_md5sums(paths)
+
+    def load_kaldi_files(self):
+        args = self.args
+        if args.verbosity:
+            print("Loading pre-extracted Kaldi-feats")
+        if not self.kaldi_files_ok():
+            return 1
+        label_to_index = {label: i for i, label in enumerate(self.experiment_config["dataset"]["labels"])}
+        config = self.experiment_config["features"]
+        if "data" not in self.state:
+            self.state["data"] = {}
+        for kaldi_paths in config["kaldi"]:
+            wavdata = collections.defaultdict(dict)
+            for utt, path in parse_lines(kaldi_paths["wav-scp"]):
+                wavdata[utt]["path"] = path
+            for utt, label in parse_lines(kaldi_paths["utt2label"]):
+                wavdata[utt]["label"] = label
+            for utt, features in kaldiio.load_ark(kaldi_paths["feats-ark"]):
+                if kaldi_paths["datagroup"] == "training":
+                    utt = utt[3:]
+                else:
+                    utt = utt[4:]
+                wavdata[utt]["features"] = features
+            ok = True
+            for utt, data in wavdata.items():
+                missing_keys = []
+                for k in ("path", "label", "features"):
+                    if k not in data:
+                        missing_keys.append(k)
+                if missing_keys:
+                    ok = False
+                    print("Error: utterance '{}' is missing keys: {}".format(utt, ', '.join(missing_keys)))
+            if not ok:
+                return 1
+            features_by_label = collections.defaultdict(list)
+            paths = []
+            labels = []
+            for utt in wavdata.values():
+                paths.append(utt["path"])
+                label, feats = utt["label"], utt["features"]
+                labels.append(label)
+                onehot = np.zeros(len(label_to_index), dtype=np.float32)
+                onehot[label_to_index[label]] = 1.0
+                features_by_label[label].append((features, onehot))
+            del wavdata
+            datagroup_name = kaldi_paths["datagroup"]
+            datagroup = {
+                "paths": paths,
+                "labels": labels,
+                "features": {},
+            }
+            tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
+            self.make_named_dir(tfrecords_dir, "features")
+            sequence_length = config.get("sequence_length", 0)
+            for label, features in features_by_label.items():
+                features = iter(features)
+                if args.verbosity:
+                    print("Writing kaldi features as TFRecord files for label '{}'".format(label))
+                output_path = os.path.join(tfrecords_dir, label)
+                if sequence_length > 0:
+                    wrote_path = system.write_sequence_features(features, output_path, sequence_length)
+                else:
+                    wrote_path = system.write_features(features, output_path)
+                datagroup["features"][label] = wrote_path
+                if args.verbosity > 1:
+                    print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
+            self.state["data"][datagroup_name] = datagroup
+        self.state["label_to_index"] = label_to_index
+        self.state["state"] = State.has_features
 
     def run(self):
         super().run()

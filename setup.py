@@ -19,6 +19,7 @@ setuptools.setup(
         "scikit-learn ~= 0.21",
         "sox ~= 1.3",
         "webrtcvad ~= 2.0",
+        "kaldiio ~= 2.13",
     ],
     packages=[
         "speechbox",
