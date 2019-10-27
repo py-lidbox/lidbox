@@ -238,7 +238,9 @@ class Gather(StatefulCommand):
             print("Loading pre-extracted Kaldi-feats")
         if not self.kaldi_files_ok():
             return 1
-        label_to_index = {label: i for i, label in enumerate(self.experiment_config["dataset"]["labels"])}
+        if "label_to_index" not in self.state:
+            self.state["label_to_index"] = {label: i for i, label in enumerate(self.experiment_config["dataset"]["labels"])}
+        label_to_index = self.state["label_to_index"]
         config = self.experiment_config["features"]
         if "data" not in self.state:
             self.state["data"] = {}
@@ -287,7 +289,7 @@ class Gather(StatefulCommand):
                  kaldi_paths["feats-ark"],
                  config.get("sequence_length", 0),
                  args.verbosity)
-                for label in label_to_index
+                for label in sorted(set(labels), key=lambda l: label_to_index[l])
             )
             if args.num_workers > 1:
                 if args.verbosity > 1:
@@ -298,12 +300,13 @@ class Gather(StatefulCommand):
                 if args.verbosity > 1:
                     print("Not using parallel workers to write kaldi features as TFRecords, writing sequentially")
                 res = [write_features_task(t) for t in tasks]
+            if args.verbosity > 2:
+                print("Writing {} results".format(len(res)))
             for label, wrote_path in res:
                 datagroup["features"][label] = wrote_path
                 if args.verbosity:
                     print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
             self.state["data"][datagroup_name] = datagroup
-        self.state["label_to_index"] = label_to_index
         self.state["state"] = State.has_features
 
     def run(self):
