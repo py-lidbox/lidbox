@@ -1,5 +1,6 @@
 import collections
 import itertools
+import multiprocessing
 import os
 import pprint
 import sys
@@ -85,6 +86,19 @@ class Dataset(Command):
         self.state["source_directory"] = new_prefix
 
 
+# Write features for a single label as tfrecords, allows parallel execution
+def write_features_task(task):
+    label, features, (tfrecords_dir, sequence_length, verbosity) = task
+    output_path = os.path.join(tfrecords_dir, label)
+    if verbosity:
+        print("Writing kaldi features as TFRecord files for label '{}', features are sequences: {}".format(label, sequence_length > 0))
+    features = iter(features)
+    if sequence_length > 0:
+        return label, system.write_sequence_features(features, output_path, sequence_length)
+    else:
+        return label, system.write_features(features, output_path)
+
+
 class Gather(StatefulCommand):
     """Gather all filepaths from a dataset into experiment state"""
     tasks = (
@@ -121,6 +135,11 @@ class Gather(StatefulCommand):
         optional.add_argument("--datagroup",
             type=str,
             help="Which key to use for datagroup when loading paths with --load-from-list.")
+        kaldi_optional = parser.add_argument_group("kaldi options")
+        kaldi_optional.add_argument("--num-workers",
+            type=int,
+            default=1,
+            help="How many parallel processes to use when writing kaldi features as TFRecords. Write tasks are grouped by label.")
         return parser
 
     def kaldi_files_ok(self):
@@ -261,18 +280,20 @@ class Gather(StatefulCommand):
             }
             tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
             self.make_named_dir(tfrecords_dir, "features")
-            sequence_length = config.get("sequence_length", 0)
-            for label, features in features_by_label.items():
-                features = iter(features)
-                if args.verbosity:
-                    print("Writing kaldi features as TFRecord files for label '{}'".format(label))
-                output_path = os.path.join(tfrecords_dir, label)
-                if sequence_length > 0:
-                    wrote_path = system.write_sequence_features(features, output_path, sequence_length)
-                else:
-                    wrote_path = system.write_features(features, output_path)
-                datagroup["features"][label] = wrote_path
+            task_args = (tfrecords_dir, config.get("sequence_length", 0), args.verbosity)
+            tasks = ((label, features, task_args) for label, features in features_by_label.items())
+            if args.num_workers > 1:
                 if args.verbosity > 1:
+                    print("Using {} parallel workers to write kaldi features as TFRecords".format(args.num_workers))
+                with multiprocessing.Pool(args.num_workers) as pool:
+                    res = list(pool.imap_unordered(write_features_task, tasks))
+            else:
+                if args.verbosity > 1:
+                    print("Not using parallel workers to write kaldi features as TFRecords, writing sequentially")
+                res = [write_features_task(t) for t in tasks]
+            for label, wrote_path in res:
+                datagroup["features"][label] = wrote_path
+                if args.verbosity:
                     print("Wrote '{}' features for label '{}' into '{}'".format(datagroup_name, label, wrote_path))
             self.state["data"][datagroup_name] = datagroup
         self.state["label_to_index"] = label_to_index
