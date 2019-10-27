@@ -1,10 +1,12 @@
+import random
+
 import librosa.display
 import librosa.feature
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
-import seaborn
 import numpy as np
+import seaborn
 
 import speechbox.system as system
 
@@ -42,6 +44,7 @@ def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legen
     plt.tight_layout()
     return fig, ax
 
+#TODO
 def draw_training_metrics_from_tf_events(event_data, xlabel, ylabel, title):
     fig, ax = plt.subplots()
     ax.set(ylabel=ylabel, xlabel=xlabel, title=title)
@@ -54,6 +57,7 @@ def draw_training_metrics_from_tf_events(event_data, xlabel, ylabel, title):
     plt.tight_layout()
     return fig, ax
 
+#TODO
 def plot_overview(wav, figpath):
     """Plot as much visual information as possible for a wavfile."""
     plt.clf()
@@ -69,14 +73,25 @@ def plot_overview(wav, figpath):
     plt.tight_layout()
     plt.savefig(figpath)
 
-def plot_sequence_features_sample(dataset_by_label, figpath, sample_width=32):
-    fig, axes = plt.subplots(2, len(dataset_by_label)//2 + 1)
+def plot_sequence_features_sample(dataset_by_label, figpath=None, sample_width=None):
+    if sample_width is None:
+        sample_width = 32
+    fig, axes = plt.subplots(1, len(dataset_by_label))
+    heatmap_kwargs = {
+        "center": 0,
+        "cbar": False,
+        "xticklabels": False,
+        "yticklabels": False,
+    }
     for ax, (label, features) in zip(axes.reshape(-1), dataset_by_label.items()):
         ax.set_title(label)
-        assert features.ndim > 1, "Cannot plot single-dim features as sequences"
+        assert features.ndim > 2, "Cannot plot single-dim features as sequences"
         assert len(features) - sample_width > 0, "Too few sequences, cannot draw sample"
         begin = random.randint(0, len(features) - sample_width)
         sample = features[begin:begin+sample_width].reshape((-1, features.shape[-1]))
-        seaborn.heatmap(sample.T, ax=ax, cbar=False)
+        seaborn.heatmap(sample.T, ax=ax, **heatmap_kwargs)
     plt.tight_layout()
-    plt.savefig(figpath)
+    if figpath is None:
+        plt.show()
+    else:
+        plt.savefig(figpath)

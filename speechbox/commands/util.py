@@ -4,7 +4,9 @@ import pprint
 import sys
 import time
 
-from speechbox.commands.base import Command, ExpandAbspath
+import numpy as np
+
+from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.system as system
 import speechbox.visualization as visualization
 
@@ -153,6 +155,58 @@ class Util(Command):
         return self.run_tasks()
 
 
+class Plot(StatefulCommand):
+    requires_state = State.has_features
+
+    @classmethod
+    def create_argparser(cls, subparsers):
+        parser = super().create_argparser(subparsers)
+        required = parser.add_argument_group("plot arguments")
+        required.add_argument("plot_type",
+            type=str,
+            choices=("sequence_sample",),
+            help="What to plot.")
+        required.add_argument("datagroup",
+            type=str,
+            help="Which datagroup to plot from.")
+        optional = parser.add_argument_group("plot options")
+        optional.add_argument("--figure-path",
+            type=str,
+            metavar="plot.svg",
+            help="If given, plots will not be shown using tkinter (or whatever the default is) but written to this file.")
+        optional.add_argument("--shuffle-buffer-size",
+            type=int,
+            help="How many examples to load per label from the TFRecords.")
+        optional.add_argument("--num-samples",
+            type=int,
+            help="How many samples to include in the plots.")
+        return parser
+
+    def plot_sequence_sample(self):
+        args = self.args
+        datagroup = self.state["data"][args.datagroup]
+        if args.shuffle_buffer_size is None:
+            shuffle_buffer_size = self.experiment_config["experiment"]["dataset_shuffle_size"] // len(self.state["label_to_index"])
+        else:
+            shuffle_buffer_size = args.shuffle_buffer_size
+        assert shuffle_buffer_size > 0
+        dataset_by_label = {}
+        for label in self.state["label_to_index"]:
+            dataset, _ = system.load_features_as_dataset(
+                [datagroup["features"][label]],
+                training_config={"shuffle_buffer_size": shuffle_buffer_size}
+            )
+            dataset_by_label[label] = np.array([example.numpy() for example, _ in dataset.take(shuffle_buffer_size)])
+        visualization.plot_sequence_features_sample(dataset_by_label, figpath=args.figure_path, sample_width=args.num_samples)
+        return 0
+
+    def run(self):
+        super().run()
+        if self.args.plot_type == "sequence_sample":
+            return self.plot_sequence_sample()
+        return 1
+
+
 command_tree = [
-    (Util, []),
+    (Util, [Plot]),
 ]
