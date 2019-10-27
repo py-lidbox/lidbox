@@ -191,9 +191,9 @@ class Plot(StatefulCommand):
             shuffle_buffer_size = args.shuffle_buffer_size
         assert shuffle_buffer_size > 0
         dataset_by_label = {}
-        for label in self.state["label_to_index"]:
+        for label, tfrecord_path in datagroup["features"].items():
             dataset, _ = system.load_features_as_dataset(
-                [datagroup["features"][label]],
+                [tfrecord_path],
                 training_config={"shuffle_buffer_size": shuffle_buffer_size}
             )
             dataset_by_label[label] = np.array([example.numpy() for example, _ in dataset.take(shuffle_buffer_size)])
