@@ -212,6 +212,7 @@ class Gather(StatefulCommand):
         # if args.compute_checksums:
         #     self.state["data"][args.datagroup]["checksums"] = system.all_md5sums(paths)
 
+    #TODO stream ark files directly into tfrecords to reduce memory usage
     def load_kaldi_files(self):
         args = self.args
         if args.verbosity:
@@ -229,10 +230,6 @@ class Gather(StatefulCommand):
             for utt, label in parse_lines(kaldi_paths["utt2label"]):
                 wavdata[utt]["label"] = label
             for utt, features in kaldiio.load_ark(kaldi_paths["feats-ark"]):
-                if kaldi_paths["datagroup"] == "training":
-                    utt = utt[3:]
-                else:
-                    utt = utt[4:]
                 wavdata[utt]["features"] = features
             ok = True
             for utt, data in wavdata.items():
