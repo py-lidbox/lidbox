@@ -88,10 +88,10 @@ class Dataset(Command):
 
 # Write features for a single label as tfrecords, allows parallel execution
 def write_features_task(task):
-    label, onehot_label, tfrecords_dir, feats_ark, sequence_length, verbosity = task
+    label, utt_ids, onehot_label, tfrecords_dir, feats_ark, sequence_length, verbosity = task
     if verbosity:
         print("Writing kaldi features as TFRecord files for label '{}', features are sequences: {}".format(label, sequence_length > 0))
-    features = ((feat_vec, onehot_label) for _, feat_vec in kaldiio.load_ark(feats_ark))
+    features = ((feat_vec, onehot_label) for utt, feat_vec in kaldiio.load_ark(feats_ark) if utt in utt_ids)
     output_path = os.path.join(tfrecords_dir, label)
     if sequence_length > 0:
         return label, system.write_sequence_features(features, output_path, sequence_length)
@@ -281,6 +281,7 @@ class Gather(StatefulCommand):
                 return onehot
             tasks = (
                 (label,
+                 set(utt for utt in wavdata if wavdata[utt]["label"] == label),
                  get_onehot_label(label),
                  tfrecords_dir,
                  kaldi_paths["feats-ark"],
