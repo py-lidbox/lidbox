@@ -88,11 +88,11 @@ class Dataset(Command):
 
 # Write features for a single label as tfrecords, allows parallel execution
 def write_features_task(task):
-    label, features, (tfrecords_dir, sequence_length, verbosity) = task
-    output_path = os.path.join(tfrecords_dir, label)
+    label, onehot_label, tfrecords_dir, feats_ark, sequence_length, verbosity = task
     if verbosity:
         print("Writing kaldi features as TFRecord files for label '{}', features are sequences: {}".format(label, sequence_length > 0))
-    features = iter(features)
+    features = ((feat_vec, onehot_label) for _, feat_vec in kaldiio.load_ark(feats_ark))
+    output_path = os.path.join(tfrecords_dir, label)
     if sequence_length > 0:
         return label, system.write_sequence_features(features, output_path, sequence_length)
     else:
@@ -248,8 +248,9 @@ class Gather(StatefulCommand):
                 wavdata[utt]["path"] = path
             for utt, label in parse_lines(kaldi_paths["utt2label"]):
                 wavdata[utt]["label"] = label
-            for utt, features in kaldiio.load_ark(kaldi_paths["feats-ark"]):
-                wavdata[utt]["features"] = features
+            # Sanity check only
+            for utt, _ in kaldiio.load_ark(kaldi_paths["feats-ark"]):
+                wavdata[utt]["features"] = None
             ok = True
             for utt, data in wavdata.items():
                 missing_keys = []
@@ -261,16 +262,11 @@ class Gather(StatefulCommand):
                     print("Error: utterance '{}' is missing keys: {}".format(utt, ', '.join(missing_keys)))
             if not ok:
                 return 1
-            features_by_label = collections.defaultdict(list)
             paths = []
             labels = []
             for uttdata in wavdata.values():
                 paths.append(uttdata["path"])
-                label, feats = uttdata["label"], uttdata["features"]
-                labels.append(label)
-                onehot = np.zeros(len(label_to_index), dtype=np.float32)
-                onehot[label_to_index[label]] = 1.0
-                features_by_label[label].append((feats, onehot))
+                labels.append(uttdata["label"])
             datagroup_name = kaldi_paths["datagroup"]
             datagroup = {
                 "paths": paths,
@@ -279,8 +275,19 @@ class Gather(StatefulCommand):
             }
             tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
             self.make_named_dir(tfrecords_dir, "features")
-            task_args = (tfrecords_dir, config.get("sequence_length", 0), args.verbosity)
-            tasks = ((label, features, task_args) for label, features in features_by_label.items())
+            def get_onehot_label(label):
+                onehot = np.zeros(len(label_to_index), dtype=np.float32)
+                onehot[label_to_index[label]] = 1.0
+                return onehot
+            tasks = (
+                (label,
+                 get_onehot_label(label),
+                 tfrecords_dir,
+                 kaldi_paths["feats-ark"],
+                 config.get("sequence_length", 0),
+                 args.verbosity)
+                for label in label_to_index
+            )
             if args.num_workers > 1:
                 if args.verbosity > 1:
                     print("Using {} parallel workers to write kaldi features as TFRecords".format(args.num_workers))
