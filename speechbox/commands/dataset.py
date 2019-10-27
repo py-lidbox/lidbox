@@ -264,14 +264,13 @@ class Gather(StatefulCommand):
             features_by_label = collections.defaultdict(list)
             paths = []
             labels = []
-            for utt in wavdata.values():
-                paths.append(utt["path"])
-                label, feats = utt["label"], utt["features"]
+            for uttdata in wavdata.values():
+                paths.append(uttdata["path"])
+                label, feats = uttdata["label"], uttdata["features"]
                 labels.append(label)
                 onehot = np.zeros(len(label_to_index), dtype=np.float32)
                 onehot[label_to_index[label]] = 1.0
-                features_by_label[label].append((features, onehot))
-            del wavdata
+                features_by_label[label].append((feats, onehot))
             datagroup_name = kaldi_paths["datagroup"]
             datagroup = {
                 "paths": paths,
