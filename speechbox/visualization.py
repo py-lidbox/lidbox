@@ -3,6 +3,7 @@ import librosa.feature
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
+import seaborn
 import numpy as np
 
 import speechbox.system as system
@@ -65,5 +66,17 @@ def plot_overview(wav, figpath):
     for i, S in enumerate(Sp, start=1):
         plt.subplot(2, len(Sp), i + len(Sp))
         librosa.display.specshow(librosa.feature.mfcc(y=signal, sr=sample_rate, S=S))
+    plt.tight_layout()
+    plt.savefig(figpath)
+
+def plot_sequence_features_sample(dataset_by_label, figpath, sample_width=32):
+    fig, axes = plt.subplots(2, len(dataset_by_label)//2 + 1)
+    for ax, (label, features) in zip(axes.reshape(-1), dataset_by_label.items()):
+        ax.set_title(label)
+        assert features.ndim > 1, "Cannot plot single-dim features as sequences"
+        assert len(features) - sample_width > 0, "Too few sequences, cannot draw sample"
+        begin = random.randint(0, len(features) - sample_width)
+        sample = features[begin:begin+sample_width].reshape((-1, features.shape[-1]))
+        seaborn.heatmap(sample.T, ax=ax, cbar=False)
     plt.tight_layout()
     plt.savefig(figpath)

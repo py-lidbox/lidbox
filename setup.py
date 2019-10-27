@@ -15,11 +15,13 @@ setuptools.setup(
     python_requires=">=3.6",
     install_requires=[
         "PyYAML ~= 5.1",
+        "kaldiio ~= 2.13",
         "librosa ~= 0.7",
+        "matplotlib ~= 3.1",
         "scikit-learn ~= 0.21",
+        "seaborn ~= 0.9",
         "sox ~= 1.3",
         "webrtcvad ~= 2.0",
-        "kaldiio ~= 2.13",
     ],
     packages=[
         "speechbox",
