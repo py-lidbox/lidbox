@@ -76,7 +76,7 @@ def plot_overview(wav, figpath):
 def plot_sequence_features_sample(dataset_by_label, figpath=None, sample_width=None):
     if sample_width is None:
         sample_width = 32
-    fig, axes = plt.subplots(1, len(dataset_by_label))
+    fig, axes = plt.subplots(2, len(dataset_by_label)//2, figsize=(20, 15))
     heatmap_kwargs = {
         "center": 0,
         "cbar": False,
