@@ -134,7 +134,7 @@ class StatefulCommand(Command):
     def state_ok(self):
         ok = True
         if self.state["state"] != self.requires_state:
-            print("Error: command '{}' has incorrect state '{}' when '{}' was required".format(self), self.state["state"], self.requires_state, file=sys.stderr)
+            print("Error: command '{}' has incorrect state '{}' when '{}' was required".format(self, self.state["state"], self.requires_state), file=sys.stderr)
             ok = False
         return ok
 
