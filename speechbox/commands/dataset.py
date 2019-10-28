@@ -8,10 +8,10 @@ import sys
 import kaldiio
 import numpy as np
 
+from speechbox import system
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
-import speechbox.system as system
 
 
 def parse_lines(path):
@@ -88,10 +88,37 @@ class Dataset(Command):
 
 # Write features for a single label as tfrecords, allows parallel execution
 def write_features_task(task):
-    label, utt_ids, onehot_label, tfrecords_dir, feats_ark, sequence_length, verbosity = task
+    label, utt_ids, onehot_label, tfrecords_dir, feats_scps, sequence_length, verbosity = task
+    # Get handles to all feature files (should not be too many, one file for every type of feature)
+    # load_scp returns a dict-like object that supports key lookup of numpy arrays
+    feat_files = [kaldiio.load_scp(f) for f in feats_scps]
     if verbosity:
-        print("Writing kaldi features as TFRecord files for label '{}', features are sequences: {}".format(label, sequence_length > 0))
-    features = ((feat_vec, onehot_label) for utt, feat_vec in kaldiio.load_ark(feats_ark) if utt in utt_ids)
+        msg = "Parsing kaldi features for writing TFRecord files for label '{}'.".format(label)
+        if len(feat_files) > 1:
+            msg += " Stacking {} different types of features.".format(len(feat_files))
+        else:
+            msg += " Not stacking features, there's only a single feature type."
+        if sequence_length > 0:
+            msg += " Features will be partitioned into sequences of non-zero length {}.".format(sequence_length)
+        else:
+            msg += " Features will not be partitioned into sequences."
+        print(msg)
+    def stack_features():
+        # Use first feat file for iterating over utt ids
+        for utt in feat_files[0]:
+            if utt not in utt_ids:
+                continue
+            feat_vecs = [f[utt] for f in feat_files]
+            for i, v in enumerate(feat_vecs[1:], start=1):
+                if v.shape[0] != feat_vecs[0].shape[0]:
+                    print("Warning: utt", utt, "has some unstackable feature vecs that will not be stacked, the mismatching shapes are", v.shape, feat_vecs[0].shape, file=sys.stderr)
+                    feat_vecs = [feat_vecs[0]]
+                    break
+                # minmax scale all vectors between 0 and maximum of first vector
+                min, max = 0, feat_vecs[0].max()
+                feat_vecs[i] = (min + (v.T - v.min(axis=1)) * (max - min) / (v.max(axis=1) - v.min(axis=1))).T
+            yield np.concatenate(feat_vecs, axis=1), onehot_label
+    features = stack_features()
     output_path = os.path.join(tfrecords_dir, label)
     if sequence_length > 0:
         return label, system.write_sequence_features(features, output_path, sequence_length)
@@ -150,13 +177,18 @@ class Gather(StatefulCommand):
             ok = False
         else:
             for kaldi in config:
-                for f in ("datagroup", "feats-ark", "wav-scp", "utt2label"):
+                for f in ("datagroup", "feats-scps", "wav-scp", "utt2label"):
                     if f not in kaldi:
                         print("Error: '{}' not defined in config file".format(f))
                         ok = False
-                    elif f != "datagroup" and not os.path.exists(kaldi[f]):
+                    elif f in {"wav-scp", "utt2label"} and not os.path.exists(kaldi[f]):
                         print("Error: '{}' does not exist: '{}'".format(f, kaldi[f]))
                         ok = False
+                    elif f == "feats-scps":
+                        for scp in kaldi[f]:
+                            if not os.path.exists(scp):
+                                print("Error: scp-file '{}' does not exist: '{}'".format(f, scp))
+                                ok = False
         return ok
 
     def walk_dir(self):
@@ -231,7 +263,6 @@ class Gather(StatefulCommand):
         # if args.compute_checksums:
         #     self.state["data"][args.datagroup]["checksums"] = system.all_md5sums(paths)
 
-    #TODO stream ark files directly into tfrecords to reduce memory usage
     def load_kaldi_files(self):
         args = self.args
         if args.verbosity:
@@ -251,14 +282,24 @@ class Gather(StatefulCommand):
             for utt, label in parse_lines(kaldi_paths["utt2label"]):
                 wavdata[utt]["label"] = label
             # Sanity check only
-            for utt, _ in kaldiio.load_ark(kaldi_paths["feats-ark"]):
-                wavdata[utt]["features"] = None
+            for feats_scp_path in kaldi_paths["feats-scps"]:
+                for utt in kaldiio.load_scp(feats_scp_path):
+                    if "features" not in wavdata[utt]:
+                        wavdata[utt]["features"] = []
+                    wavdata[utt]["features"].append(None)
             ok = True
+            num_feature_types = 0
             for utt, data in wavdata.items():
                 missing_keys = []
                 for k in ("path", "label", "features"):
                     if k not in data:
                         missing_keys.append(k)
+                if "features" not in missing_keys:
+                    if num_feature_types == 0:
+                        num_feature_types = len(data["features"])
+                    elif len(data["features"]) != num_feature_types:
+                        print("Error: utterance '{}' has an mismatching amount of features compared to the some other utterance: {} feats compared to {}".format(utt, len(data["features"]), num_feature_types))
+                        ok = False
                 if missing_keys:
                     ok = False
                     print("Error: utterance '{}' is missing keys: {}".format(utt, ', '.join(missing_keys)))
@@ -286,7 +327,7 @@ class Gather(StatefulCommand):
                  set(utt for utt in wavdata if wavdata[utt]["label"] == label),
                  get_onehot_label(label),
                  tfrecords_dir,
-                 kaldi_paths["feats-ark"],
+                 kaldi_paths["feats-scps"],
                  config.get("sequence_length", 0),
                  args.verbosity)
                 for label in sorted(set(labels), key=lambda l: label_to_index[l])
