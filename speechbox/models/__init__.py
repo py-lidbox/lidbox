@@ -103,7 +103,9 @@ class KerasWrapper:
         def inspect_batches(batch_idx, batch):
             inputs, targets = batch[:2]
             print("\nLogger enabled for dataset '{}', batch data will be written as histograms for TensorBoard".format(dataset_name))
+            # Every value of all examples in this batch flattened to a single dimension
             tf.summary.histogram("{}-inputs".format(dataset_name), tf.reshape(inputs, [-1]), step=batch_idx)
+            # Index of every one-hot encoded target in this batch
             tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
             return batch
         dataset = dataset.enumerate().map(inspect_batches)

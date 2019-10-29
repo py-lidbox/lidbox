@@ -124,12 +124,12 @@ class Train(StatefulCommand):
             list(data["training"]["features"].values()),
             training_config
         )
-        if args.debug:
+        if training_config.get("monitor_model_input", False):
             metrics_dir, training_set = model.enable_dataset_logger("training", training_set)
             self.make_named_dir(metrics_dir)
         # Same for the validation set
         validation_set, _ = system.load_features_as_dataset(
-            list(data["validation"]["features"].values()),
+            list(data[training_config.get("validation_datagroup", "validation")]["features"].values()),
             training_config
         )
         if args.verbosity > 1:
@@ -283,7 +283,7 @@ class Evaluate(StatefulCommand):
         super().run()
         self.model_id = self.experiment_config["experiment"]["name"]
         args = self.args
-        self.eval_dir = os.path.join(args.cache_dir, "evaluations")
+        self.eval_dir = os.path.join(self.cache_dir, "evaluations")
         if args.eval_result_dir:
             self.eval_dir = args.eval_result_dir
         self.make_named_dir(self.eval_dir, "evaluation output")

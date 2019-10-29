@@ -276,19 +276,23 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
         else:
             d = d.map(example_parser_fn)
         return d
+    def parse_label(path):
+        return os.path.basename(path).split(".tfrecord")[0]
     label_weights = training_config.get("label_weights")
     if label_weights:
-        assert len(label_weights) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
+        if isinstance(label_weights, list):
+            assert len(label_weights) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
+        else:
+            assert isinstance(label_weights, float), "If the label weights are not a list, it should be a single float that will be assigned as a weight to all labels"
+            # Uniform dist.
+            label_weights = dict(zip((parse_label(p) for p in tfrecord_paths), itertools.repeat(label_weights)))
         # Assign a higher probability for drawing a more rare sample by inverting ratios of label to total num labels
         draw_prob = {label: 1.0/w for label, w in label_weights.items()}
         # Normalize into a probability distribution
         tot = sum(draw_prob.values())
         draw_prob = {label: inv_w/tot for label, inv_w in draw_prob.items()}
         # Assume .tfrecord files have been named by label
-        weights = [
-            draw_prob[os.path.basename(path).split(".tfrecord")[0]]
-            for path in tfrecord_paths
-        ]
+        weights = [draw_prob[parse_label(path)] for path in tfrecord_paths]
         # Assume each tfrecord file contains features only for a single label
         label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
         if "repeat" in training_config:
