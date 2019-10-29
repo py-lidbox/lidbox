@@ -1,11 +1,11 @@
 import tensorflow as tf
+import keras_self_attention
 
-
-def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, merge_mode='sum', batch_normalize=False, dropout_rate=0):
+def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, merge_mode='sum', batch_normalize=False, dropout_rate=0, output_attention=False):
     blstm_layers = []
     lstm_1 = tf.keras.layers.LSTM(
         num_units,
-        return_sequences=num_layers > 1
+        return_sequences=num_layers > 1 or output_attention
     )
     blstm_1 = tf.keras.layers.Bidirectional(
         lstm_1,
@@ -19,7 +19,7 @@ def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, 
             num_units //= 2
         lstm_i = tf.keras.layers.LSTM(
             num_units,
-            return_sequences=i < num_layers
+            return_sequences=i < num_layers or output_attention
         )
         blstm_i = tf.keras.layers.Bidirectional(
             lstm_i,
@@ -35,5 +35,9 @@ def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, 
         if dropout_rate > 0:
             layers.append(tf.keras.layers.Dropout(dropout_rate, name="dropout_{}".format(i)))
     blstm_layers = layers
-    output = tf.keras.layers.Dense(output_shape, activation='softmax')
-    return tf.keras.models.Sequential(blstm_layers + [output])
+    output = []
+    if output_attention:
+        output.append(keras_self_attention.SeqSelfAttention(name="self-attention"))
+        output.append(keras_self_attention.SeqWeightedAttention(name="weighted-attention"))
+    output.append(tf.keras.layers.Dense(output_shape, activation='softmax'))
+    return tf.keras.models.Sequential(blstm_layers + output)

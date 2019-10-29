@@ -16,6 +16,7 @@ setuptools.setup(
     install_requires=[
         "PyYAML ~= 5.1",
         "kaldiio ~= 2.13",
+        "keras-self-attention ~= 0.42",
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
         "scikit-learn ~= 0.21",
