@@ -88,7 +88,7 @@ class Dataset(Command):
 
 # Write features for a single label as tfrecords, allows parallel execution
 def write_features_task(task):
-    label, utt_ids, onehot_label, tfrecords_dir, feats_scps, sequence_length, verbosity = task
+    label, utt_ids, onehot_label, tfrecords_dir, feats_scps, sequence_length, normalize, verbosity = task
     # Get handles to all feature files (should not be too many, one file for every type of feature)
     # load_scp returns a dict-like object that supports key lookup of numpy arrays
     feat_files = [kaldiio.load_scp(f) for f in feats_scps]
@@ -102,6 +102,10 @@ def write_features_task(task):
             msg += " Features will be partitioned into sequences of non-zero length {}.".format(sequence_length)
         else:
             msg += " Features will not be partitioned into sequences."
+        if normalize:
+            msg += " Features will normalized over axis 1."
+        else:
+            msg += " Features will not be normalized."
         print(msg)
     def stack_features():
         # Use first feat file for iterating over utt ids
@@ -115,8 +119,13 @@ def write_features_task(task):
                     feat_vecs = [feat_vecs[0]]
                     break
                 # minmax scale all vectors between 0 and maximum of first vector
-                min, max = 0, feat_vecs[0].max()
-                feat_vecs[i] = (min + (v.T - v.min(axis=1)) * (max - min) / (v.max(axis=1) - v.min(axis=1))).T
+                # min, max = 0, feat_vecs[0].max()
+                # feat_vecs[i] = (min + (v.T - v.min(axis=1)) * (max - min) / (v.max(axis=1) - v.min(axis=1))).T
+            if normalize:
+                normalized = []
+                for v in feat_vecs:
+                    normalized.append(scipy.stats.zscore(v, axis=1))
+                feat_vecs = normalized
             yield np.concatenate(feat_vecs, axis=1), onehot_label
     features = stack_features()
     output_path = os.path.join(tfrecords_dir, label)
@@ -329,6 +338,7 @@ class Gather(StatefulCommand):
                  tfrecords_dir,
                  kaldi_paths["feats-scps"],
                  config.get("sequence_length", 0),
+                 config.get("normalize", False),
                  args.verbosity)
                 for label in sorted(set(labels), key=lambda l: label_to_index[l])
             )
