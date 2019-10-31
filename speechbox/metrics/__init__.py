@@ -1,34 +1,54 @@
-from tensorflow.keras.metrics import Metric, TruePositives, TrueNegatives, FalsePositives, FalseNegatives
+from sklearn.metrics import confusion_matrix
 from tensorflow import math as tf_math
+from tensorflow.keras.metrics import Metric, TruePositives, TrueNegatives, FalsePositives, FalseNegatives
+import numpy as np
 
 
-class EqualErrorRate(Metric):
-    def __init__(self, **kwargs):
+# non-tf version
+def avg_eer(y_true, y_pred):
+    cm = confusion_matrix(y_true, y_pred)
+    tp = np.diag(cm)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+    tn = cm.sum() - (fp + fn + tp)
+    fpr = fp / (fp + tn)
+    fnr = fn / (fn + tp)
+    return (0.5 * (fpr + fnr)).mean()
+
+
+class OneHotAvgEER(Metric):
+    """
+    Average Equal Error Rate for one-hot encoded targets containing 'num_classes' of different classes.
+    """
+    def __init__(self, num_classes, **kwargs):
         super().__init__(**kwargs)
-        self._metrics = (
-            TruePositives(),
-            TrueNegatives(),
-            FalsePositives(),
-            FalseNegatives()
-        )
-
-    def __iter__(self):
-        for m in self._metrics:
-            yield m
+        # 4 metrics for each dimension/class
+        self.class_metrics = [
+            {"tp": TruePositives(),
+             "tn": TrueNegatives(),
+             "fp": FalsePositives(),
+             "fn": FalseNegatives()}
+            for _ in range(num_classes)
+        ]
 
     def update_state(self, y_true, y_pred, **kwargs):
-        for m in self:
-            m.update_state(y_true, y_pred, **kwargs)
+        for i, dim in enumerate(self.class_metrics):
+            for metric in dim.values():
+                metric.update_state(y_true[:,i], y_pred[:,i])
 
     def reset_states(self):
-        for m in self:
-            m.reset_states()
+        for dim in self.class_metrics:
+            for metric in dim.values():
+                metric.reset_states()
 
     def result(self):
-        tp, tn, fp, fn = [m.result() for m in self]
-        fp_rate = tf_math.divide_no_nan(fp, fp + tn)
-        fn_rate = tf_math.divide_no_nan(fn, fn + tp)
-        return 0.5 * (fp_rate + fn_rate)
+        eer = np.empty(len(self.class_metrics), dtype=np.float32)
+        for i, dim in enumerate(self.class_metrics):
+            tp, tn, fp, fn = [dim[k].result() for k in ("tp", "tn", "fp", "fn")]
+            fp_rate = fp / (fp + tn)
+            fn_rate = fn / (fn + tp)
+            eer[i] = 0.5 * (fp_rate + fn_rate)
+        return eer.mean()
 
 
 class AverageDetectionCost(Metric):
