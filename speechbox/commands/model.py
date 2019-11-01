@@ -27,6 +27,9 @@ class Train(StatefulCommand):
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
         optional = parser.add_argument_group("training options")
+        optional.add_argument("--generate-debug-features",
+            action="store_true",
+            help="Do not use extracted features, instead generate normally distributed features for each label which should make every sample trivial to classify.")
         optional.add_argument("--imbalanced-labels",
             action="store_true",
             help="Apply weighting on imbalanced labels during training by using a pre-calculated feature distribution.")
@@ -124,6 +127,14 @@ class Train(StatefulCommand):
             list(data["training"]["features"].values()),
             training_config
         )
+        if args.generate_debug_features:
+            if args.verbosity:
+                print("Generating debug features for training set instead of using the actual features")
+            training_set = system.generate_and_load_dummy_features(
+                self.experiment_config["dummy"]["training_examples"],
+                features_meta,
+                training_config
+            )
         if training_config.get("monitor_model_input", False):
             metrics_dir, training_set = model.enable_dataset_logger("training", training_set)
             self.make_named_dir(metrics_dir)
@@ -132,6 +143,14 @@ class Train(StatefulCommand):
             list(data[training_config.get("validation_datagroup", "validation")]["features"].values()),
             training_config
         )
+        if args.generate_debug_features:
+            if args.verbosity:
+                print("Generating debug features for validation set instead of using the actual features")
+            validation_set = system.generate_and_load_dummy_features(
+                self.experiment_config["dummy"]["validation_examples"],
+                features_meta,
+                training_config
+            )
         if args.verbosity > 1:
             print("Compiling model")
         model.prepare(features_meta, training_config)

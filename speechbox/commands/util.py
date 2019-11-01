@@ -186,7 +186,7 @@ class Plot(StatefulCommand):
         args = self.args
         datagroup = self.state["data"][args.datagroup]
         if args.shuffle_buffer_size is None:
-            shuffle_buffer_size = self.experiment_config["experiment"]["dataset_shuffle_size"] // len(self.state["label_to_index"])
+            shuffle_buffer_size = self.experiment_config["experiment"]["shuffle_buffer_size"] // len(self.state["label_to_index"])
         else:
             shuffle_buffer_size = args.shuffle_buffer_size
         assert shuffle_buffer_size > 0

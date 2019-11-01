@@ -310,6 +310,44 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
         dataset = dataset.prefetch(training_config["prefetch"])
     return dataset, features_meta
 
+def generate_and_load_dummy_features(N, features_meta, training_config=None):
+    """
+    Generate dummy dataset with normally distributed features with unit variance and far apart means.
+    """
+    import tensorflow as tf
+    if training_config is None:
+        training_config = {}
+    num_labels = features_meta["num_labels"]
+    num_features =  features_meta["num_features"]
+    def onehot(i):
+        o = np.zeros(num_labels, dtype=np.float32)
+        o[i] = 1.0
+        return o
+    seq_len = features_meta.get("sequence_length", 0)
+    if seq_len:
+        feat_shape = [seq_len, num_features]
+    else:
+        feat_shape = [num_features]
+    def gauss_spikes():
+        separation = 100.0
+        centers = 100.0 * (np.arange(num_labels) - num_labels // 2)
+        onehot_labels = (onehot(i) for i in range(num_labels))
+        for onehot_label, center in itertools.cycle(zip(onehot_labels, centers)):
+            yield np.random.normal(center, 1, feat_shape), onehot_label
+    dataset = tf.data.Dataset.from_generator(
+        gauss_spikes,
+        (tf.float32, tf.float32),
+        (tf.TensorShape(feat_shape), tf.TensorShape([num_labels]))
+    )
+    dataset = dataset.take(N)
+    if "shuffle_buffer_size" in training_config:
+        dataset = dataset.shuffle(training_config["shuffle_buffer_size"])
+    if "batch_size" in training_config:
+        dataset = dataset.batch(training_config["batch_size"])
+    if "prefetch" in training_config:
+        dataset = dataset.prefetch(training_config["prefetch"])
+    return dataset
+
 def iter_log_events(tf_event_file):
     import tensorflow as tf
     from tensorflow.core.util.event_pb2 import Event
