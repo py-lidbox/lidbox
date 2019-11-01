@@ -7,6 +7,7 @@ import sys
 
 import kaldiio
 import numpy as np
+import scipy
 
 from speechbox import system
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
@@ -107,6 +108,7 @@ def write_features_task(task):
         else:
             msg += " Features will not be normalized."
         print(msg)
+    #TODO more numpy
     def stack_features():
         # Use first feat file for iterating over utt ids
         for utt in feat_files[0]:
