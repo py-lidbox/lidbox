@@ -1,6 +1,6 @@
 from sklearn.metrics import confusion_matrix
-from tensorflow import math as tf_math
 from tensorflow.keras.metrics import Metric, TruePositives, TrueNegatives, FalsePositives, FalseNegatives
+import tensorflow as tf
 import numpy as np
 
 
@@ -15,40 +15,40 @@ def avg_eer(y_true, y_pred):
     fnr = fn / (fn + tp)
     return (0.5 * (fpr + fnr)).mean()
 
-
 class OneHotAvgEER(Metric):
     """
     Average Equal Error Rate for one-hot encoded targets containing 'num_classes' of different classes.
     """
-    def __init__(self, num_classes, **kwargs):
-        super().__init__(**kwargs)
-        # 4 metrics for each dimension/class
+    def __init__(self, num_classes, name="avg_eer", **kwargs):
+        super().__init__(name=name, **kwargs)
+        # 4 metrics for each class
         self.class_metrics = [
-            {"tp": TruePositives(),
-             "tn": TrueNegatives(),
-             "fp": FalsePositives(),
-             "fn": FalseNegatives()}
+            (TruePositives(), TrueNegatives(), FalsePositives(), FalseNegatives())
             for _ in range(num_classes)
         ]
 
     def update_state(self, y_true, y_pred, **kwargs):
-        for i, dim in enumerate(self.class_metrics):
-            for metric in dim.values():
-                metric.update_state(y_true[:,i], y_pred[:,i])
+        for i, c in enumerate(self.class_metrics):
+            for metric in c:
+                metric.update_state(y_true[:,i], y_pred[:,i], **kwargs)
 
     def reset_states(self):
-        for dim in self.class_metrics:
-            for metric in dim.values():
+        for c in self.class_metrics:
+            for metric in c:
                 metric.reset_states()
 
     def result(self):
-        eer = np.empty(len(self.class_metrics), dtype=np.float32)
-        for i, dim in enumerate(self.class_metrics):
-            tp, tn, fp, fn = [dim[k].result() for k in ("tp", "tn", "fp", "fn")]
+        @tf.function
+        def eer(tp, tn, fp, fn):
             fp_rate = fp / (fp + tn)
             fn_rate = fn / (fn + tp)
-            eer[i] = 0.5 * (fp_rate + fn_rate)
-        return eer.mean()
+            if tf.math.is_nan(fp_rate):
+                fp_rate = tf.constant(1.0)
+            if tf.math.is_nan(fn_rate):
+                fn_rate = tf.constant(1.0)
+            return 0.5 * (fp_rate + fn_rate)
+        eer_by_label = [eer(*[m.result() for m in c]) for c in self.class_metrics]
+        return tf.reduce_mean(eer_by_label)
 
 
 class AverageDetectionCost(Metric):
