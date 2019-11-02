@@ -1,4 +1,5 @@
 """File IO."""
+import collections
 import gzip
 import hashlib
 import itertools
@@ -137,14 +138,14 @@ def get_most_recent_file(directory):
     files = (f for f in os.scandir(directory) if f.is_file())
     return max(files, key=lambda d: d.stat().st_mtime).name
 
-def sequence_to_example(sequence, onehot_label_vec):
+def feat_vec_to_example(feat_vec, onehot_label_vec):
     """
-    Encode a single sequence and its label as a TensorFlow SequenceExample.
+    Encode a single feat_vec and its label as a TensorFlow SequenceExample.
     """
     import tensorflow as tf
     def float_vec_to_float_features(v):
         return tf.train.Feature(float_list=tf.train.FloatList(value=v))
-    def sequence_to_floatlist_features(seq):
+    def feat_vec_to_floatlist_features(seq):
         float_features = (tf.train.Feature(float_list=tf.train.FloatList(value=frame)) for frame in seq)
         return tf.train.FeatureList(feature=float_features)
     # Time-independent context for time-dependent sequence
@@ -154,12 +155,12 @@ def sequence_to_example(sequence, onehot_label_vec):
     context = tf.train.Features(feature=context_definition)
     # Sequence frames as a feature list
     feature_list_definition = {
-        "inputs": sequence_to_floatlist_features(sequence),
+        "inputs": feat_vec_to_floatlist_features(feat_vec),
     }
     feature_lists = tf.train.FeatureLists(feature_list=feature_list_definition)
     return tf.train.SequenceExample(context=context, feature_lists=feature_lists)
 
-def sequence_example_to_model_input(seq_example_string, num_labels, num_features):
+def sequence_example_to_model_input(seq_example_string, num_labels, feat_shape):
     """
     Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
     """
@@ -168,7 +169,7 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
         "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
     }
     sequence_definition = {
-        "inputs": tf.io.FixedLenSequenceFeature(shape=[num_features], dtype=tf.float32)
+        "inputs": tf.io.FixedLenSequenceFeature(shape=feat_shape[1:], dtype=tf.float32)
     }
     context, sequence = tf.io.parse_single_sequence_example(
         seq_example_string,
@@ -177,14 +178,12 @@ def sequence_example_to_model_input(seq_example_string, num_labels, num_features
     )
     return sequence["inputs"], context["target"]
 
-def write_sequence_features(features, target_path, sequence_length):
+def write_features(features, target_path):
     import tensorflow as tf
-    sequence_features = transformations.partition_features_into_sequences(features, sequence_length)
     # Peek the dimensions from the first sample
-    sequence, onehot_label = next(sequence_features)
+    feat_vec, onehot_label = next(features)
     features_meta = {
-        "sequence_length": sequence.shape[0],
-        "num_features": sequence.shape[1],
+        "feat_vec_shape": feat_vec.shape,
         "num_labels": len(onehot_label)
     }
     target_path += ".tfrecord"
@@ -192,12 +191,15 @@ def write_sequence_features(features, target_path, sequence_length):
         json.dump(features_meta, meta_file)
         meta_file.write("\n")
     # Put back the first sample
-    sequence_features = itertools.chain([(sequence, onehot_label)], sequence_features)
+    features = itertools.chain([(feat_vec, onehot_label)], features)
     # Write all samples
     with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
-        for sequence, onehot_label in sequence_features:
-            sequence_example = sequence_to_example(sequence, onehot_label)
-            record_writer.write(sequence_example.SerializeToString())
+        c = collections.Counter()
+        for feat_vec, onehot_label in features:
+            c[feat_vec.shape] += 1
+            example = feat_vec_to_example(feat_vec, onehot_label)
+            record_writer.write(example.SerializeToString())
+        print("feature shape histogram, length:", len(c), ", 5 most common shapes:", c.most_common(5))
     return target_path
 
 def features_to_example(features, onehot_label_vec):
@@ -219,24 +221,24 @@ def example_to_model_input(example_string, num_labels, num_features):
     example = tf.io.parse_single_example(example_string, features_definition)
     return example["input"], example["target"]
 
-def write_features(features, target_path):
-    import tensorflow as tf
-    target_path += ".tfrecord"
-    feat, onehot_label = next(features)
-    assert feat.ndim == 1, "Unexpected dimensions '{}' for 1-dim vector features".format(feat.ndim)
-    features_meta = {
-        "num_features": feat.size,
-        "num_labels": len(onehot_label)
-    }
-    with open(target_path + ".meta.json", 'w') as meta_file:
-        json.dump(features_meta, meta_file)
-        meta_file.write("\n")
-    features = itertools.chain([(feat, onehot_label)], features)
-    with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
-        for feat, onehot_label in features:
-            example = features_to_example(feat, onehot_label)
-            record_writer.write(example.SerializeToString())
-    return target_path
+# def write_features(features, target_path):
+#     import tensorflow as tf
+#     target_path += ".tfrecord"
+#     feat, onehot_label = next(features)
+#     assert feat.ndim == 2, "Unexpected dimensions '{}' for dataset containing 1-dim feature vectors".format(feat.ndim)
+#     features_meta = {
+#         "num_features": feat.size,
+#         "num_labels": len(onehot_label)
+#     }
+#     with open(target_path + ".meta.json", 'w') as meta_file:
+#         json.dump(features_meta, meta_file)
+#         meta_file.write("\n")
+#     features = itertools.chain([(feat, onehot_label)], features)
+#     with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
+#         for feat, onehot_label in features:
+#             example = features_to_example(feat, onehot_label)
+#             record_writer.write(example.SerializeToString())
+#     return target_path
 
 def count_all_features(features_file):
     from tensorflow import device
@@ -262,13 +264,10 @@ def load_features_as_dataset(tfrecord_paths, training_config=None):
         training_config = {}
     # All labels should have features of same dimensions
     features_meta = load_features_meta(tfrecord_paths[0])
-    assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
+    # assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
     num_labels = features_meta["num_labels"]
-    num_features =  features_meta["num_features"]
-    if features_meta.get("sequence_length", 0) > 0:
-        example_parser_fn = lambda example_str: sequence_example_to_model_input(example_str, num_labels, num_features)
-    else:
-        example_parser_fn = lambda example_str: example_to_model_input(example_str, num_labels, num_features)
+    feat_shape =  features_meta["feat_vec_shape"]
+    example_parser_fn = lambda example_str: sequence_example_to_model_input(example_str, num_labels, feat_shape)
     def parse_compressed_tfrecords(paths):
         d = tf.data.TFRecordDataset(paths, compression_type=TFRECORD_COMPRESSION)
         if "parallel_parse" in training_config:

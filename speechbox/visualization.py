@@ -76,20 +76,19 @@ def plot_overview(wav, figpath):
 def plot_sequence_features_sample(dataset_by_label, figpath=None, sample_width=None):
     if sample_width is None:
         sample_width = 32
-    fig, axes = plt.subplots(2, len(dataset_by_label)//2 + 1, figsize=(20, 15))
+    fig, axes = plt.subplots(2, int(np.ceil(len(dataset_by_label)/2)), figsize=(20, 15))
     heatmap_kwargs = {
         "center": 0,
-        "cbar": False,
-        "xticklabels": False,
-        "yticklabels": False,
+        "xticklabels": 50,
     }
     for ax, (label, features) in zip(axes.reshape(-1), dataset_by_label.items()):
-        ax.set_title(label)
         assert features.ndim > 2, "Cannot plot single-dim features as sequences"
         assert len(features) - sample_width > 0, "Too few sequences, cannot draw sample"
         rand_indexes = np.random.choice(np.arange(features.shape[0]), size=sample_width, replace=False)
-        sample = features[rand_indexes].reshape((-1, features.shape[-1]))
+        sample = features[rand_indexes].reshape((-1, features.shape[-1] if features.shape[-1] > 1 else features.shape[-2]))
         seaborn.heatmap(sample.T, ax=ax, **heatmap_kwargs)
+        ax.set_title(label)
+        ax.invert_yaxis()
     plt.tight_layout()
     if figpath is None:
         plt.show()

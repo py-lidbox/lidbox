@@ -115,7 +115,7 @@ class KerasWrapper:
 
     @with_device
     def prepare(self, features_meta, training_config):
-        input_shape = features_meta["sequence_length"], features_meta["num_features"]
+        input_shape = features_meta["feat_vec_shape"]
         output_shape = features_meta["num_labels"]
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
@@ -139,6 +139,7 @@ class KerasWrapper:
             class_weight=model_config.get("class_weight"),
             epochs=model_config["epochs"],
             initial_epoch=self.initial_epoch,
+            shuffle=False,
             steps_per_epoch=model_config.get("steps_per_epoch"),
             validation_data=validation_set,
             validation_steps=model_config.get("validation_steps"),

@@ -89,7 +89,9 @@ class Dataset(Command):
 
 # Write features for a single label as tfrecords, allows parallel execution
 def write_features_task(task):
-    label, utt_ids, onehot_label, tfrecords_dir, feats_scps, sequence_length, normalize, verbosity = task
+    label, utt_ids, onehot_label, tfrecords_dir, feats_scps, config, verbosity = task
+    reshape_to = config.get("reshape")
+    normalize = config.get("normalize", False)
     # Get handles to all feature files (should not be too many, one file for every type of feature)
     # load_scp returns a dict-like object that supports key lookup of numpy arrays
     feat_files = [kaldiio.load_scp(f) for f in feats_scps]
@@ -99,42 +101,34 @@ def write_features_task(task):
             msg += " Stacking {} different types of features.".format(len(feat_files))
         else:
             msg += " Not stacking features, there's only a single feature type."
-        if sequence_length > 0:
-            msg += " Features will be partitioned into sequences of non-zero length {}.".format(sequence_length)
+        if reshape_to:
+            msg += " Features will be reshaped to {}.".format(reshape_to)
         else:
-            msg += " Features will not be partitioned into sequences."
+            msg += " Features will not be reshaped."
         if normalize:
-            msg += " Features will normalized over axis 1."
+            msg += " Features will be normalized to 0 mean and 1 variance."
         else:
             msg += " Features will not be normalized."
         print(msg)
-    #TODO more numpy
     def stack_features():
         # Use first feat file for iterating over utt ids
         for utt in feat_files[0]:
             if utt not in utt_ids:
                 continue
-            feat_vecs = [f[utt] for f in feat_files]
-            for i, v in enumerate(feat_vecs[1:], start=1):
-                if v.shape[0] != feat_vecs[0].shape[0]:
-                    print("Warning: utt", utt, "has some unstackable feature vecs that will not be stacked, the mismatching shapes are", v.shape, feat_vecs[0].shape, file=sys.stderr)
-                    feat_vecs = [feat_vecs[0]]
-                    break
-                # minmax scale all vectors between 0 and maximum of first vector
-                # min, max = 0, feat_vecs[0].max()
-                # feat_vecs[i] = (min + (v.T - v.min(axis=1)) * (max - min) / (v.max(axis=1) - v.min(axis=1))).T
+            feat_vecs = np.array([f[utt] for f in feat_files])
             if normalize:
-                normalized = []
+                feat_vecs = scipy.stats.zscore(feat_vecs, axis=1)
+            if reshape_to:
+                reshaped = []
                 for v in feat_vecs:
-                    normalized.append(scipy.stats.zscore(v, axis=1))
-                feat_vecs = normalized
+                    # zero pad down and right
+                    v = np.pad(v, ((0, reshape_to[0] - v.shape[0]), (0, reshape_to[1] - v.shape[1])))
+                    reshaped.append(v.reshape(reshape_to))
+                feat_vecs = reshaped
             yield np.concatenate(feat_vecs, axis=1), onehot_label
     features = stack_features()
     output_path = os.path.join(tfrecords_dir, label)
-    if sequence_length > 0:
-        return label, system.write_sequence_features(features, output_path, sequence_length)
-    else:
-        return label, system.write_features(features, output_path)
+    return label, system.write_features(features, output_path)
 
 
 class Gather(StatefulCommand):
@@ -288,8 +282,8 @@ class Gather(StatefulCommand):
             self.state["data"] = {}
         for kaldi_paths in config["kaldi"]:
             wavdata = collections.defaultdict(dict)
-            for utt, path in parse_lines(kaldi_paths["wav-scp"]):
-                wavdata[utt]["path"] = path
+            # for utt, path in parse_lines(kaldi_paths["wav-scp"]):
+                # wavdata[utt]["path"] = path
             for utt, label in parse_lines(kaldi_paths["utt2label"]):
                 wavdata[utt]["label"] = label
             # Sanity check only
@@ -302,7 +296,7 @@ class Gather(StatefulCommand):
             num_feature_types = 0
             for utt, data in wavdata.items():
                 missing_keys = []
-                for k in ("path", "label", "features"):
+                for k in ("label", "features"):
                     if k not in data:
                         missing_keys.append(k)
                 if "features" not in missing_keys:
@@ -311,20 +305,15 @@ class Gather(StatefulCommand):
                     elif len(data["features"]) != num_feature_types:
                         print("Error: utterance '{}' has an mismatching amount of features compared to the some other utterance: {} feats compared to {}".format(utt, len(data["features"]), num_feature_types))
                         ok = False
-                if missing_keys:
+                if "label" in missing_keys:
                     ok = False
                     print("Error: utterance '{}' is missing keys: {}".format(utt, ', '.join(missing_keys)))
             if not ok:
                 return 1
-            paths = []
-            labels = []
-            for uttdata in wavdata.values():
-                paths.append(uttdata["path"])
-                labels.append(uttdata["label"])
             datagroup_name = kaldi_paths["datagroup"]
             datagroup = {
-                "paths": paths,
-                "labels": labels,
+                "paths": [],
+                "labels": [],
                 "features": {},
             }
             tfrecords_dir = os.path.join(self.cache_dir, datagroup_name)
@@ -339,10 +328,9 @@ class Gather(StatefulCommand):
                  get_onehot_label(label),
                  tfrecords_dir,
                  kaldi_paths["feats-scps"],
-                 config.get("sequence_length", 0),
-                 config.get("normalize", False),
+                 config,
                  args.verbosity)
-                for label in sorted(set(labels), key=lambda l: label_to_index[l])
+                for _, label in sorted((i, l) for l, i in label_to_index.items())
             )
             if args.num_workers > 1:
                 if args.verbosity > 1:
