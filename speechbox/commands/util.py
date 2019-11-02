@@ -1,6 +1,7 @@
 import itertools
 import os
 import pprint
+import shutil
 import sys
 import time
 
@@ -207,6 +208,54 @@ class Plot(StatefulCommand):
         return 1
 
 
+class Kaldi(Command):
+
+    @classmethod
+    def create_argparser(cls, subparsers):
+        parser = super().create_argparser(subparsers)
+        required = parser.add_argument_group("kaldi arguments")
+        required.add_argument("wavscp", type=str, action=ExpandAbspath)
+        required.add_argument("durations", type=str, action=ExpandAbspath)
+        required.add_argument("utt2lang", type=str, action=ExpandAbspath)
+        required.add_argument("task", choices=("uniform-segment",))
+        optional = parser.add_argument_group("kaldi options")
+        optional.add_argument("--offset", type=float)
+        optional.add_argument("--window-len", type=float)
+        return parser
+
+    def uniform_segment(self):
+        def parse_kaldifile(path):
+            with open(path) as f:
+                for line in f:
+                    yield line.strip().split()
+        args = self.args
+        file2lang = dict(parse_kaldifile(args.utt2lang))
+        utt2seg = {}
+        utt2lang = {}
+        for wavpath, dur in parse_kaldifile(args.durations):
+            dur = float(dur)
+            fileid = os.path.basename(wavpath).split(".wav")[0]
+            for utt_num in range(int((dur + args.offset) / args.window_len)):
+                start = utt_num * args.offset
+                uttid = "{}_{}".format(fileid, utt_num)
+                utt2seg[uttid] = (fileid, start, start + args.window_len)
+                utt2lang[uttid] = file2lang[fileid]
+        with open(os.path.join(os.path.dirname(args.wavscp), "segments"), "w") as f:
+            for uttid, (fileid, start, end) in utt2seg.items():
+                print(uttid, fileid, format(float(start), ".2f"), format(float(end), ".2f"), file=f)
+        shutil.copyfile(args.utt2lang, args.utt2lang + ".old")
+        with open(args.utt2lang, "w") as f:
+            for uttid, lang in utt2lang.items():
+                print(uttid, lang, file=f)
+
+    def run(self):
+        super().run()
+        if self.args.task == "uniform-segment":
+            return self.uniform_segment()
+        return 1
+
+
 command_tree = [
     (Util, [Plot]),
+    (Kaldi, []),
 ]
