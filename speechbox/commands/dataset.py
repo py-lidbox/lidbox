@@ -6,6 +6,7 @@ import pprint
 import sys
 
 import kaldiio
+import librosa
 import numpy as np
 import scipy
 
@@ -102,7 +103,7 @@ def write_features_task(task):
         else:
             msg += " Not stacking features, there's only a single feature type."
         if reshape_to:
-            msg += " Features will be reshaped to {}.".format(reshape_to)
+            msg += " Features will be reshaped to windows of shape {} with hop length {}.".format(reshape_to, config["frame_hop"])
         else:
             msg += " Features will not be reshaped."
         if normalize:
@@ -119,13 +120,23 @@ def write_features_task(task):
             if normalize:
                 feat_vecs = scipy.stats.zscore(feat_vecs, axis=1)
             if reshape_to:
+                #TODO
                 reshaped = []
                 for v in feat_vecs:
-                    # zero pad down and right
-                    v = np.pad(v, ((0, reshape_to[0] - v.shape[0]), (0, reshape_to[1] - v.shape[1])))
-                    reshaped.append(v.reshape(reshape_to))
-                feat_vecs = reshaped
-            yield np.concatenate(feat_vecs, axis=1), onehot_label
+                    assert reshape_to[1] >= v.shape[1], "invalid reshape_to {} when feature vector shape is {}, dimension 1 would be shorter than in the feature vector".format(reshape_to, v.shape)
+                    # zero-pad along first axis to fit all frames when sliding over the window
+                    # zero-pad alog second axis to expand feature dimensions up to reshape_to[1]
+                    v = np.pad(v, ((0, reshape_to[0] - v.shape[0] % reshape_to[0]), (0, reshape_to[1] - v.shape[1])))
+                    # slide window over v, creating new feature vectors of shape 'reshape_to'
+                    windows = [
+                        w.reshape(reshape_to)
+                        for w in librosa.util.frame(v, frame_length=reshape_to[0], hop_length=config["frame_hop"], axis=0)
+                    ]
+                    reshaped.append(windows)
+                for i in range(len(reshaped[0])):
+                    yield np.concatenate([w[i] for w in reshaped], axis=1), onehot_label
+            else:
+                yield np.concatenate(feat_vecs, axis=1), onehot_label
     features = stack_features()
     output_path = os.path.join(tfrecords_dir, label)
     return label, system.write_features(features, output_path)

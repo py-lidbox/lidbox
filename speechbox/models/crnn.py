@@ -22,10 +22,10 @@ def loader(input_shape, output_shape, filters=(32, 64, 128, 256), lstm_units=128
         else:
             m.add(Conv2D(num_filters, 3, activation="relu", input_shape=input_shape))
         m.add(BatchNormalization())
-        m.add(MaxPool2D(pool_size=(2, 2)))
+        m.add(MaxPool2D())
     m.add(Permute((2, 1, 3)))
-    num_cols, num_rows, num_filters = m.layers[-1].output_shape[1:]
-    m.add(Reshape((num_cols, num_rows * num_filters)))
+    y, x, timesteps = m.layers[-1].output_shape[1:]
+    m.add(Reshape((y, x * timesteps)))
     lstm = LSTM(lstm_units)
     if blstm:
         lstm = Bidirectional(lstm)
