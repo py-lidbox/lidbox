@@ -165,7 +165,7 @@ class Plot(StatefulCommand):
         required = parser.add_argument_group("plot arguments")
         required.add_argument("plot_type",
             type=str,
-            choices=("sequence_sample",),
+            choices=("sequence_sample", "rand_samples"),
             help="What to plot.")
         required.add_argument("datagroup",
             type=str,
@@ -180,10 +180,11 @@ class Plot(StatefulCommand):
             help="How many examples to load per label from the TFRecords.")
         optional.add_argument("--num-samples",
             type=int,
+            default=1,
             help="How many samples to include in the plots.")
         return parser
 
-    def plot_sequence_sample(self):
+    def get_dataset(self):
         args = self.args
         datagroup = self.state["data"][args.datagroup]
         if args.shuffle_buffer_size is None:
@@ -198,13 +199,30 @@ class Plot(StatefulCommand):
                 training_config={"shuffle_buffer_size": shuffle_buffer_size}
             )
             dataset_by_label[label] = np.array([example.numpy() for example, _ in dataset.take(shuffle_buffer_size)])
-        visualization.plot_sequence_features_sample(dataset_by_label, figpath=args.figure_path, sample_width=args.num_samples)
+        return dataset_by_label
+
+    def plot_sequence_sample(self):
+        visualization.plot_sequence_features_sample(
+            self.get_dataset(),
+            figpath=self.args.figure_path,
+            sample_width=self.args.num_samples
+        )
+        return 0
+
+    def plot_rand_samples(self):
+        visualization.plot_features_samples(
+            self.get_dataset(),
+            self.args.num_samples,
+            figpath=self.args.figure_path
+        )
         return 0
 
     def run(self):
         super().run()
         if self.args.plot_type == "sequence_sample":
             return self.plot_sequence_sample()
+        if self.args.plot_type == "rand_samples":
+            return self.plot_rand_samples()
         return 1
 
 
