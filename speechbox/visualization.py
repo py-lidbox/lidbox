@@ -75,7 +75,7 @@ def plot_overview(wav, figpath):
 
 
 def plot_features_samples(dataset_by_label, num_samples, figpath=None):
-    fig, all_axes = plt.subplots(num_samples, len(dataset_by_label), figsize=(20, 15 * num_samples))
+    fig, all_axes = plt.subplots(num_samples, len(dataset_by_label), figsize=(15 * len(dataset_by_label), 5 * num_samples))
     if all_axes.ndim == 1:
         all_axes = all_axes.reshape((1, -1))
     heatmap_kwargs = {
@@ -88,14 +88,13 @@ def plot_features_samples(dataset_by_label, num_samples, figpath=None):
         print("plotting sample {} for {} labels".format(sample_idx, len(labels)))
         for ax, label in zip(axes, labels):
             features = dataset_by_label[label]
-            assert features.ndim > 2, "cannot plot heatmap for 1-dim features"
             assert len(features) >= num_samples, "Too few examples ({}) in dataset to draw {} samples".format(len(features), num_samples)
+            sample = features[sample_idx]
+            assert sample.ndim in (2, 3), "this plotter supports only samples with 2 dimensions"
             # flatten 1-dim channels
-            if features.ndim == 3:
-                assert features.shape[-1] == 1, "heatmap implemented only for 2-dim features (no reduction of channels in 3-dims)"
-                sample = features[sample_idx].reshape((-1, features.shape[-2]))
-            else:
-                sample = features[sample_idx].reshape((-1, features.shape[-1]))
+            if sample.ndim == 3:
+                assert sample.shape[2] == 1, "heatmap implemented only for 2-dim features (no reduction of channels in 3-dims)"
+                sample = sample.reshape((sample.shape[0], sample.shape[1]))
             seaborn.heatmap(sample.T, ax=ax, **heatmap_kwargs)
             ax.set_title("{} sample {}".format(label, sample_idx))
             ax.invert_yaxis()
