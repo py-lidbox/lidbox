@@ -50,10 +50,6 @@ def extract_melspec_features(signals, sample_rate):
     vad_decisions = energy_vad(signals)
     return tf.ragged.boolean_mask(melspecs, vad_decisions)
 
-#FIXME
-def read_wavs(paths):
-    wavs = tf.ragged.constant([read(p) for p in paths], dtype=tf.float32)
-
 def get_heatmap_plot(batch):
     figure = plt.figure(figsize=(10, 10))
     width = 5

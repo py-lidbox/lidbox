@@ -14,6 +14,7 @@ from speechbox import system
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
+import speechbox.tf_data as tf_data
 
 
 def parse_lines(path):
@@ -842,6 +843,53 @@ class Parse(Command):
         return self.parse()
 
 
+class Ingest(StatefulCommand):
+    """
+    Read 16-bit 16 kHz PCM wav-files from given list of paths and write all into TFRecords.
+    Files with 2 channels will be converted to mono by averaging the channels.
+    """
+    requires_state = State.none
+
+    @classmethod
+    def create_argparser(cls, parent_parser):
+        parser = super().create_argparser(parent_parser)
+        required = parser.add_argument_group("input args")
+        required.add_argument("wav_scp",
+            type=str,
+            action=ExpandAbspath,
+            metavar="wav.scp",
+            help="Path to a wav.scp file using Kaldi format. At least two columns, each row contains: <audiofile_uuid> <audiofile_path>. Only the audiofile_path column is currently read, all other columns are ignored.")
+        required.add_argument("utt2label",
+            type=str,
+            action=ExpandAbspath,
+            metavar="utt2label")
+        optional = parser.add_argument_group("options")
+        optional.add_argument("--datagroup",
+            type=str,
+            help="Which key to use for datagroup when loading paths.")
+        return parser
+
+    def ingest_from_wav_scp(self):
+        args = self.args
+        if args.verbosity:
+            print("Reading wav-files from '{}'".format(args.wav_scp))
+        with open(args.wav_scp) as f:
+            wavscp = dict(l.strip().split()[:2] for l in f)
+        with open(args.utt2label) as f:
+            utt2label = dict(l.strip().split()[:2] for l in f)
+        assert set(wavscp) == set(utt2label)
+        def p():
+            for utt, path in wavscp.items():
+                wav = tf_data.load_wav(path)
+                meta = {"label": utt2label[utt], "uuid": utt}
+                yield wav, meta
+        tf_data.write_audio(p(), "tmp.tfrecord")
+
+    def run(self):
+        super().run()
+        return self.ingest_from_wav_scp()
+
+
 command_tree = [
-    (Dataset, [Gather, Split, Inspect, Augment, Parse]),
+    (Dataset, [Gather, Split, Inspect, Augment, Parse, Ingest]),
 ]
