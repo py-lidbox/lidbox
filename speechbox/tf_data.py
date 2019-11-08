@@ -27,27 +27,39 @@ def serialize_sequence_features(features, meta):
 
 def deserialize_sequence_features(seq_example_str, feature_dim):
     context_definition = {
-        "uuid": tf.io.FixedLenFeature(shape=[], dtype=tf.string),
-        "label": tf.io.FixedLenFeature(shape=[], dtype=tf.string),
+        "uuid": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
+        "label": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
     }
     sequence_definition = {
         "features": tf.io.FixedLenSequenceFeature(shape=[feature_dim], dtype=tf.float32)
     }
-    return tf.io.parse_single_sequence_example(
+    context, sequence = tf.io.parse_single_sequence_example(
         seq_example_str,
         context_features=context_definition,
         sequence_features=sequence_definition
     )
+    return sequence["features"], context
 
 def write_features(extractor_dataset, target_path):
     serialize = lambda feats, meta: tf.py_function(serialize_sequence_features, (feats, meta), tf.string)
     record_writer = tf.data.experimental.TFRecordWriter(target_path, compression_type=TFRECORD_COMPRESSION)
     record_writer.write(extractor_dataset.map(serialize))
 
-def load_features(tfrecord_paths, feature_dim):
+def load_features(tfrecord_paths, feature_dim, dataset_config):
     deserialize = lambda s: deserialize_sequence_features(s, feature_dim)
-    return (tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
-              .map(deserialize))
+    ds = tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
+    ds = ds.map(deserialize)
+    rnn_steps = dataset_config.get("rnn_steps")
+    if rnn_steps:
+        seq_len, seq_step = rnn_steps["frame_length"], rnn_steps["frame_step"]
+        ds = ds.flat_map(lambda feats, meta: tf.data.Dataset.zip((
+                tf.data.Dataset.from_tensor_slices(tf.signal.frame(feats, seq_len, seq_step, axis=0)),
+                tf.data.Dataset.from_tensor_slices(meta).repeat(-1))))
+    shuffle_size = dataset_config.get("shuffle_buffer_size", 0)
+    if shuffle_size:
+        ds = ds.shuffle(shuffle_size)
+    ds = ds.batch(dataset_config.get("batch_size", 1))
+    return ds
 
 @tf.function
 def load_wav(path):
@@ -94,17 +106,24 @@ def extract_features(feat_config, paths, meta, batch_size=1):
                   .zip((features, tf.data.Dataset.from_tensor_slices(meta)))
                   .filter(not_empty)
                   .filter(not_too_short))
-    if feat_config.get("apply_minmax_scaling", False):
-        global_min = filtered.reduce(
-            tf.fill((feat_config["feature_dim"],), float("inf")),
-            lambda acc, x: tf.math.minimum(acc, tf.math.reduce_min(x[0], axis=0)))
-        global_max = filtered.reduce(
-            tf.fill((feat_config["feature_dim"],), -float("inf")),
-            lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
-        a, b, c = -1.0, 1.0, global_max - global_min
+    feat_shape = (feat_config["feature_dim"],)
+    global_min = filtered.reduce(
+        tf.fill(feat_shape, float("inf")),
+        lambda acc, x: tf.math.minimum(acc, tf.math.reduce_min(x[0], axis=0)))
+    global_max = filtered.reduce(
+        tf.fill(feat_shape, -float("inf")),
+        lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
+    if "minmax_scaling" in feat_config:
+        a = feat_config["min"]
+        b = feat_config["max"]
+        c = global_max - global_min
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
         filtered = filtered.map(scale_minmax)
-    return filtered
+    stats = {
+        "global_min": global_min,
+        "global_max": global_max,
+    }
+    return filtered, stats
 
 def serialize_wav(wav, uuid, label):
     feature_definition = {
@@ -127,4 +146,3 @@ def write_wavs_to_tfrecord(wavs, target_path):
     with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
         for wav, meta in wavs:
             record_writer.write(serialize_wav(wav, **meta))
-

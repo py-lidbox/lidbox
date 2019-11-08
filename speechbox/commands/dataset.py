@@ -864,7 +864,7 @@ class Ingest(StatefulCommand):
             help="Which key to use for datagroup when loading paths.")
         return parser
 
-    def ingest_from_wav_scp(self, config):
+    def extract_features(self, config):
         args = self.args
         wavscp_path, utt2label_path = config["wav-scp"], config["utt2label"]
         if args.verbosity:
@@ -881,15 +881,25 @@ class Ingest(StatefulCommand):
         tfrecords_path = config["tfrecords_path"]
         if args.verbosity:
             print("Starting feature extraction, writing results into '{}'".format(tfrecords_path))
-        extractor_ds = tf_data.extract_features(config, paths, paths_meta)
+        extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
+        if args.verbosity:
+            print("Global dataset stats:")
+            pprint.pprint(stats)
         tf_data.write_features(extractor_ds, tfrecords_path)
         return 0
 
     def dump_tfrecords(self, config):
-        feat_loader = tf_data.load_features([config["tfrecords_path"]], config["feature_dim"]).take(12)
-        plot = librosa_tf.get_heatmap_plot(feat_loader, 3, 4)
-        with open("plot.png", "wb") as f:
-            f.write(plot)
+        feat_loader = tf_data.load_features(
+            [config["tfrecords_path"]],
+            config["feature_dim"],
+            self.experiment_config["experiment"],
+            onehot_encoder,
+        )
+        for f, meta in feat_loader:
+            print(f.shape, meta['label'].shape, meta['uuid'].shape)
+        # plot = librosa_tf.get_heatmap_plot(feat_loader.take(12), 3, 4)
+        # with open("plot.png", "wb") as f:
+            # f.write(plot)
         return 0
 
     def run(self):
@@ -915,7 +925,7 @@ class Ingest(StatefulCommand):
             print("Error: unknown feature type '{}'".format(config["type"]))
             return 1
         if args.task == "extract":
-            return self.ingest_from_wav_scp(config)
+            return self.extract_features(config)
         elif args.task == "dump-tfrecords":
             return self.dump_tfrecords(config)
         return 1
