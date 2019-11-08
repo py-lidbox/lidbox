@@ -8,6 +8,9 @@ import seaborn
 import tensorflow as tf
 
 
+# All functions operate on batches, input must always have ndim of 2.
+# i.e. use a singleton batch for single input
+
 @tf.function
 def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
     e = tf.math.exp(1.0)
@@ -15,12 +18,12 @@ def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
     return tf.math.maximum(log_spec, tf.math.reduce_max(log_spec) - top_db)
 
 @tf.function
-def spectrograms(signals, n_fft=400, hop_length=160, power=2.0):
-    S = tf.math.abs(tf.signal.stft(signals, n_fft, hop_length, fft_length=n_fft))
+def spectrograms(signals, frame_length=400, frame_step=160, power=1.0):
+    S = tf.math.abs(tf.signal.stft(signals, frame_length, frame_step))
     return tf.math.pow(S, power)
 
 @tf.function
-def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
+def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     mel_weights = tf.signal.linear_to_mel_weight_matrix(
         num_mel_bins=num_mel_bins,
         num_spectrogram_bins=S.shape[-1],
@@ -31,40 +34,46 @@ def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def mfcc(melspectrogram, n_coefs=13):
-    log_mel_spectrogram = tf.math.log(melspectrogram + 1e-6)
-    return tf.signal.mfccs_from_log_mel_spectrograms(log_mel_spectrogram)[..., 1:n_coefs]
+def mfcc(melspectrograms, num_coefs=13):
+    log_mel_spectrogram = tf.math.log(melspectrograms + 1e-6)
+    return tf.signal.mfccs_from_log_mel_spectrograms(log_mel_spectrogram)[..., 1:num_coefs+1]
 
 @tf.function
-def energy_vad(signals, n_fft=400, hop_length=160, vad_strength=0.7):
+def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_threshold=1e-3):
     """Returns frame-wise vad decisions."""
-    tf.debugging.assert_non_negative(vad_strength)
-    frames = tf.signal.frame(signals, n_fft, hop_length)
+    tf.debugging.assert_non_negative(strength)
+    frames = tf.signal.frame(signals, frame_length, frame_step)
     rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=2))
-    threshold = vad_strength * 0.5 * tf.math.reduce_mean(rms, axis=1, keepdims=True)
+    mean_rms = tf.math.reduce_mean(rms, axis=1, keepdims=True)
+    threshold = strength * 0.5 * tf.math.maximum(min_rms_threshold, mean_rms)
     return tf.math.greater(rms, threshold)
 
 @tf.function
-def extract_melspec_features(signals, sample_rate):
-    melspecs = melspectrograms(spectrograms(signals), sample_rate)
-    vad_decisions = energy_vad(signals)
-    return tf.ragged.boolean_mask(melspecs, vad_decisions)
+def extract_features_and_do_vad(signals, spec_kwargs, vad_kwargs, melspec_kwargs, logmel, mfcc_kwargs):
+    feat = spectrograms(signals, **spec_kwargs)
+    if melspec_kwargs is not None:
+        feat = melspectrograms(feat, **melspec_kwargs)
+        if mfcc_kwargs is not None:
+            feat = mfcc(feat, **mfcc_kwargs)
+        elif logmel is not None:
+            feat = tf.math.log(feat + 1e-6)
+    vad_decisions = energy_vad(signals, **vad_kwargs)
+    # We use ragged tensors here to keep the dimensions after filtering feature frames according to vad decision based on the signals batch
+    return tf.ragged.boolean_mask(feat, vad_decisions)
 
-def get_heatmap_plot(batch):
-    figure = plt.figure(figsize=(10, 10))
-    width = 5
-    height = batch.shape[1] // width + (batch.shape[1] % width) != 0
-    for i, data in enumerate(batch, start=1):
-        ax = plt.subplot(height, width, i)
-        ax.set_title(str(i))
+def get_heatmap_plot(seq_examples, num_rows, num_cols):
+    decode = lambda t: t.numpy().decode("utf-8")
+    figure = plt.figure(figsize=(30, 20))
+    for i, (meta, data) in enumerate(seq_examples, start=1):
+        ax = plt.subplot(num_rows, num_cols, i)
+        ax.set_title(decode(meta["uuid"]) + ": " + decode(meta["label"]))
+        seaborn.heatmap(data["features"].numpy().T, ax=ax, cmap="YlGnBu_r")
         ax.invert_yaxis()
-        seaborn.heatmap(data.T, ax=ax, cmap="YlGnBu_r")
     buf = io.BytesIO()
     plt.savefig(buf, format="png")
-    figure.close()
     buf.seek(0)
     heatmaps_png = tf.io.decode_png(buf.getvalue(), channels=4)
-    return heatmaps_png
+    return buf.getvalue()
 
 def get_spectrogram_plot_from_signal(signals, sample_rate):
     melspecs_db = power_to_db(melspectrogram(signals, sample_rate))

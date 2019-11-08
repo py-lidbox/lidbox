@@ -247,20 +247,25 @@ class Kaldi(Command):
                 for line in f:
                     yield line.strip().split()
         args = self.args
+        segfile = os.path.join(os.path.dirname(args.wavscp), "segments")
+        if os.path.exists(segfile):
+            print("error: segments file already exists, not overwriting: {}".format(segfile))
+            return 1
         file2lang = dict(parse_kaldifile(args.utt2lang))
         utt2seg = {}
         utt2lang = {}
-        for wavpath, dur in parse_kaldifile(args.durations):
+        for fileid, dur in parse_kaldifile(args.durations):
             dur = float(dur)
-            fileid = os.path.basename(wavpath).split(".wav")[0]
-            for utt_num in range(int((dur + args.offset) / args.window_len)):
+            num_frames = int(1 + max(0, (dur - args.window_len + args.offset)/args.offset))
+            for utt_num in range(num_frames):
                 start = utt_num * args.offset
+                end = start + args.window_len
                 uttid = "{}_{}".format(fileid, utt_num)
-                utt2seg[uttid] = (fileid, start, start + args.window_len)
+                utt2seg[uttid] = (fileid, start, end if end <= dur else -1)
                 utt2lang[uttid] = file2lang[fileid]
-        with open(os.path.join(os.path.dirname(args.wavscp), "segments"), "w") as f:
+        with open(segfile, "w") as f:
             for uttid, (fileid, start, end) in utt2seg.items():
-                print(uttid, fileid, format(float(start), ".2f"), format(float(end), ".2f"), file=f)
+                print(uttid, fileid, format(float(start), ".2f"), format(float(end), ".2f") if end >= 0 else '-1', file=f)
         shutil.copyfile(args.utt2lang, args.utt2lang + ".old")
         with open(args.utt2lang, "w") as f:
             for uttid, lang in utt2lang.items():
@@ -268,7 +273,13 @@ class Kaldi(Command):
 
     def run(self):
         super().run()
-        if self.args.task == "uniform-segment":
+        args = self.args
+        if args.task == "uniform-segment":
+            if args.verbosity:
+                print("Creating a segmentation file for all utterances in wav.scp with fixed length segments")
+            assert args.offset
+            assert args.window_len
+            assert args.offset <= args.window_len
             return self.uniform_segment()
         return 1
 

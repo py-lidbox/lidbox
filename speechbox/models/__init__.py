@@ -142,6 +142,7 @@ class KerasWrapper:
             shuffle=False,
             steps_per_epoch=model_config.get("steps_per_epoch"),
             validation_data=validation_set,
+            validation_freq=model_config.get("validation_freq", 1),
             validation_steps=model_config.get("validation_steps"),
             verbose=model_config.get("verbose", 2),
         )

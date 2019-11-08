@@ -13,11 +13,12 @@ import scipy
 from speechbox import system
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
+import speechbox.librosa_tf as librosa_tf
 import speechbox.preprocess.transformations as transformations
 import speechbox.tf_data as tf_data
 
 
-def parse_lines(path):
+def parse_space_separated(path):
     with open(path) as f:
         for l in f:
             l = l.strip()
@@ -304,9 +305,9 @@ class Gather(StatefulCommand):
             self.state["data"] = {}
         for kaldi_paths in config["kaldi"]:
             wavdata = collections.defaultdict(dict)
-            # for utt, path in parse_lines(kaldi_paths["wav-scp"]):
+            # for utt, path in parse_space_separated(kaldi_paths["wav-scp"]):
                 # wavdata[utt]["path"] = path
-            for utt, label in parse_lines(kaldi_paths["utt2label"]):
+            for utt, label in parse_space_separated(kaldi_paths["utt2label"]):
                 wavdata[utt]["label"] = label
             # Sanity check only
             for feats_scp_path in kaldi_paths["feats-scps"]:
@@ -854,40 +855,70 @@ class Ingest(StatefulCommand):
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
         required = parser.add_argument_group("input args")
-        required.add_argument("wav_scp",
+        required.add_argument("task",
             type=str,
-            action=ExpandAbspath,
-            metavar="wav.scp",
-            help="Path to a wav.scp file using Kaldi format. At least two columns, each row contains: <audiofile_uuid> <audiofile_path>. Only the audiofile_path column is currently read, all other columns are ignored.")
-        required.add_argument("utt2label",
-            type=str,
-            action=ExpandAbspath,
-            metavar="utt2label")
+            choices=("extract", "dump-tfrecords"))
         optional = parser.add_argument_group("options")
         optional.add_argument("--datagroup",
             type=str,
             help="Which key to use for datagroup when loading paths.")
         return parser
 
-    def ingest_from_wav_scp(self):
+    def ingest_from_wav_scp(self, config):
         args = self.args
+        wavscp_path, utt2label_path = config["wav-scp"], config["utt2label"]
         if args.verbosity:
-            print("Reading wav-files from '{}'".format(args.wav_scp))
-        with open(args.wav_scp) as f:
-            wavscp = dict(l.strip().split()[:2] for l in f)
-        with open(args.utt2label) as f:
-            utt2label = dict(l.strip().split()[:2] for l in f)
+            print("Reading wav-files from '{}'".format(wavscp_path))
+        wavscp = dict(row[:2] for row in parse_space_separated(wavscp_path))
+        utt2label = dict(row[:2] for row in parse_space_separated(utt2label_path))
+        # All utterance ids must be found in both files
         assert set(wavscp) == set(utt2label)
-        def p():
-            for utt, path in wavscp.items():
-                wav = tf_data.load_wav(path)
-                meta = {"label": utt2label[utt], "uuid": utt}
-                yield wav, meta
-        tf_data.write_audio(p(), "tmp.tfrecord")
+        paths = []
+        paths_meta = []
+        for utt, path in wavscp.items():
+            paths.append(path)
+            paths_meta.append((utt, utt2label[utt]))
+        tfrecords_path = config["tfrecords_path"]
+        if args.verbosity:
+            print("Starting feature extraction, writing results into '{}'".format(tfrecords_path))
+        extractor_ds = tf_data.extract_features(config, paths, paths_meta)
+        tf_data.write_features(extractor_ds, tfrecords_path)
+        return 0
+
+    def dump_tfrecords(self, config):
+        feat_loader = tf_data.load_features([config["tfrecords_path"]], config["feature_dim"]).take(12)
+        plot = librosa_tf.get_heatmap_plot(feat_loader, 3, 4)
+        with open("plot.png", "wb") as f:
+            f.write(plot)
+        return 0
 
     def run(self):
         super().run()
-        return self.ingest_from_wav_scp()
+        args = self.args
+        config = self.experiment_config["input"]
+        if args.verbosity > 1:
+            print("Feature config is:")
+            pprint.pprint(config)
+        if config["type"] == "mfcc":
+            config["feature_dim"] = config["mfcc"]["num_coefs"]
+        elif config["type"] == "melspectrogram":
+            config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
+            config["mfcc"] = None
+        elif config["type"] == "logmelspectrogram":
+            config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
+            config["mfcc"] = None
+            config["logmel"] = True
+        elif config["type"] == "spectrogram":
+            config["feature_dim"] = config["spectrogram"] // 2 + 1
+            config["melspectrogram"] = config["mfcc"] = None
+        else:
+            print("Error: unknown feature type '{}'".format(config["type"]))
+            return 1
+        if args.task == "extract":
+            return self.ingest_from_wav_scp(config)
+        elif args.task == "dump-tfrecords":
+            return self.dump_tfrecords(config)
+        return 1
 
 
 command_tree = [
