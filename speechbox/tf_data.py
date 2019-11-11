@@ -1,6 +1,7 @@
 import tensorflow as tf
 from . import librosa_tf
 
+AUTOTUNE = tf.data.experimental.AUTOTUNE
 TFRECORD_COMPRESSION = "GZIP"
 
 def floats2floatlist(v):
@@ -43,22 +44,27 @@ def deserialize_sequence_features(seq_example_str, feature_dim):
 def write_features(extractor_dataset, target_path):
     serialize = lambda feats, meta: tf.py_function(serialize_sequence_features, (feats, meta), tf.string)
     record_writer = tf.data.experimental.TFRecordWriter(target_path, compression_type=TFRECORD_COMPRESSION)
-    record_writer.write(extractor_dataset.map(serialize))
+    record_writer.write(extractor_dataset.map(serialize, num_parallel_calls=AUTOTUNE))
 
 def load_features(tfrecord_paths, feature_dim, dataset_config):
     deserialize = lambda s: deserialize_sequence_features(s, feature_dim)
     ds = tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
-    ds = ds.map(deserialize)
-    rnn_steps = dataset_config.get("rnn_steps")
+    return ds.map(deserialize)
+
+def prepare_dataset_for_training(ds, config, label2onehot):
+    rnn_steps = config.get("rnn_steps")
     if rnn_steps:
         seq_len, seq_step = rnn_steps["frame_length"], rnn_steps["frame_step"]
-        ds = ds.flat_map(lambda feats, meta: tf.data.Dataset.zip((
-                tf.data.Dataset.from_tensor_slices(tf.signal.frame(feats, seq_len, seq_step, axis=0)),
-                tf.data.Dataset.from_tensor_slices(meta).repeat(-1))))
-    shuffle_size = dataset_config.get("shuffle_buffer_size", 0)
+        make_timesteps_frames = lambda feats, meta: tf.data.Dataset.zip((
+            tf.data.Dataset.from_tensor_slices(tf.signal.frame(feats, seq_len, seq_step, axis=0)),
+            tf.data.Dataset.from_tensors(meta).repeat(-1)))
+        ds = ds.flat_map(make_timesteps_frames)
+    to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]))
+    ds = ds.map(to_model_input)
+    shuffle_size = config.get("shuffle_buffer_size", 0)
     if shuffle_size:
         ds = ds.shuffle(shuffle_size)
-    ds = ds.batch(dataset_config.get("batch_size", 1))
+    ds = ds.batch(config.get("batch_size", 1))
     return ds
 
 @tf.function
@@ -98,9 +104,9 @@ def extract_features(feat_config, paths, meta, batch_size=1):
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
     features = (tf.data.Dataset
                   .from_tensor_slices(paths)
-                  .map(load_wav)
+                  .map(load_wav, num_parallel_calls=AUTOTUNE)
                   .batch(batch_size)
-                  .map(extract_and_vad)
+                  .map(extract_and_vad, num_parallel_calls=AUTOTUNE)
                   .flat_map(unbatch_ragged))
     filtered = (tf.data.Dataset
                   .zip((features, tf.data.Dataset.from_tensor_slices(meta)))
@@ -114,8 +120,8 @@ def extract_features(feat_config, paths, meta, batch_size=1):
         tf.fill(feat_shape, -float("inf")),
         lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
     if "minmax_scaling" in feat_config:
-        a = feat_config["min"]
-        b = feat_config["max"]
+        a = feat_config["minmax_scaling"]["min"]
+        b = feat_config["minmax_scaling"]["max"]
         c = global_max - global_min
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
         filtered = filtered.map(scale_minmax)

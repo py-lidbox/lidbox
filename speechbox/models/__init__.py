@@ -102,21 +102,19 @@ class KerasWrapper:
         metrics_dir = os.path.join(tensorboard.log_dir, "dataset", dataset_name)
         summary_writer = tf.summary.create_file_writer(metrics_dir)
         summary_writer.set_as_default()
+        @tf.function
         def inspect_batches(batch_idx, batch):
             inputs, targets = batch[:2]
-            print("\nLogger enabled for dataset '{}', batch data will be written as histograms for TensorBoard".format(dataset_name))
             # Every value of all examples in this batch flattened to a single dimension
-            tf.summary.histogram("{}-inputs".format(dataset_name), tf.reshape(inputs, [-1]), step=batch_idx)
+            # tf.summary.histogram("{}-inputs".format(dataset_name), tf.reshape(inputs, [-1]), step=batch_idx)
             # Index of every one-hot encoded target in this batch
-            tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
+            # tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
             return batch
         dataset = dataset.enumerate().map(inspect_batches)
         return metrics_dir, dataset
 
     @with_device
-    def prepare(self, features_meta, training_config):
-        input_shape = features_meta["feat_vec_shape"]
-        output_shape = features_meta["num_labels"]
+    def prepare(self, input_shape, output_shape, training_config):
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))

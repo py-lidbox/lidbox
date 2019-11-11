@@ -10,6 +10,7 @@ from . import dataset
 from . import features
 from . import util
 from . import model
+from . import e2e
 
 
 def create_argparser():
@@ -24,6 +25,7 @@ def create_argparser():
         dataset.command_tree,
         features.command_tree,
         model.command_tree,
+        e2e.command_tree,
     )
     # Create command line options for all valid commands
     for command_group, subcommands in command_tree:
