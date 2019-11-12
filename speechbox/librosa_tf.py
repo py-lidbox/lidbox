@@ -64,10 +64,10 @@ def extract_features_and_do_vad(signals, spec_kwargs, vad_kwargs, melspec_kwargs
 def get_heatmap_plot(seq_examples, num_rows, num_cols):
     decode = lambda t: t.numpy().decode("utf-8")
     figure = plt.figure(figsize=(30, 20))
-    for i, (meta, data) in enumerate(seq_examples, start=1):
+    for i, (data, meta) in enumerate(seq_examples, start=1):
         ax = plt.subplot(num_rows, num_cols, i)
-        ax.set_title(decode(meta["uuid"]) + ": " + decode(meta["label"]))
-        seaborn.heatmap(data["features"].numpy().T, ax=ax, cmap="YlGnBu_r")
+        ax.set_title(decode(meta[0]) + ": " + decode(meta[1]))
+        seaborn.heatmap(data.numpy().T, ax=ax, cmap="YlGnBu_r")
         ax.invert_yaxis()
     buf = io.BytesIO()
     plt.savefig(buf, format="png")

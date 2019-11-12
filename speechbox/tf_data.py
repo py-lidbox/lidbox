@@ -1,5 +1,8 @@
+from multiprocessing import cpu_count
+
 import tensorflow as tf
 from . import librosa_tf
+
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 TFRECORD_COMPRESSION = "GZIP"
@@ -41,10 +44,13 @@ def deserialize_sequence_features(seq_example_str, feature_dim):
     )
     return sequence["features"], context
 
+# TODO this is horribly slow
 def write_features(extractor_dataset, target_path):
+    if not target_path.endswith(".tfrecord"):
+        target_path += ".tfrecord"
     serialize = lambda feats, meta: tf.py_function(serialize_sequence_features, (feats, meta), tf.string)
     record_writer = tf.data.experimental.TFRecordWriter(target_path, compression_type=TFRECORD_COMPRESSION)
-    record_writer.write(extractor_dataset.map(serialize, num_parallel_calls=AUTOTUNE))
+    record_writer.write(extractor_dataset.map(serialize))
 
 def load_features(tfrecord_paths, feature_dim, dataset_config):
     deserialize = lambda s: deserialize_sequence_features(s, feature_dim)
@@ -55,11 +61,15 @@ def prepare_dataset_for_training(ds, config, label2onehot):
     rnn_steps = config.get("rnn_steps")
     if rnn_steps:
         seq_len, seq_step = rnn_steps["frame_length"], rnn_steps["frame_step"]
-        make_timesteps_frames = lambda feats, meta: tf.data.Dataset.zip((
-            tf.data.Dataset.from_tensor_slices(tf.signal.frame(feats, seq_len, seq_step, axis=0)),
-            tf.data.Dataset.from_tensors(meta).repeat(-1)))
+        # Extract frames from all features, using the same metadata for each frame of one sample of features
+        def make_timesteps_frames(feats, meta):
+            frames = tf.signal.frame(feats, seq_len, seq_step, axis=0)
+            # Repeat same meta for all frames
+            frames_meta = tf.tile(tf.expand_dims(meta, 0), [tf.shape(frames)[0], 1])
+            # Zip together
+            return tf.data.Dataset.from_tensor_slices((frames, frames_meta))
         ds = ds.flat_map(make_timesteps_frames)
-    to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]))
+    to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]), meta[0])
     ds = ds.map(to_model_input)
     shuffle_size = config.get("shuffle_buffer_size", 0)
     if shuffle_size:
@@ -67,69 +77,90 @@ def prepare_dataset_for_training(ds, config, label2onehot):
     ds = ds.batch(config.get("batch_size", 1))
     return ds
 
+def attach_dataset_logger(ds, output_dir, max_image_samples=10, image_size=None):
+    def inspect_batches(batch_idx, batch):
+        features, onehot, meta = batch
+        # Add grayscale channel, swap width and height dims, and flip y-axis
+        image = tf.image.flip_up_down(tf.image.transpose(tf.expand_dims(features, -1)))
+        # Scale the channel between 0 and 1
+        min, max = tf.math.reduce_min(image), tf.math.reduce_max(image)
+        image = tf.math.divide_no_nan(image - min, max - min)
+        if image_size:
+            image = tf.image.resize(image, image_size)
+        tf.summary.image("features", image, step=batch_idx, max_outputs=max_image_samples)
+        return batch
+    summary_writer = tf.summary.create_file_writer(output_dir)
+    with summary_writer.as_default():
+        ds = ds.enumerate().map(inspect_batches)
+    return ds
+
+def without_metadata(dataset):
+    return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
+
 @tf.function
-def load_wav(path):
+def load_wav(path, meta):
     wav = tf.audio.decode_wav(tf.io.read_file(path))
     tf.debugging.assert_equal(wav.sample_rate, 16000, message="Failed to load audio file '{}'. Currently only 16 kHz sampling rate is supported.".format(path))
     # Merge channels by averaging over channels.
     # For mono this just drops the channel dim.
-    return tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
+    return (tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), meta)
 
 @tf.function
-def unbatch_ragged(ragged):
-    return tf.data.Dataset.from_tensor_slices(ragged.to_tensor())
+def unbatch_ragged(ragged, meta):
+    return tf.data.Dataset.from_tensor_slices((ragged.to_tensor(), meta))
 
 @tf.function
 def not_empty(feats, meta):
     return not tf.reduce_all(tf.math.equal(feats, 0))
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
-def extract_features(feat_config, paths, meta, batch_size=1):
+def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=cpu_count()):
     if "melspectrogram" in feat_config:
         feat_config["melspectrogram"]["sample_rate"] = feat_config["sample_rate"]
     for k in ("frame_length", "frame_step"):
         feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
     min_seq_len = feat_config["min_sequence_length"]
     not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
-    extract_and_vad = lambda wavs: librosa_tf.extract_features_and_do_vad(
-        wavs,
-        feat_config["spectrogram"],
-        feat_config["voice_activity_detection"],
-        feat_config.get("melspectrogram"),
-        feat_config.get("logmel"),
-        feat_config.get("mfcc"),
+    extract_and_vad = lambda wavs, meta: (
+        librosa_tf.extract_features_and_do_vad(
+            wavs,
+            feat_config["spectrogram"],
+            feat_config["voice_activity_detection"],
+            feat_config.get("melspectrogram"),
+            feat_config.get("logmel"),
+            feat_config.get("mfcc"),
+        ),
+        meta
     )
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    features = (tf.data.Dataset
-                  .from_tensor_slices(paths)
-                  .map(load_wav, num_parallel_calls=AUTOTUNE)
+    features = (tf.data.Dataset.from_tensor_slices((paths, meta))
+                  .map(load_wav, num_parallel_calls=num_parallel_calls)
                   .batch(batch_size)
-                  .map(extract_and_vad, num_parallel_calls=AUTOTUNE)
-                  .flat_map(unbatch_ragged))
-    filtered = (tf.data.Dataset
-                  .zip((features, tf.data.Dataset.from_tensor_slices(meta)))
+                  .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
+                  .flat_map(unbatch_ragged)
                   .filter(not_empty)
                   .filter(not_too_short))
     feat_shape = (feat_config["feature_dim"],)
-    global_min = filtered.reduce(
+    global_min = features.reduce(
         tf.fill(feat_shape, float("inf")),
         lambda acc, x: tf.math.minimum(acc, tf.math.reduce_min(x[0], axis=0)))
-    global_max = filtered.reduce(
+    global_max = features.reduce(
         tf.fill(feat_shape, -float("inf")),
         lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
     if "minmax_scaling" in feat_config:
+        # Apply feature scaling on each feature dimension over whole dataset
         a = feat_config["minmax_scaling"]["min"]
         b = feat_config["minmax_scaling"]["max"]
         c = global_max - global_min
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
-        filtered = filtered.map(scale_minmax)
+        features = features.map(scale_minmax)
     stats = {
         "global_min": global_min,
         "global_max": global_max,
     }
-    return filtered, stats
+    return features, stats
 
 def serialize_wav(wav, uuid, label):
     feature_definition = {

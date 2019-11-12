@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 import speechbox.metrics
+import speechbox.tf_data
 
 # Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
 def with_device(method):
@@ -81,7 +82,8 @@ class KerasWrapper:
         self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition["kwargs"])
         self.callbacks = []
         if tensorboard:
-            self.callbacks.append(tf.keras.callbacks.TensorBoard(**tensorboard))
+            self.tensorboard = tf.keras.callbacks.TensorBoard(**tensorboard)
+            self.callbacks.append(self.tensorboard)
         if early_stopping:
             self.callbacks.append(tf.keras.callbacks.EarlyStopping(**early_stopping))
         if checkpoints:
@@ -94,24 +96,6 @@ class KerasWrapper:
         model_path = self.get_model_filepath(basedir, self.model_id)
         self.model.save(model_path, overwrite=True)
         return model_path
-
-    def enable_dataset_logger(self, dataset_name, dataset):
-        tensorboard = [callback for callback in self.callbacks if "TensorBoard" in callback.__class__.__name__]
-        assert len(tensorboard) == 1, "TensorBoard is not enabled for model or it has too many TensorBoard instances, there is nowhere to write the output of the logged metrics"
-        tensorboard = tensorboard[0]
-        metrics_dir = os.path.join(tensorboard.log_dir, "dataset", dataset_name)
-        summary_writer = tf.summary.create_file_writer(metrics_dir)
-        summary_writer.set_as_default()
-        @tf.function
-        def inspect_batches(batch_idx, batch):
-            inputs, targets = batch[:2]
-            # Every value of all examples in this batch flattened to a single dimension
-            # tf.summary.histogram("{}-inputs".format(dataset_name), tf.reshape(inputs, [-1]), step=batch_idx)
-            # Index of every one-hot encoded target in this batch
-            # tf.summary.histogram("{}-targets".format(dataset_name), tf.math.argmax(targets, 1), step=batch_idx)
-            return batch
-        dataset = dataset.enumerate().map(inspect_batches)
-        return metrics_dir, dataset
 
     @with_device
     def prepare(self, input_shape, output_shape, training_config):
@@ -132,14 +116,14 @@ class KerasWrapper:
     @with_device
     def fit(self, training_set, validation_set, model_config):
         self.model.fit(
-            training_set,
+            speechbox.tf_data.without_metadata(training_set),
             callbacks=self.callbacks,
             class_weight=model_config.get("class_weight"),
             epochs=model_config["epochs"],
             initial_epoch=self.initial_epoch,
             shuffle=False,
             steps_per_epoch=model_config.get("steps_per_epoch"),
-            validation_data=validation_set,
+            validation_data=speechbox.tf_data.without_metadata(validation_set),
             validation_freq=model_config.get("validation_freq", 1),
             validation_steps=model_config.get("validation_steps"),
             verbose=model_config.get("verbose", 2),

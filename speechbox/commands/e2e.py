@@ -2,6 +2,7 @@ from datetime import datetime
 import collections
 import os
 import pprint
+import random
 import shutil
 import sys
 
@@ -30,17 +31,49 @@ def parse_space_separated(path):
 
 def make_label2onehot_fn(labels):
     labels_enum = tf.range(len(labels))
+    # Label to int or one past last one if not found
     label2int = tf.lookup.StaticHashTable(
         tf.lookup.KeyValueTensorInitializer(
             tf.constant(labels),
             tf.constant(labels_enum)),
         len(labels)
     )
-    OH = tf.one_hot(labels_enum, len(labels))
+    OH = tf.constant(tf.one_hot(labels_enum, len(labels)))
     return (lambda label: OH[label2int.lookup(label)])
+
+def patch_feature_dim(config):
+    if config["type"] == "mfcc":
+        config["feature_dim"] = config["mfcc"]["num_coefs"]
+    elif config["type"] == "melspectrogram":
+        config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
+        config["mfcc"] = None
+    elif config["type"] == "logmelspectrogram":
+        config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
+        config["mfcc"] = None
+        config["logmel"] = True
+    elif config["type"] == "spectrogram":
+        config["feature_dim"] = config["spectrogram"] // 2 + 1
+        config["melspectrogram"] = config["mfcc"] = None
+    else:
+        print("Error: unknown feature type '{}'".format(config["type"]))
+        config = None
+    return config
+
 
 class Train(StatefulCommand):
     requires_state = State.none
+
+    @classmethod
+    def create_argparser(cls, parent_parser):
+        parser = super().create_argparser(parent_parser)
+        optional = parser.add_argument_group("options")
+        optional.add_argument("--file-limit",
+            type=int,
+            help="Extract only up to this many files from the wavpath list (e.g. for debugging).")
+        optional.add_argument("--shuffle-file-list",
+            action="store_true",
+            help="Shuffle wavpath list before loading wavs (e.g. for debugging, use TF shuffle buffers during training).")
+        return parser
 
     def get_checkpoint_dir(self):
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
@@ -91,8 +124,13 @@ class Train(StatefulCommand):
         assert set(utt2path) == set(utt2label)
         paths = []
         paths_meta = []
-        for utt, path in utt2path.items():
-            paths.append(path)
+        keys = list(utt2path.keys())
+        if args.shuffle_file_list:
+            random.shuffle(keys)
+        if args.file_limit:
+            keys = keys[:args.file_limit]
+        for utt in keys:
+            paths.append(utt2path[utt])
             paths_meta.append((utt, utt2label[utt]))
         cache_path = os.path.join(self.cache_dir, "tf_data", datagroup_key)
         self.make_named_dir(os.path.dirname(cache_path), "tf.data.Dataset cache")
@@ -102,27 +140,7 @@ class Train(StatefulCommand):
         if args.verbosity > 1:
             print("Global dataset stats:")
             pprint.pprint(stats)
-        # return extractor_ds.cache(cache_path)
         return extractor_ds
-
-    @staticmethod
-    def patch_feature_dim(config):
-        if config["type"] == "mfcc":
-            config["feature_dim"] = config["mfcc"]["num_coefs"]
-        elif config["type"] == "melspectrogram":
-            config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
-            config["mfcc"] = None
-        elif config["type"] == "logmelspectrogram":
-            config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
-            config["mfcc"] = None
-            config["logmel"] = True
-        elif config["type"] == "spectrogram":
-            config["feature_dim"] = config["spectrogram"] // 2 + 1
-            config["melspectrogram"] = config["mfcc"] = None
-        else:
-            print("Error: unknown feature type '{}'".format(config["type"]))
-            config = None
-        return config
 
     def train(self):
         args = self.args
@@ -138,18 +156,15 @@ class Train(StatefulCommand):
             print("Using feature extraction parameters:")
             pprint.pprint(feat_config)
             print()
-        feat_config = self.patch_feature_dim(feat_config)
+        feat_config = patch_feature_dim(feat_config)
         training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
         validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
-        if training_config.get("monitor_training_input", False):
-            metrics_dir, training_ds = model.enable_dataset_logger("training", training_ds)
-            self.make_named_dir(metrics_dir)
         if args.verbosity > 1:
             print("Compiling model")
         labels = self.experiment_config["dataset"]["labels"]
-        input_shape = (feat_config["min_sequence_length"], feat_config["feature_dim"])
+        input_shape = (training_config["rnn_steps"]["frame_length"], feat_config["feature_dim"])
         model.prepare(input_shape, len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = os.listdir(checkpoint_dir)
@@ -164,6 +179,8 @@ class Train(StatefulCommand):
             print()
         label2onehot = make_label2onehot_fn(labels)
         training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
+        if training_config.get("monitor_training_input", False):
+            training_ds = tf_data.attach_dataset_logger(training_ds, model.tensorboard.log_dir, image_size=(512, 1024))
         validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
         model.fit(training_ds, validation_ds, training_config)
         if args.verbosity:
@@ -171,11 +188,7 @@ class Train(StatefulCommand):
 
     def run(self):
         super().run()
-        # metrics_dir = os.path.join(self.cache_dir, "trace")
-        # with tf.summary.create_file_writer(metrics_dir).as_default():
-            # tf.summary.trace_on(profiler=True)
-        ret = self.train()
-        return ret
+        return self.train()
 
 
 command_tree = [
