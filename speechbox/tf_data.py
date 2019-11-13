@@ -117,22 +117,18 @@ def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    min_seq_len = feat_config.get("min_sequence_length", 0)
-    not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
     if feat_config["type"] == "sparsespeech":
         with open(feat_config["path"], "rb") as f:
             data = np.load(f, fix_imports=False, allow_pickle=True).item()
-        data = [data[u[0].numpy().decode("utf-8")] for u in meta]
+        data = [(data[m[0].numpy().decode("utf-8")], m) for m in meta]
         def datagen():
-            for d in data:
-                yield d
+            for d, m in data:
+                yield d, m
         features = tf.data.Dataset.from_generator(
             datagen,
-            tf.as_dtype(data[0].dtype),
-            tf.TensorShape([None, feat_config["feature_dim"]])
+            (tf.as_dtype(data[0][0].dtype), tf.string),
+            (tf.TensorShape([None, feat_config["feature_dim"]]), tf.TensorShape([2])),
         )
-        features = (tf.data.Dataset.zip((features, tf.data.Dataset.from_tensor_slices(meta)))
-                      .filter(not_too_short))
     else:
         extract_and_vad = lambda wavs, meta: (
             librosa_tf.extract_features_and_do_vad(
@@ -151,8 +147,10 @@ def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=
                       .batch(batch_size)
                       .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
                       .flat_map(unbatch_ragged)
-                      .filter(not_empty)
-                      .filter(not_too_short))
+                      .filter(not_empty))
+    min_seq_len = feat_config.get("min_sequence_length", 0)
+    not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
+    features = features.filter(not_too_short)
     feat_shape = (feat_config["feature_dim"],)
     global_min = features.reduce(
         tf.fill(feat_shape, float("inf")),
