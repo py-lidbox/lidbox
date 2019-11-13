@@ -132,8 +132,6 @@ class Train(StatefulCommand):
         for utt in keys:
             paths.append(utt2path[utt])
             paths_meta.append((utt, utt2label[utt]))
-        cache_path = os.path.join(self.cache_dir, "tf_data", datagroup_key)
-        self.make_named_dir(os.path.dirname(cache_path), "tf.data.Dataset cache")
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}'".format(datagroup_key))
         extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
@@ -157,6 +155,15 @@ class Train(StatefulCommand):
             pprint.pprint(feat_config)
             print()
         feat_config = patch_feature_dim(feat_config)
+        if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
+            assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
+            if "melspectrogram" not in feat_config:
+                feat_config["melspectrogram"] = {}
+            feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
+        if "spectrogram" in feat_config:
+            for k in ("frame_length", "frame_step"):
+                if k in feat_config["spectrogram"]:
+                    feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
         training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
         validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]

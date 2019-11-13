@@ -34,11 +34,6 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def mfcc(melspectrograms, num_coefs=13):
-    log_mel_spectrogram = tf.math.log(melspectrograms + 1e-6)
-    return tf.signal.mfccs_from_log_mel_spectrograms(log_mel_spectrogram)[..., 1:num_coefs+1]
-
-@tf.function
 def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_threshold=1e-3):
     """Returns frame-wise vad decisions."""
     tf.debugging.assert_non_negative(strength)
@@ -51,12 +46,13 @@ def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_
 @tf.function
 def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, melspec_kwargs, logmel, mfcc_kwargs):
     feat = spectrograms(signals, **spec_kwargs)
-    if feattype in ("melspec", "logmelspec", "mfcc"):
+    if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
         feat = melspectrograms(feat, **melspec_kwargs)
-        if feattype == "logmelspec":
+        if feattype in ("logmelspectrogram", "mfcc"):
             feat = tf.math.log(feat + 1e-6)
-        elif feattype == "mfcc":
-            feat = mfcc(feat, **mfcc_kwargs)
+            if feattype == "mfcc":
+                num_coefs = mfcc_kwargs.get("num_coefs", 13)
+                feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., 1:num_coefs+1]
     vad_decisions = energy_vad(signals, **vad_kwargs)
     # We use ragged tensors here to keep the dimensions after filtering feature frames according to vad decision based on the signals batch
     return tf.ragged.boolean_mask(feat, vad_decisions)

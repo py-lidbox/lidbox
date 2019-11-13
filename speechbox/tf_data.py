@@ -1,10 +1,10 @@
 from multiprocessing import cpu_count
 
-import tensorflow as tf
 from . import librosa_tf
+import numpy as np
+import tensorflow as tf
 
 
-AUTOTUNE = tf.data.experimental.AUTOTUNE
 TFRECORD_COMPRESSION = "GZIP"
 
 def floats2floatlist(v):
