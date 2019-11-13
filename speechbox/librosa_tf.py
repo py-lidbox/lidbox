@@ -49,14 +49,14 @@ def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_
     return tf.math.greater(rms, threshold)
 
 @tf.function
-def extract_features_and_do_vad(signals, spec_kwargs, vad_kwargs, melspec_kwargs, logmel, mfcc_kwargs):
+def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, melspec_kwargs, logmel, mfcc_kwargs):
     feat = spectrograms(signals, **spec_kwargs)
-    if melspec_kwargs is not None:
+    if feattype in ("melspec", "logmelspec", "mfcc"):
         feat = melspectrograms(feat, **melspec_kwargs)
-        if mfcc_kwargs is not None:
-            feat = mfcc(feat, **mfcc_kwargs)
-        elif logmel is not None:
+        if feattype == "logmelspec":
             feat = tf.math.log(feat + 1e-6)
+        elif feattype == "mfcc":
+            feat = mfcc(feat, **mfcc_kwargs)
     vad_decisions = energy_vad(signals, **vad_kwargs)
     # We use ragged tensors here to keep the dimensions after filtering feature frames according to vad decision based on the signals batch
     return tf.ragged.boolean_mask(feat, vad_decisions)

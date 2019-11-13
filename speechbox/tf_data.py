@@ -77,7 +77,8 @@ def prepare_dataset_for_training(ds, config, label2onehot):
     ds = ds.batch(config.get("batch_size", 1))
     return ds
 
-def attach_dataset_logger(ds, output_dir, max_image_samples=10, image_size=None):
+def attach_dataset_logger(ds, max_image_samples=10, image_size=None):
+    @tf.function
     def inspect_batches(batch_idx, batch):
         features, onehot, meta = batch
         # Add grayscale channel, swap width and height dims, and flip y-axis
@@ -86,12 +87,10 @@ def attach_dataset_logger(ds, output_dir, max_image_samples=10, image_size=None)
         min, max = tf.math.reduce_min(image), tf.math.reduce_max(image)
         image = tf.math.divide_no_nan(image - min, max - min)
         if image_size:
-            image = tf.image.resize(image, image_size)
+            image = tf.image.resize_with_pad(image, *image_size, method="nearest")
         tf.summary.image("features", image, step=batch_idx, max_outputs=max_image_samples)
         return batch
-    summary_writer = tf.summary.create_file_writer(output_dir)
-    with summary_writer.as_default():
-        ds = ds.enumerate().map(inspect_batches)
+    ds = ds.enumerate().map(inspect_batches)
     return ds
 
 def without_metadata(dataset):
@@ -117,18 +116,21 @@ def not_empty(feats, meta):
 def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=cpu_count()):
     if "melspectrogram" in feat_config:
         feat_config["melspectrogram"]["sample_rate"] = feat_config["sample_rate"]
-    for k in ("frame_length", "frame_step"):
-        feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
+    if "spectrogram" in feat_config:
+        # Spectrogram frames must match vad decision frames
+        for k in ("frame_length", "frame_step"):
+            feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
     min_seq_len = feat_config["min_sequence_length"]
     not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
     extract_and_vad = lambda wavs, meta: (
         librosa_tf.extract_features_and_do_vad(
             wavs,
-            feat_config["spectrogram"],
-            feat_config["voice_activity_detection"],
-            feat_config.get("melspectrogram"),
-            feat_config.get("logmel"),
-            feat_config.get("mfcc"),
+            feat_config["type"],
+            feat_config.get("spectrogram", {}),
+            feat_config.get("voice_activity_detection", {}),
+            feat_config.get("melspectrogram", {}),
+            feat_config.get("logmel", {}),
+            feat_config.get("mfcc", {}),
         ),
         meta
     )
@@ -149,10 +151,11 @@ def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=
     global_max = features.reduce(
         tf.fill(feat_shape, -float("inf")),
         lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
-    if "minmax_scaling" in feat_config:
+    scale_conf = feat_config.get("global_minmax_scaling")
+    if scale_conf:
         # Apply feature scaling on each feature dimension over whole dataset
-        a = feat_config["minmax_scaling"]["min"]
-        b = feat_config["minmax_scaling"]["max"]
+        a = scale_conf["min"]
+        b = scale_conf["max"]
         c = global_max - global_min
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
         features = features.map(scale_minmax)

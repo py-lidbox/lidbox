@@ -179,8 +179,11 @@ class Train(StatefulCommand):
             print()
         label2onehot = make_label2onehot_fn(labels)
         training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
-        if training_config.get("monitor_training_input", False):
-            training_ds = tf_data.attach_dataset_logger(training_ds, model.tensorboard.log_dir, image_size=(512, 1024))
+        summary_kwargs = training_config.get("monitor_training_input")
+        if summary_kwargs:
+            file_summary_writer = tf.summary.create_file_writer(os.path.join(model.tensorboard.log_dir, "train"))
+            with file_summary_writer.as_default():
+                training_ds = tf_data.attach_dataset_logger(training_ds, **summary_kwargs)
         validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
         model.fit(training_ds, validation_ds, training_config)
         if args.verbosity:
