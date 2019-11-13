@@ -114,36 +114,45 @@ def not_empty(feats, meta):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=cpu_count()):
-    if "melspectrogram" in feat_config:
-        feat_config["melspectrogram"]["sample_rate"] = feat_config["sample_rate"]
-    if "spectrogram" in feat_config:
-        # Spectrogram frames must match vad decision frames
-        for k in ("frame_length", "frame_step"):
-            feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
-    min_seq_len = feat_config["min_sequence_length"]
-    not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
-    extract_and_vad = lambda wavs, meta: (
-        librosa_tf.extract_features_and_do_vad(
-            wavs,
-            feat_config["type"],
-            feat_config.get("spectrogram", {}),
-            feat_config.get("voice_activity_detection", {}),
-            feat_config.get("melspectrogram", {}),
-            feat_config.get("logmel", {}),
-            feat_config.get("mfcc", {}),
-        ),
-        meta
-    )
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    features = (tf.data.Dataset.from_tensor_slices((paths, meta))
-                  .map(load_wav, num_parallel_calls=num_parallel_calls)
-                  .batch(batch_size)
-                  .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
-                  .flat_map(unbatch_ragged)
-                  .filter(not_empty)
-                  .filter(not_too_short))
+    min_seq_len = feat_config.get("min_sequence_length", 0)
+    not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
+    if feat_config["type"] == "sparsespeech":
+        with open(feat_config["path"], "rb") as f:
+            data = np.load(f, fix_imports=False, allow_pickle=True).item()
+        data = [data[u[0].numpy().decode("utf-8")] for u in meta]
+        def datagen():
+            for d in data:
+                yield d
+        features = tf.data.Dataset.from_generator(
+            datagen,
+            tf.as_dtype(data[0].dtype),
+            tf.TensorShape([None, feat_config["feature_dim"]])
+        )
+        features = (tf.data.Dataset.zip((features, tf.data.Dataset.from_tensor_slices(meta)))
+                      .filter(not_too_short))
+    else:
+        extract_and_vad = lambda wavs, meta: (
+            librosa_tf.extract_features_and_do_vad(
+                wavs,
+                feat_config["type"],
+                feat_config.get("spectrogram", {}),
+                feat_config.get("voice_activity_detection", {}),
+                feat_config.get("melspectrogram", {}),
+                feat_config.get("logmel", {}),
+                feat_config.get("mfcc", {}),
+            ),
+            meta
+        )
+        features = (tf.data.Dataset.from_tensor_slices((paths, meta))
+                      .map(load_wav, num_parallel_calls=num_parallel_calls)
+                      .batch(batch_size)
+                      .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
+                      .flat_map(unbatch_ragged)
+                      .filter(not_empty)
+                      .filter(not_too_short))
     feat_shape = (feat_config["feature_dim"],)
     global_min = features.reduce(
         tf.fill(feat_shape, float("inf")),

@@ -54,6 +54,8 @@ def patch_feature_dim(config):
     elif config["type"] == "spectrogram":
         config["feature_dim"] = config["spectrogram"] // 2 + 1
         config["melspectrogram"] = config["mfcc"] = None
+    elif config["type"] == "sparsespeech":
+        assert "feature_dim" in config, "feature dimensions for sparsespeech decodings is equal to the number of mem entries (embedding output dim) and must be specified explicitly"
     else:
         print("Error: unknown feature type '{}'".format(config["type"]))
         config = None
