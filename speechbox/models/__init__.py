@@ -79,7 +79,7 @@ class KerasWrapper:
         self.model = None
         self.initial_epoch = 0
         import_path = "speechbox.models." + model_definition["name"]
-        self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition["kwargs"])
+        self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition.get("kwargs", {}))
         self.callbacks = []
         if tensorboard:
             self.tensorboard = tf.keras.callbacks.TensorBoard(**tensorboard)
