@@ -52,7 +52,7 @@ def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, mels
             feat = tf.math.log(feat + 1e-6)
             if feattype == "mfcc":
                 num_coefs = mfcc_kwargs.get("num_coefs", 13)
-                feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., 1:num_coefs+1]
+                feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., :num_coefs]
     vad_decisions = energy_vad(signals, **vad_kwargs)
     # We use ragged tensors here to keep the dimensions after filtering feature frames according to vad decision based on the signals batch
     return tf.ragged.boolean_mask(feat, vad_decisions)
