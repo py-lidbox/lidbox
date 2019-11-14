@@ -113,7 +113,7 @@ def not_empty(feats, meta):
     return not tf.reduce_all(tf.math.equal(feats, 0))
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
-def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=cpu_count()):
+def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -144,7 +144,7 @@ def extract_features(feat_config, paths, meta, batch_size=1, num_parallel_calls=
         )
         features = (tf.data.Dataset.from_tensor_slices((paths, meta))
                       .map(load_wav, num_parallel_calls=num_parallel_calls)
-                      .batch(batch_size)
+                      .batch(feat_config.get("batch_size", 1))
                       .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
                       .flat_map(unbatch_ragged)
                       .filter(not_empty))
