@@ -57,18 +57,28 @@ def load_features(tfrecord_paths, feature_dim, dataset_config):
     ds = tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
     return ds.map(deserialize)
 
+@tf.function
+def frame_and_unbatch(sequences, meta, frame_len, frame_step):
+    frames = tf.signal.frame(sequences, frame_len, frame_step, axis=0)
+    # Repeat same meta for all frames
+    frames_meta = tf.tile(tf.expand_dims(meta, 0), [tf.shape(frames)[0], 1])
+    # Zip together
+    return tf.data.Dataset.from_tensor_slices((frames, frames_meta))
+
 def prepare_dataset_for_training(ds, config, label2onehot):
-    rnn_steps = config.get("rnn_steps")
-    if rnn_steps:
-        seq_len, seq_step = rnn_steps["frame_length"], rnn_steps["frame_step"]
+    if "frames" in config:
         # Extract frames from all features, using the same metadata for each frame of one sample of features
-        def make_timesteps_frames(feats, meta):
-            frames = tf.signal.frame(feats, seq_len, seq_step, axis=0)
-            # Repeat same meta for all frames
-            frames_meta = tf.tile(tf.expand_dims(meta, 0), [tf.shape(frames)[0], 1])
-            # Zip together
-            return tf.data.Dataset.from_tensor_slices((frames, frames_meta))
-        ds = ds.flat_map(make_timesteps_frames)
+        seq_len, seq_step = config["frames"]["length"], config["frames"]["step"]
+        ds = ds.flat_map(lambda feats, meta: frame_and_unbatch(feats, meta, seq_len, seq_step))
+    image_size = config.get("resize_input_as_images")
+    if image_size:
+        def convert_to_images(feats, meta):
+            # Add single grayscale channel
+            imgs = tf.expand_dims(feats, -1)
+            # Resize
+            imgs = tf.image.resize(imgs, (image_size["width"], image_size["height"]))
+            return imgs, meta
+        ds = ds.map(convert_to_images)
     to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]), meta[0])
     ds = ds.map(to_model_input)
     shuffle_size = config.get("shuffle_buffer_size", 0)
@@ -77,15 +87,18 @@ def prepare_dataset_for_training(ds, config, label2onehot):
     ds = ds.batch(config.get("batch_size", 1))
     return ds
 
-def attach_dataset_logger(ds, max_image_samples=10, image_size=None):
+def attach_dataset_logger(ds, max_image_samples=10, image_size=None, expand_channel_dim=False):
     @tf.function
     def inspect_batches(batch_idx, batch):
-        features, onehot, meta = batch
-        # Add grayscale channel, swap width and height dims, and flip y-axis
-        image = tf.image.flip_up_down(tf.image.transpose(tf.expand_dims(features, -1)))
-        # Scale the channel between 0 and 1
+        image, onehot, meta = batch
+        if expand_channel_dim:
+            # 'image' is not actually an image yet, add grayscale channel
+            image = tf.expand_dims(image, -1)
+        # Scale grayscale channel between 0 and 1
         min, max = tf.math.reduce_min(image), tf.math.reduce_max(image)
         image = tf.math.divide_no_nan(image - min, max - min)
+        image = tf.image.transpose(image)
+        image = tf.image.flip_up_down(image)
         if image_size:
             image = tf.image.resize_with_pad(image, *image_size, method="nearest")
         tf.summary.image("features", image, step=batch_idx, max_outputs=max_image_samples)
@@ -144,8 +157,12 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
             ),
             meta
         )
-        features = (tf.data.Dataset.from_tensor_slices((paths, meta))
-                      .map(load_wav, num_parallel_calls=num_parallel_calls)
+        wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
+                  .map(load_wav, num_parallel_calls=num_parallel_calls))
+        if "frames" in feat_config:
+            frame_len, frame_step = feat_config["frames"]["length"], feat_config["frames"]["step"]
+            wavs  = wavs.flat_map(lambda wavs, meta: frame_and_unbatch(wavs, meta, frame_len, frame_step))
+        features = (wavs
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
                       .flat_map(unbatch_ragged)

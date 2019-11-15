@@ -128,8 +128,12 @@ class Train(StatefulCommand):
         paths_meta = []
         keys = list(utt2path.keys())
         if args.shuffle_file_list:
+            if args.verbosity > 1:
+                print("--shuffle-file-list given, shuffling utterance ids")
             random.shuffle(keys)
         if args.file_limit:
+            if args.verbosity > 1:
+                print("--file-limit set at {}, slicing utterance id list".format(args.file_limit))
             keys = keys[:args.file_limit]
         labels_set = set(self.experiment_config["dataset"]["labels"])
         num_dropped = 0
@@ -178,14 +182,22 @@ class Train(StatefulCommand):
             print("Generated onehot encoding:")
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
-                tf.print(l, label2onehot(l))
+                tf.print(l, label2onehot(l), summarize=-1)
         training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
         validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
+        training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
+        summary_kwargs = training_config.get("monitor_training_input")
+        if summary_kwargs:
+            file_summary_writer = tf.summary.create_file_writer(os.path.join(model.tensorboard.log_dir, "train"))
+            with file_summary_writer.as_default():
+                training_ds = tf_data.attach_dataset_logger(training_ds, **summary_kwargs)
         if args.verbosity > 1:
             print("Compiling model")
-        input_shape = (training_config["rnn_steps"]["frame_length"], feat_config["feature_dim"])
+        input_shape = next(iter(training_ds.take(1)))[0].shape[1:]
+        if args.verbosity > 2:
+            print("input shape is", input_shape)
         model.prepare(input_shape, len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = os.listdir(checkpoint_dir)
@@ -198,12 +210,6 @@ class Train(StatefulCommand):
             print("Starting training with model:")
             print(str(model))
             print()
-        training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
-        summary_kwargs = training_config.get("monitor_training_input")
-        if summary_kwargs:
-            file_summary_writer = tf.summary.create_file_writer(os.path.join(model.tensorboard.log_dir, "train"))
-            with file_summary_writer.as_default():
-                training_ds = tf_data.attach_dataset_logger(training_ds, **summary_kwargs)
         validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
         model.fit(training_ds, validation_ds, training_config)
         if args.verbosity:
