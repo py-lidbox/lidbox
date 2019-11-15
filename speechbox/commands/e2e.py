@@ -73,6 +73,7 @@ class Train(StatefulCommand):
             help="Extract only up to this many files from the wavpath list (e.g. for debugging).")
         optional.add_argument("--shuffle-file-list",
             action="store_true",
+            default=False,
             help="Shuffle wavpath list before loading wavs (e.g. for debugging, use TF shuffle buffers during training).")
         return parser
 
@@ -130,11 +131,17 @@ class Train(StatefulCommand):
             random.shuffle(keys)
         if args.file_limit:
             keys = keys[:args.file_limit]
+        labels_set = set(self.experiment_config["dataset"]["labels"])
+        num_dropped = 0
         for utt in keys:
+            label = utt2label[utt]
+            if label not in labels_set:
+                num_dropped += 1
+                continue
             paths.append(utt2path[utt])
-            paths_meta.append((utt, utt2label[utt]))
+            paths_meta.append((utt, label))
         if args.verbosity:
-            print("Starting feature extraction for datagroup '{}'".format(datagroup_key))
+            print("Starting feature extraction for datagroup '{}' from {} files. Amount of files that were dropped because their label is not in the enabled labels list: {}".format(datagroup_key, len(paths), num_dropped))
         extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
         if args.verbosity > 1:
             print("Global dataset stats:")
@@ -165,13 +172,19 @@ class Train(StatefulCommand):
             for k in ("frame_length", "frame_step"):
                 if k in feat_config["spectrogram"]:
                     feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
+        labels = self.experiment_config["dataset"]["labels"]
+        label2onehot = make_label2onehot_fn(labels)
+        if args.verbosity > 2:
+            print("Generated onehot encoding:")
+            for l in labels:
+                l = tf.constant(l, dtype=tf.string)
+                tf.print(l, label2onehot(l))
         training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
         validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
         if args.verbosity > 1:
             print("Compiling model")
-        labels = self.experiment_config["dataset"]["labels"]
         input_shape = (training_config["rnn_steps"]["frame_length"], feat_config["feature_dim"])
         model.prepare(input_shape, len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
@@ -185,7 +198,6 @@ class Train(StatefulCommand):
             print("Starting training with model:")
             print(str(model))
             print()
-        label2onehot = make_label2onehot_fn(labels)
         training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
         summary_kwargs = training_config.get("monitor_training_input")
         if summary_kwargs:

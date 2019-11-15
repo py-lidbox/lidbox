@@ -35,7 +35,7 @@ def get_best_checkpoint(checkpoints, key="epoch"):
         # Greatest validation accuracy value
         return max(checkpoints, key=lambda p: float(key_fn(p)))
 
-def parse_metrics(metrics):
+def parse_metrics(metrics, output_shape):
     keras_metrics = []
     for m in metrics:
         metric = None
@@ -50,7 +50,7 @@ def parse_metrics(metrics):
         elif name == "recall":
             metric = tf.keras.metrics.Recall(**kwargs)
         elif name == "equal_error_rate":
-            metric = speechbox.metrics.OneHotAvgEER(kwargs.pop("num_classes"), **kwargs)
+            metric = speechbox.metrics.OneHotAvgEER(output_shape, **kwargs)
         elif name == "C_avg":
             metric = speechbox.metrics.AverageDetectionCost(**kwargs)
         assert metric is not None, "metric not implemented: '{}'".format(m)
@@ -105,7 +105,7 @@ class KerasWrapper:
         self.model.compile(
             loss=training_config["loss"],
             optimizer=optimizer,
-            metrics=parse_metrics(training_config["metrics"])
+            metrics=parse_metrics(training_config["metrics"], output_shape)
         )
 
     @with_device
