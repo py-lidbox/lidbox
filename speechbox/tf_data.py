@@ -121,12 +121,14 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
         with open(feat_config["path"], "rb") as f:
             data = np.load(f, fix_imports=False, allow_pickle=True).item()
         data = [(data[m[0].numpy().decode("utf-8")], m) for m in meta]
+        datatype = tf.as_dtype(data[0][0].dtype)
         def datagen():
             for d, m in data:
-                yield d, m
+                noise = tf.random.normal(d.shape, mean=0, stddev=0.01, dtype=datatype)
+                yield d + noise, m
         features = tf.data.Dataset.from_generator(
             datagen,
-            (tf.as_dtype(data[0][0].dtype), tf.string),
+            (datatype, tf.string),
             (tf.TensorShape([None, feat_config["feature_dim"]]), tf.TensorShape([2])),
         )
     else:
