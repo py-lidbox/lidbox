@@ -8,24 +8,45 @@ from tensorflow.keras.layers import (
     Permute,
     Reshape,
 )
-from tensorflow.keras.models import Sequential
+from tensorflow.keras import Sequential, Model
+import tensorflow as tf
 
-def loader(input_shape, output_shape, num_lstm_units=256):
+
+class ResnetBlock(Model):
+    """
+    Combination of
+    https://adventuresinmachinelearning.com/introduction-resnet-tensorflow-2/
+    and
+    https://www.tensorflow.org/tutorials/customization/custom_layers
+    """
+    def __init__(self, num_filters, kernel_size, name=''):
+        super().__init__(name=name)
+        self.conv2a = Conv2D(num_filters, kernel_size, padding="same", activation="relu")
+        self.bn2a = BatchNormalization()
+        self.conv2b = Conv2D(num_filters, kernel_size, padding="same")
+        self.bn2b = BatchNormalization()
+
+    def call(self, input_tensor, training=False):
+        x = self.conv2a(input_tensor)
+        x = self.bn2a(x, training=training)
+        x = self.conv2b(x)
+        x = self.bn2b(x, training=training)
+        x += input_tensor
+        return tf.nn.relu(x)
+
+
+def loader(input_shape, output_shape, num_lstm_units=64):
     return Sequential([
-        Reshape(input_shape + (1, ), input_shape=input_shape),
-        Conv2D(64, 7, 2, padding="same"),
+        Conv2D(64, 7, 2, input_shape=input_shape, padding="same", activation="relu"),
         MaxPool2D(2),
-        Conv2D(64, 3, 2, padding="same"),
-        BatchNormalization(),
-        Conv2D(128, 3, 2, padding="same"),
-        BatchNormalization(),
-        Conv2D(256, 3, 2, padding="same"),
-        BatchNormalization(),
-        Conv2D(512, 3, 2, padding="same"),
-        BatchNormalization(),
-        Permute((3, 1, 2)),
-        Reshape((-1, 1)),
-        Bidirectional(LSTM(num_lstm_units, return_sequences=True)),
-        Bidirectional(LSTM(num_lstm_units)),
+        ResnetBlock(64, 3),
+        ResnetBlock(64, 3),
+        ResnetBlock(64, 3),
+        ResnetBlock(64, 3),
+        ResnetBlock(64, 3),
+        ResnetBlock(64, 3),
+        tf.keras.layers.GlobalAveragePooling2D(),
+        # Bidirectional(LSTM(num_lstm_units, return_sequences=True)),
+        # Bidirectional(LSTM(num_lstm_units)),
         Dense(output_shape, activation="softmax")
      ])
