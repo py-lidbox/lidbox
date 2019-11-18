@@ -34,13 +34,15 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_threshold=1e-3):
-    """Returns frame-wise vad decisions."""
-    tf.debugging.assert_non_negative(strength)
+def energy_vad(signals, frame_length=400, frame_step=160, strength=0.4, min_rms_threshold=1e-3):
+    """
+    Returns frame-wise vad decisions based on mean RMS value for each frame.
+    'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
+    """
     frames = tf.signal.frame(signals, frame_length, frame_step)
     rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=2))
     mean_rms = tf.math.reduce_mean(rms, axis=1, keepdims=True)
-    threshold = strength * 0.5 * tf.math.maximum(min_rms_threshold, mean_rms)
+    threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
     return tf.math.greater(rms, threshold)
 
 @tf.function
@@ -53,8 +55,8 @@ def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, mels
             if feattype == "mfcc":
                 num_coefs = mfcc_kwargs.get("num_coefs", 13)
                 feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., :num_coefs]
+    # Compute VAD decisions on the signals batch
     vad_decisions = energy_vad(signals, **vad_kwargs)
-    # We use ragged tensors here to keep the dimensions after filtering feature frames according to vad decision based on the signals batch
     return tf.ragged.boolean_mask(feat, vad_decisions)
 
 def get_heatmap_plot(seq_examples, num_rows, num_cols):
