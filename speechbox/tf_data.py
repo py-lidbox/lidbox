@@ -81,10 +81,11 @@ def prepare_dataset_for_training(ds, config, label2onehot):
         ds = ds.map(convert_to_images)
     to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]), meta[0])
     ds = ds.map(to_model_input)
-    shuffle_size = config.get("shuffle_buffer_size", 0)
-    if shuffle_size:
-        ds = ds.shuffle(shuffle_size)
+    if "shuffle_buffer_size" in config:
+        ds = ds.shuffle(config["shuffle_buffer_size"])
     ds = ds.batch(config.get("batch_size", 1))
+    if "prefetch" in config:
+        ds = ds.prefetch(config["prefetch"])
     return ds
 
 def attach_dataset_logger(ds, max_image_samples=10, image_size=None, expand_channel_dim=False):
@@ -152,7 +153,6 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
                 feat_config.get("spectrogram", {}),
                 feat_config.get("voice_activity_detection", {}),
                 feat_config.get("melspectrogram", {}),
-                feat_config.get("logmel", {}),
                 feat_config.get("mfcc", {}),
             ),
             meta

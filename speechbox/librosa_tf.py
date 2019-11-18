@@ -44,7 +44,7 @@ def energy_vad(signals, frame_length=400, frame_step=160, strength=0.7, min_rms_
     return tf.math.greater(rms, threshold)
 
 @tf.function
-def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, melspec_kwargs, logmel, mfcc_kwargs):
+def extract_features_and_do_vad(signals, feattype, spec_kwargs, vad_kwargs, melspec_kwargs, mfcc_kwargs):
     feat = spectrograms(signals, **spec_kwargs)
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
         feat = melspectrograms(feat, **melspec_kwargs)

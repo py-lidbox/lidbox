@@ -44,16 +44,10 @@ def make_label2onehot_fn(labels):
 def patch_feature_dim(config):
     if config["type"] == "mfcc":
         config["feature_dim"] = config["mfcc"]["num_coefs"]
-    elif config["type"] == "melspectrogram":
+    elif config["type"] in ("melspectrogram", "logmelspectrogram"):
         config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
-        config["mfcc"] = None
-    elif config["type"] == "logmelspectrogram":
-        config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
-        config["mfcc"] = None
-        config["logmel"] = True
     elif config["type"] == "spectrogram":
         config["feature_dim"] = config["spectrogram"] // 2 + 1
-        config["melspectrogram"] = config["mfcc"] = None
     elif config["type"] == "sparsespeech":
         assert "feature_dim" in config, "feature dimensions for sparsespeech decodings is equal to the number of mem entries (embedding output dim) and must be specified explicitly"
     else:
@@ -182,23 +176,31 @@ class Train(StatefulCommand):
             print("Generated onehot encoding:")
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
-                tf.print(l, label2onehot(l), summarize=-1)
+                tf.print(l, label2onehot(l), summarize=-1, output_stream=sys.stdout)
         training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
         validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
         training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
+        validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
         summary_kwargs = training_config.get("monitor_training_input")
         if summary_kwargs:
-            file_summary_writer = tf.summary.create_file_writer(os.path.join(model.tensorboard.log_dir, "train"))
-            with file_summary_writer.as_default():
+            logdir = os.path.join(model.tensorboard.log_dir, "train")
+            self.make_named_dir(logdir)
+            train_ds_writer = tf.summary.create_file_writer(logdir)
+            with train_ds_writer.as_default():
                 training_ds = tf_data.attach_dataset_logger(training_ds, **summary_kwargs)
+            logdir = os.path.join(model.tensorboard.log_dir, "validation")
+            self.make_named_dir(logdir)
+            validation_ds_writer = tf.summary.create_file_writer(logdir)
+            with validation_ds_writer.as_default():
+                validation_ds = tf_data.attach_dataset_logger(validation_ds, **summary_kwargs)
         if args.verbosity > 1:
             print("Compiling model")
-        input_shape = next(iter(training_ds.take(1)))[0].shape[1:]
+        input_shape = next(iter(training_ds.take(1)))[0].shape
         if args.verbosity > 2:
-            print("input shape is", input_shape)
-        model.prepare(input_shape, len(labels), training_config)
+            print("Full shape of the first sample in the training set is", input_shape)
+        model.prepare(input_shape[1:], len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = os.listdir(checkpoint_dir)
         if checkpoints:
@@ -210,7 +212,6 @@ class Train(StatefulCommand):
             print("Starting training with model:")
             print(str(model))
             print()
-        validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
         model.fit(training_ds, validation_ds, training_config)
         if args.verbosity:
             print("\nTraining finished\n")
