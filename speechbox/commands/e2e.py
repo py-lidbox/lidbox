@@ -138,11 +138,11 @@ class Train(StatefulCommand):
                 continue
             paths.append(utt2path[utt])
             paths_meta.append((utt, label))
+        ds_cache_dir = os.path.join(self.cache_dir, "tf_dataset_caches", datagroup_key)
+        self.make_named_dir(ds_cache_dir, "tf.data.Dataset cache")
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files. Amount of files that were dropped because their label is not in the enabled labels list: {}".format(datagroup_key, len(paths), num_dropped))
-            if "extracted_cache_dir" not in config:
-                print("Warning: 'extracted_cache_dir' not specified in features config, features will be cached in memory.")
-        extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
+        extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta, cache_dir=ds_cache_dir)
         if args.verbosity > 1:
             print("Global dataset stats:")
             pprint.pprint(stats)
