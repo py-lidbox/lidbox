@@ -25,5 +25,5 @@ def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, 
             bn = tf.keras.layers.BatchNormalization(name="batchnorm_{}".format(i))
             layers.extend([lstm, bn])
         lstm_layers = layers
-    output = tf.keras.layers.Dense(output_shape, activation='softmax')
+    output = tf.keras.layers.Dense(output_shape, activation="softmax", name="output")
     return tf.keras.models.Sequential(lstm_layers + [output])

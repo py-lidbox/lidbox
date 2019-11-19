@@ -7,32 +7,30 @@ from tensorflow.keras.layers import (
     Bidirectional,
     Conv2D,
     Dense,
-    GlobalAveragePooling2D,
     LSTM,
     MaxPool2D,
-    Permute,
     Reshape,
 )
 from tensorflow.keras import Sequential
 
-def loader(input_shape, output_shape):
+def loader(input_shape, output_shape, d=1):
     crnn = Sequential([
-        Conv2D(128, 3, input_shape=input_shape, padding="same", activation="relu"),
+        Conv2D(128//d, 3, input_shape=input_shape, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
-        Conv2D(128, 3, padding="same", activation="relu"),
+        Conv2D(128//d, 3, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
-        Conv2D(128, 3, padding="same", activation="relu"),
+        Conv2D(128//d, 3, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
-        Conv2D(256, 3, padding="same", activation="relu"),
+        Conv2D(256//d, 3, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
-        Conv2D(512, 3, padding="same", activation="relu"),
+        Conv2D(512//d, 3, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
-        Conv2D(512, 3, padding="same", activation="relu"),
+        Conv2D(512//d, 3, padding="same", activation="relu"),
         BatchNormalization(),
         MaxPool2D(2),
     ])
@@ -40,8 +38,8 @@ def loader(input_shape, output_shape):
     timesteps = y * x
     lstm = [
         Reshape((timesteps, channels)),
-        Bidirectional(LSTM(64, return_sequences=True)),
-        Bidirectional(LSTM(64)),
+        Bidirectional(LSTM(64//d, return_sequences=True)),
+        Bidirectional(LSTM(64//d)),
         Dense(output_shape, activation="softmax"),
     ]
     for layer in lstm:
