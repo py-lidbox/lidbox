@@ -58,8 +58,8 @@ def load_features(tfrecord_paths, feature_dim, dataset_config):
     return ds.map(deserialize)
 
 @tf.function
-def frame_and_unbatch(sequences, meta, frame_len, frame_step):
-    frames = tf.signal.frame(sequences, frame_len, frame_step, axis=0)
+def frame_and_unbatch(sequences, meta, frame_len, frame_step, pad_zeros=False):
+    frames = tf.signal.frame(sequences, frame_len, frame_step, pad_end=pad_zeros, axis=0)
     # Repeat same meta for all frames
     frames_meta = tf.tile(tf.expand_dims(meta, 0), [tf.shape(frames)[0], 1])
     # Zip together
@@ -69,7 +69,8 @@ def prepare_dataset_for_training(ds, config, label2onehot):
     if "frames" in config:
         # Extract frames from all features, using the same metadata for each frame of one sample of features
         seq_len, seq_step = config["frames"]["length"], config["frames"]["step"]
-        ds = ds.flat_map(lambda feats, meta: frame_and_unbatch(feats, meta, seq_len, seq_step))
+        pad_zeros = config["frames"].get("pad_zeros", False)
+        ds = ds.flat_map(lambda feats, meta: frame_and_unbatch(feats, meta, seq_len, seq_step, pad_zeros))
     image_size = config.get("resize_input_as_images")
     if image_size:
         def convert_to_images(feats, meta):
