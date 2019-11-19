@@ -140,6 +140,8 @@ class Train(StatefulCommand):
             paths_meta.append((utt, label))
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files. Amount of files that were dropped because their label is not in the enabled labels list: {}".format(datagroup_key, len(paths), num_dropped))
+            if "extracted_cache_dir" not in config:
+                print("Warning: 'extracted_cache_dir' not specified in features config, features will be cached in memory.")
         extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
         if args.verbosity > 1:
             print("Global dataset stats:")

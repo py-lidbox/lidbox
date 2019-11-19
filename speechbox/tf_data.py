@@ -165,11 +165,16 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
         features = (wavs
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
-                      .flat_map(unbatch_ragged)
-                      .filter(not_empty))
+                      .flat_map(unbatch_ragged))
+    features = features.cache(filename=feat_config.get("extracted_cache_dir", ''))
+    stats = {"num_features": {}}
+    stats["num_features"]["before_filtering"] = int(features.reduce(0, lambda c, f: c + 1))
+    features = features.filter(not_empty)
+    stats["num_features"]["after_vad_filter"] = int(features.reduce(0, lambda c, f: c + 1))
     min_seq_len = feat_config.get("min_sequence_length", 0)
-    not_too_short = lambda feats, meta: tf.math.greater(tf.size(feats), min_seq_len)
+    not_too_short = lambda feats, meta: tf.math.greater(tf.shape(feats)[0], min_seq_len)
     features = features.filter(not_too_short)
+    stats["num_features"]["after_too_short_filter"] = int(features.reduce(0, lambda c, f: c + 1))
     feat_shape = (feat_config["feature_dim"],)
     global_min = features.reduce(
         tf.fill(feat_shape, float("inf")),
@@ -177,6 +182,8 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
     global_max = features.reduce(
         tf.fill(feat_shape, -float("inf")),
         lambda acc, x: tf.math.maximum(acc, tf.math.reduce_max(x[0], axis=0)))
+    stats["global_min"] = global_min
+    stats["global_max"] = global_max
     scale_conf = feat_config.get("global_minmax_scaling")
     if scale_conf:
         # Apply feature scaling on each feature dimension over whole dataset
@@ -185,10 +192,6 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count()):
         c = global_max - global_min
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
         features = features.map(scale_minmax)
-    stats = {
-        "global_min": global_min,
-        "global_max": global_max,
-    }
     return features, stats
 
 def serialize_wav(wav, uuid, label):
