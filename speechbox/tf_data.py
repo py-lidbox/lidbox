@@ -86,7 +86,7 @@ def not_empty(feats, meta):
     return not tf.reduce_all(tf.math.equal(feats, 0))
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
-def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_dir=''):
+def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path=''):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -125,13 +125,13 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), c
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_and_vad, num_parallel_calls=num_parallel_calls)
                       .flat_map(unbatch_ragged))
-    features = features.cache(filename=cache_dir)
+    features = features.cache(filename=cache_path)
     stats = {"num_features": {}}
     stats["num_features"]["before_filtering"] = int(features.reduce(0, lambda c, f: c + 1))
     features = features.filter(not_empty)
     stats["num_features"]["after_vad_filter"] = int(features.reduce(0, lambda c, f: c + 1))
     min_seq_len = feat_config.get("min_sequence_length", 0)
-    not_too_short = lambda feats, meta: tf.math.greater(tf.shape(feats)[0], min_seq_len)
+    not_too_short = lambda feats, meta: tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
     features = features.filter(not_too_short)
     stats["num_features"]["after_too_short_filter"] = int(features.reduce(0, lambda c, f: c + 1))
     feat_shape = (feat_config["feature_dim"],)
