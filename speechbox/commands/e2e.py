@@ -179,27 +179,33 @@ class Train(StatefulCommand):
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
                 tf.print(l, label2onehot(l), summarize=-1, output_stream=sys.stdout)
-        training_ds = self.extract_features(feat_config, training_config["training_datagroup"])
-        validation_ds = self.extract_features(feat_config, training_config["validation_datagroup"])
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
-        training_ds = tf_data.prepare_dataset_for_training(training_ds, training_config, label2onehot)
-        validation_ds = tf_data.prepare_dataset_for_training(validation_ds, training_config, label2onehot)
-        summary_kwargs = training_config.get("monitor_training_input")
-        if summary_kwargs:
-            logdir = os.path.join(model.tensorboard.log_dir, "train")
-            self.make_named_dir(logdir)
-            train_ds_writer = tf.summary.create_file_writer(logdir)
-            with train_ds_writer.as_default():
-                training_ds = tf_data.attach_dataset_logger(training_ds, **summary_kwargs)
-            logdir = os.path.join(model.tensorboard.log_dir, "validation")
-            self.make_named_dir(logdir)
-            validation_ds_writer = tf.summary.create_file_writer(logdir)
-            with validation_ds_writer.as_default():
-                validation_ds = tf_data.attach_dataset_logger(validation_ds, **summary_kwargs)
+        dataset = {}
+        for ds in ("train", "validation"):
+            if args.verbosity > 2:
+                print("Dataset config for '{}'".format(ds))
+                pprint.pprint(training_config[ds])
+            ds_config = dict(training_config, **training_config[ds])
+            del ds_config["train"], ds_config["validation"]
+            dataset[ds] = tf_data.prepare_dataset_for_training(
+                self.extract_features(feat_config, ds_config.pop("datagroup")),
+                ds_config,
+                label2onehot
+            )
+            summary_kwargs = ds_config.get("dataset_logger")
+            if summary_kwargs:
+                logdir = os.path.join(model.tensorboard.log_dir, ds)
+                self.make_named_dir(logdir)
+                writer = tf.summary.create_file_writer(logdir)
+                with writer.as_default():
+                    dataset[ds] = tf_data.attach_dataset_logger(dataset[ds], **summary_kwargs)
+                # Tensorboard expects the file writer python object to be alive when writing starts, so we shove it into the dict
+                # it has no other use
+                dataset[ds + "-writer"] = writer
         if args.verbosity > 1:
             print("Compiling model")
-        input_shape = next(iter(training_ds.take(1)))[0].shape
+        input_shape = next(iter(dataset["train"].take(1)))[0].shape
         if args.verbosity > 2:
             print("Full shape of the first sample in the training set is", input_shape)
         model.prepare(input_shape[1:], len(labels), training_config)
@@ -211,10 +217,10 @@ class Train(StatefulCommand):
                 print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
             model.load_weights(checkpoint_path)
         if args.verbosity:
-            print("Starting training with model:")
+            print("\nStarting training with:")
             print(str(model))
             print()
-        model.fit(training_ds, validation_ds, training_config)
+        model.fit(dataset["train"], dataset["validation"], training_config)
         if args.verbosity:
             print("\nTraining finished\n")
 
