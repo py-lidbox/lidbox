@@ -8,56 +8,6 @@ import tensorflow as tf
 
 TFRECORD_COMPRESSION = "GZIP"
 
-def floats2floatlist(v):
-    return tf.train.Feature(float_list=tf.train.FloatList(value=v))
-
-def sequence2floatlists(v_seq):
-    return tf.train.FeatureList(feature=map(floats2floatlist, v_seq))
-
-def string2byteslist(s):
-    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[s.numpy()]))
-
-def serialize_sequence_features(features, meta):
-    context_definition = {
-        "uuid": string2byteslist(meta[0]),
-        "label": string2byteslist(meta[1]),
-    }
-    context = tf.train.Features(feature=context_definition)
-    sequence_definition = {
-        "features": sequence2floatlists(features),
-    }
-    feature_lists = tf.train.FeatureLists(feature_list=sequence_definition)
-    seq_example = tf.train.SequenceExample(context=context, feature_lists=feature_lists)
-    return seq_example.SerializeToString()
-
-def deserialize_sequence_features(seq_example_str, feature_dim):
-    context_definition = {
-        "uuid": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
-        "label": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
-    }
-    sequence_definition = {
-        "features": tf.io.FixedLenSequenceFeature(shape=[feature_dim], dtype=tf.float32)
-    }
-    context, sequence = tf.io.parse_single_sequence_example(
-        seq_example_str,
-        context_features=context_definition,
-        sequence_features=sequence_definition
-    )
-    return sequence["features"], context
-
-# TODO this is horribly slow
-def write_features(extractor_dataset, target_path):
-    if not target_path.endswith(".tfrecord"):
-        target_path += ".tfrecord"
-    serialize = lambda feats, meta: tf.py_function(serialize_sequence_features, (feats, meta), tf.string)
-    record_writer = tf.data.experimental.TFRecordWriter(target_path, compression_type=TFRECORD_COMPRESSION)
-    record_writer.write(extractor_dataset.map(serialize))
-
-def load_features(tfrecord_paths, feature_dim, dataset_config):
-    deserialize = lambda s: deserialize_sequence_features(s, feature_dim)
-    ds = tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
-    return ds.map(deserialize)
-
 @tf.function
 def frame_and_unbatch(sequences, meta, frame_len, frame_step, pad_zeros=False):
     frames = tf.signal.frame(sequences, frame_len, frame_step, pad_end=pad_zeros, axis=0)
@@ -201,6 +151,59 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), c
         scale_minmax = lambda feats, meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), meta)
         features = features.map(scale_minmax)
     return features, stats
+
+
+# TF serialization functions, not really needed if features are cached using tf.data.Dataset.cache
+
+def floats2floatlist(v):
+    return tf.train.Feature(float_list=tf.train.FloatList(value=v))
+
+def sequence2floatlists(v_seq):
+    return tf.train.FeatureList(feature=map(floats2floatlist, v_seq))
+
+def string2byteslist(s):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[s.numpy()]))
+
+def serialize_sequence_features(features, meta):
+    context_definition = {
+        "uuid": string2byteslist(meta[0]),
+        "label": string2byteslist(meta[1]),
+    }
+    context = tf.train.Features(feature=context_definition)
+    sequence_definition = {
+        "features": sequence2floatlists(features),
+    }
+    feature_lists = tf.train.FeatureLists(feature_list=sequence_definition)
+    seq_example = tf.train.SequenceExample(context=context, feature_lists=feature_lists)
+    return seq_example.SerializeToString()
+
+def deserialize_sequence_features(seq_example_str, feature_dim):
+    context_definition = {
+        "uuid": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
+        "label": tf.io.FixedLenFeature(shape=[1], dtype=tf.string),
+    }
+    sequence_definition = {
+        "features": tf.io.FixedLenSequenceFeature(shape=[feature_dim], dtype=tf.float32)
+    }
+    context, sequence = tf.io.parse_single_sequence_example(
+        seq_example_str,
+        context_features=context_definition,
+        sequence_features=sequence_definition
+    )
+    return sequence["features"], context
+
+# TODO this is horribly slow
+def write_features(extractor_dataset, target_path):
+    if not target_path.endswith(".tfrecord"):
+        target_path += ".tfrecord"
+    serialize = lambda feats, meta: tf.py_function(serialize_sequence_features, (feats, meta), tf.string)
+    record_writer = tf.data.experimental.TFRecordWriter(target_path, compression_type=TFRECORD_COMPRESSION)
+    record_writer.write(extractor_dataset.map(serialize))
+
+def load_features(tfrecord_paths, feature_dim, dataset_config):
+    deserialize = lambda s: deserialize_sequence_features(s, feature_dim)
+    ds = tf.data.TFRecordDataset(tfrecord_paths, compression_type=TFRECORD_COMPRESSION)
+    return ds.map(deserialize)
 
 def serialize_wav(wav, uuid, label):
     feature_definition = {
