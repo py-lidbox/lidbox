@@ -1,6 +1,7 @@
 from multiprocessing import cpu_count
 
 from . import librosa_tf
+import matplotlib.cm
 import numpy as np
 import tensorflow as tf
 
@@ -89,20 +90,26 @@ def prepare_dataset_for_training(ds, config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
-def attach_dataset_logger(ds, max_image_samples=10, image_size=None, expand_channel_dim=False):
+def attach_dataset_logger(ds, max_image_samples=10, image_size=None, colormap="gray"):
+    # TF colormap trickery from https://gist.github.com/jimfleming/c1adfdb0f526465c99409cc143dea97b
+    # The idea is to extract all RGB values from the matplotlib colormap into a tf.constant
+    cmap = matplotlib.cm.get_cmap(colormap)
+    num_colors = cmap.N
+    colors = tf.constant(cmap(np.arange(num_colors + 1))[:,:3], dtype=tf.float32)
     @tf.function
     def inspect_batches(batch_idx, batch):
         image, onehot, meta = batch
-        if expand_channel_dim:
-            # 'image' is not actually an image yet, add grayscale channel
-            image = tf.expand_dims(image, -1)
         # Scale grayscale channel between 0 and 1
         min, max = tf.math.reduce_min(image), tf.math.reduce_max(image)
         image = tf.math.divide_no_nan(image - min, max - min)
+        # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
+        indices = tf.dtypes.cast(tf.math.round(image * num_colors), tf.int32)
+        image = tf.gather(colors, indices)
+        # Prepare for tensorboard
         image = tf.image.transpose(image)
         image = tf.image.flip_up_down(image)
         if image_size:
-            image = tf.image.resize_with_pad(image, *image_size, method="nearest")
+            image = tf.image.resize(image, image_size, method="nearest")
         tf.summary.image("features", image, step=batch_idx, max_outputs=max_image_samples)
         return batch
     ds = ds.enumerate().map(inspect_batches)
