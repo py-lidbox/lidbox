@@ -9,6 +9,46 @@ import tensorflow as tf
 TFRECORD_COMPRESSION = "GZIP"
 
 @tf.function
+def energy_vad(signal, *meta, frame_length=400, strength=0.3, min_rms_threshold=1e-3):
+    """
+    Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
+    'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
+    """
+    tf.debugging.assert_rank(signal, 1, "energy_vad supports VAD only on one signal at a time, e.g. not batches")
+    frames = tf.signal.frame(signal, frame_length, frame_length)
+    rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=1))
+    mean_rms = tf.math.reduce_mean(rms, axis=0, keepdims=True)
+    threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
+    # Take only frames that have rms greater than the threshold
+    filtered_frames = tf.boolean_mask(frames, tf.math.greater(rms, threshold))
+    # Concat all frames and return a new signal with silence removed
+    return tf.reshape(filtered_frames, [-1]), *meta
+
+@tf.function
+def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs):
+    feat = librosa_tf.spectrograms(signals, **spec_kwargs)
+    if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
+        feat = librosa_tf.melspectrograms(feat, **melspec_kwargs)
+        if feattype in ("logmelspectrogram", "mfcc"):
+            feat = tf.math.log(feat + 1e-6)
+            if feattype == "mfcc":
+                num_coefs = mfcc_kwargs.get("num_coefs", 13)
+                feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., :num_coefs]
+    return feat
+
+@tf.function
+def load_wav(path, meta):
+    wav = tf.audio.decode_wav(tf.io.read_file(path))
+    tf.debugging.assert_equal(wav.sample_rate, 16000, message="Failed to load audio file '{}'. Currently only 16 kHz sampling rate is supported.".format(path))
+    # Merge channels by averaging over channels.
+    # For mono this just drops the channel dim.
+    return (tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), meta)
+
+@tf.function
+def write_wav(wav, path):
+    tf.io.write_file(path, tf.audio.encode_wav(wav, 16000))
+
+@tf.function
 def frame_and_unbatch(sequences, meta, frame_len, frame_step, pad_zeros=False):
     frames = tf.signal.frame(sequences, frame_len, frame_step, pad_end=pad_zeros, axis=0)
     # Repeat same meta for all frames
@@ -70,14 +110,6 @@ def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
 
 @tf.function
-def load_wav(path, meta):
-    wav = tf.audio.decode_wav(tf.io.read_file(path))
-    tf.debugging.assert_equal(wav.sample_rate, 16000, message="Failed to load audio file '{}'. Currently only 16 kHz sampling rate is supported.".format(path))
-    # Merge channels by averaging over channels.
-    # For mono this just drops the channel dim.
-    return (tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), meta)
-
-@tf.function
 def unbatch_ragged(ragged, meta):
     return tf.data.Dataset.from_tensor_slices((ragged.to_tensor(), meta))
 
@@ -106,7 +138,7 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), c
         )
     else:
         extract_and_vad = lambda wavs, meta: (
-            librosa_tf.extract_features_and_do_vad(
+            extract_features_and_do_vad(
                 wavs,
                 feat_config["type"],
                 feat_config.get("spectrogram", {}),
