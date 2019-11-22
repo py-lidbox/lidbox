@@ -1,7 +1,7 @@
 from multiprocessing import cpu_count
 import collections
 
-from . import librosa_tf
+from . import audio_feat
 import matplotlib.cm
 import numpy as np
 import tensorflow as tf
@@ -26,9 +26,9 @@ def energy_vad(signal, *meta, frame_length=400, strength=0.3, min_rms_threshold=
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs):
-    feat = librosa_tf.spectrograms(signals, **spec_kwargs)
+    feat = audio_feat.spectrograms(signals, **spec_kwargs)
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
-        feat = librosa_tf.melspectrograms(feat, **melspec_kwargs)
+        feat = audio_feat.melspectrograms(feat, **melspec_kwargs)
         if feattype in ("logmelspectrogram", "mfcc"):
             feat = tf.math.log(feat + 1e-6)
             if feattype == "mfcc":
@@ -183,7 +183,7 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             stats = update_wav_summary(stats, wavs, "00_before_filtering")
         vad_config = feat_config.get("voice_activity_detection")
         if vad_config:
-            wavs = wavs.map(lambda wav, meta: energy_vad(wav, meta, **vad_config))
+            wavs = wavs.map(lambda wav, meta: audio_feat.energy_vad(wav, meta, **vad_config))
             if debug:
                 stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
         if "frames" in feat_config:
