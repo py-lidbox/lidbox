@@ -20,6 +20,9 @@ import speechbox.visualization as visualization
 
 class E2E(Command):
     """TensorFlow pipeline for wavfile preprocessing, feature extraction and model training"""
+    #TODO:
+    # - feature inspection and exploration outside training
+    #   e.g. after vad, how much is left etc
 
 
 def parse_space_separated(path):
@@ -69,6 +72,13 @@ class Train(StatefulCommand):
             action="store_true",
             default=False,
             help="Shuffle wavpath list before loading wavs (e.g. for debugging, use TF shuffle buffers during training).")
+        optional.add_argument("--debug-dataset",
+            action="store_true",
+            default=False,
+            help="Gather statistics and shapes of elements in the datasets during feature extraction. This adds several linear passes over the datasets.")
+        optional.add_argument("--skip-training",
+            action="store_true",
+            default=False)
         return parser
 
     def get_checkpoint_dir(self):
@@ -220,6 +230,9 @@ class Train(StatefulCommand):
             print("\nStarting training with:")
             print(str(model))
             print()
+        if args.skip_training:
+            print("--skip-training given, will not call model.fit")
+            return
         model.fit(dataset["train"], dataset["validation"], training_config)
         if args.verbosity:
             print("\nTraining finished\n")

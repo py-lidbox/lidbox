@@ -6,14 +6,13 @@ import numpy as np
 import tensorflow as tf
 
 
-TFRECORD_COMPRESSION = "GZIP"
-
 @tf.function
 def energy_vad(signal, *meta, frame_length=400, strength=0.3, min_rms_threshold=1e-3):
     """
     Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
     'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
     """
+    tf.debugging.assert_greater(frame_length, 0, "energy_vad requires a non zero frame_length to do VAD on")
     tf.debugging.assert_rank(signal, 1, "energy_vad supports VAD only on one signal at a time, e.g. not batches")
     frames = tf.signal.frame(signal, frame_length, frame_length)
     rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=1))
@@ -22,7 +21,7 @@ def energy_vad(signal, *meta, frame_length=400, strength=0.3, min_rms_threshold=
     # Take only frames that have rms greater than the threshold
     filtered_frames = tf.boolean_mask(frames, tf.math.greater(rms, threshold))
     # Concat all frames and return a new signal with silence removed
-    return tf.reshape(filtered_frames, [-1]), *meta
+    return (tf.reshape(filtered_frames, [-1]), *meta)
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs):
@@ -187,6 +186,8 @@ def extract_features(feat_config, paths, meta, num_parallel_calls=cpu_count(), c
 
 
 # TF serialization functions, not really needed if features are cached using tf.data.Dataset.cache
+
+TFRECORD_COMPRESSION = "GZIP"
 
 def floats2floatlist(v):
     return tf.train.Feature(float_list=tf.train.FloatList(value=v))
