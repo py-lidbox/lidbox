@@ -1,10 +1,10 @@
-from datetime import datetime
 import collections
 import os
 import pprint
 import random
 import shutil
 import sys
+import time
 
 import sklearn.metrics
 import tensorflow as tf
@@ -78,7 +78,7 @@ class Train(StatefulCommand):
     def create_model(self, config):
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
         tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "logs")
-        now_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+        now_str = str(int(time.time()))
         tensorboard_dir = os.path.join(tensorboard_log_dir, now_str)
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
