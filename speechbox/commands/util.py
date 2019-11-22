@@ -263,9 +263,18 @@ class Kaldi(Command):
                 uttid = "{}_{}".format(fileid, utt_num)
                 utt2seg[uttid] = (fileid, start, end if end <= dur else -1)
                 utt2lang[uttid] = file2lang[fileid]
+        # assume mono left
+        channel = 0
         with open(segfile, "w") as f:
             for uttid, (fileid, start, end) in utt2seg.items():
-                print(uttid, fileid, format(float(start), ".2f"), format(float(end), ".2f") if end >= 0 else '-1', file=f)
+                print(
+                    uttid,
+                    fileid,
+                    format(float(start), ".2f"),
+                    format(float(end), ".2f") if end >= 0 else '-1',
+                    channel,
+                    file=f
+                )
         shutil.copyfile(args.utt2lang, args.utt2lang + ".old")
         with open(args.utt2lang, "w") as f:
             for uttid, lang in utt2lang.items():

@@ -152,10 +152,16 @@ class Train(StatefulCommand):
         self.make_named_dir(os.path.dirname(ds_cache_path), "tf.data.Dataset features cache")
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files. Amount of files that were dropped because their label is not in the enabled labels list: {}".format(datagroup_key, len(paths), num_dropped))
-        extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta, cache_path=ds_cache_path)
+        extractor_ds, stats = tf_data.extract_features_from_paths(
+            config,
+            paths,
+            paths_meta,
+            cache_path=ds_cache_path,
+            debug=args.debug_dataset
+        )
         if args.verbosity > 1:
             print("Global dataset stats:")
-            pprint.pprint(stats)
+            pprint.pprint(dict(stats))
         return extractor_ds
 
     def train(self):
@@ -209,7 +215,7 @@ class Train(StatefulCommand):
                 self.make_named_dir(logdir)
                 writer = tf.summary.create_file_writer(logdir)
                 with writer.as_default():
-                    dataset[ds] = tf_data.attach_dataset_logger(dataset[ds], **summary_kwargs)
+                    dataset[ds] = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
                 # Tensorboard expects the file writer python object to be alive when writing starts, so we shove it into the dict
                 # it has no other use
                 dataset[ds + "-writer"] = writer
