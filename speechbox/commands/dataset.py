@@ -13,7 +13,6 @@ import scipy
 from speechbox import system
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
-import speechbox.librosa_tf as librosa_tf
 import speechbox.preprocess.transformations as transformations
 import speechbox.tf_data as tf_data
 
@@ -897,9 +896,6 @@ class Ingest(StatefulCommand):
         )
         for f, meta in feat_loader:
             print(f.shape, meta['label'].shape, meta['uuid'].shape)
-        # plot = librosa_tf.get_heatmap_plot(feat_loader.take(12), 3, 4)
-        # with open("plot.png", "wb") as f:
-            # f.write(plot)
         return 0
 
     def run(self):

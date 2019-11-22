@@ -8,23 +8,6 @@ import tensorflow as tf
 
 
 @tf.function
-def energy_vad(signal, *meta, frame_length=400, strength=0.3, min_rms_threshold=1e-3):
-    """
-    Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
-    'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
-    """
-    tf.debugging.assert_greater(frame_length, 0, "energy_vad requires a non zero frame_length to do VAD on")
-    tf.debugging.assert_rank(signal, 1, "energy_vad supports VAD only on one signal at a time, e.g. not batches")
-    frames = tf.signal.frame(signal, frame_length, frame_length)
-    rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=1))
-    mean_rms = tf.math.reduce_mean(rms, axis=0, keepdims=True)
-    threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
-    # Take only frames that have rms greater than the threshold
-    filtered_frames = tf.boolean_mask(frames, tf.math.greater(rms, threshold))
-    # Concat all frames and return a new signal with silence removed
-    return (tf.reshape(filtered_frames, [-1]), *meta)
-
-@tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs):
     feat = audio_feat.spectrograms(signals, **spec_kwargs)
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
@@ -183,7 +166,7 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             stats = update_wav_summary(stats, wavs, "00_before_filtering")
         vad_config = feat_config.get("voice_activity_detection")
         if vad_config:
-            wavs = wavs.map(lambda wav, meta: audio_feat.energy_vad(wav, meta, **vad_config))
+            wavs = wavs.map(lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta))
             if debug:
                 stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
         if "frames" in feat_config:
