@@ -9,7 +9,7 @@ import time
 import sklearn.metrics
 import tensorflow as tf
 
-from speechbox.commands.base import Command, State, StatefulCommand, ExpandAbspath
+from speechbox.commands.base import Command, State, StatefulCommand
 import speechbox.dataset as dataset
 import speechbox.tf_data as tf_data
 import speechbox.models as models
@@ -32,17 +32,19 @@ def parse_space_separated(path):
             if l:
                 yield l.split()
 
-def make_label2onehot_fn(labels):
+def make_label2onehot(labels):
     labels_enum = tf.range(len(labels))
     # Label to int or one past last one if not found
+    # TODO slice index out of bounds is probably not a very informative error message
     label2int = tf.lookup.StaticHashTable(
         tf.lookup.KeyValueTensorInitializer(
             tf.constant(labels),
-            tf.constant(labels_enum)),
-        len(labels)
+            tf.constant(labels_enum)
+        ),
+        tf.constant(len(labels), dtype=tf.int32)
     )
-    OH = tf.constant(tf.one_hot(labels_enum, len(labels)))
-    return (lambda label: OH[label2int.lookup(label)])
+    OH = tf.one_hot(labels_enum, len(labels))
+    return label2int, OH
 
 def patch_feature_dim(config):
     if config["type"] == "mfcc":
@@ -189,12 +191,14 @@ class Train(StatefulCommand):
                 if k in feat_config["spectrogram"]:
                     feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
         labels = self.experiment_config["dataset"]["labels"]
-        label2onehot = make_label2onehot_fn(labels)
+        label2int, OH = make_label2onehot(labels)
+        label2onehot = lambda label: OH[label2int.lookup(label)]
         if args.verbosity > 2:
-            print("Generated onehot encoding:")
+            print("Generating onehot encoding from labels:", ', '.join(labels))
+            print("Generated onehot encoding as tensors:")
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
-                tf.print(l, label2onehot(l), summarize=-1, output_stream=sys.stdout)
+                tf.print(l, "\t", label2onehot(l), summarize=-1, output_stream=sys.stdout)
         self.model_id = training_config["name"]
         model = self.create_model(training_config)
         dataset = {}
