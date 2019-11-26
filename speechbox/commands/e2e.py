@@ -126,8 +126,12 @@ class Train(StatefulCommand):
         utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
         if args.verbosity:
             print("Reading wav-files from '{}'".format(utt2path_path))
-        utt2path = dict(row[:2] for row in parse_space_separated(utt2path_path))
-        utt2label = dict(row[:2] for row in parse_space_separated(utt2label_path))
+        utt2path = collections.OrderedDict(
+            row[:2] for row in parse_space_separated(utt2path_path)
+        )
+        utt2label = collections.OrderedDict(
+            row[:2] for row in parse_space_separated(utt2label_path)
+        )
         # All utterance ids must be present in both files
         assert set(utt2path) == set(utt2label)
         paths = []
