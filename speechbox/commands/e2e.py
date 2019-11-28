@@ -48,15 +48,16 @@ def make_label2onehot(labels):
 
 def patch_feature_dim(config):
     if config["type"] == "mfcc":
-        config["feature_dim"] = config["mfcc"]["num_coefs"]
+        config["feature_dim"] = config["mfcc"]["coef_end"] - config["mfcc"]["coef_begin"]
     elif config["type"] in ("melspectrogram", "logmelspectrogram"):
         config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
     elif config["type"] == "spectrogram":
-        config["feature_dim"] = config["spectrogram"] // 2 + 1
+        config["feature_dim"] = config["spectrogram"]["frame_length"] // 2 + 1
     elif config["type"] == "sparsespeech":
         assert "feature_dim" in config, "feature dimensions for sparsespeech decodings is equal to the number of mem entries (embedding output dim) and must be specified explicitly"
     else:
         assert False, "Error: unknown feature type '{}'".format(config["type"])
+    assert config["feature_dim"] > 0
     return config
 
 
@@ -154,7 +155,7 @@ class Train(StatefulCommand):
                 continue
             paths.append(utt2path[utt])
             paths_meta.append((utt, label))
-        ds_cache_path = os.path.join(self.cache_dir, "cached_features", config["type"], datagroup_key)
+        ds_cache_path = os.path.join(self.cache_dir, "features", config["type"], datagroup_key)
         self.make_named_dir(os.path.dirname(ds_cache_path), "tf.data.Dataset features cache")
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files. Amount of files that were dropped because their label is not in the enabled labels list: {}".format(datagroup_key, len(paths), num_dropped))
@@ -168,6 +169,8 @@ class Train(StatefulCommand):
         if args.verbosity > 1:
             print("Global dataset stats:")
             pprint.pprint(dict(stats))
+            for key in ("global_min", "global_max"):
+                tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
         return extractor_ds
 
     def train(self):
@@ -190,7 +193,7 @@ class Train(StatefulCommand):
             if "melspectrogram" not in feat_config:
                 feat_config["melspectrogram"] = {}
             feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
-        if "spectrogram" in feat_config:
+        if "spectrogram" in feat_config and "voice_activity_detection" in feat_config:
             for k in ("frame_length", "frame_step"):
                 if k in feat_config["spectrogram"]:
                     feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]

@@ -15,8 +15,10 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
         if feattype in ("logmelspectrogram", "mfcc"):
             feat = tf.math.log(feat + 1e-6)
             if feattype == "mfcc":
-                num_coefs = mfcc_kwargs.get("num_coefs", 13)
-                feat = tf.signal.mfccs_from_log_mel_spectrograms(feat)[..., :num_coefs]
+                coef_begin = mfcc_kwargs.get("coef_begin", 1)
+                coef_end = mfcc_kwargs.get("coef_end", 13)
+                mfccs = tf.signal.mfccs_from_log_mel_spectrograms(feat)
+                feat = mfccs[..., coef_begin:coef_end]
     return feat
 
 @tf.function
@@ -225,12 +227,12 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
         if debug:
             stats["num_features"]["01_after_too_short_filter"] = int(count_dataset(features))
     feat_shape = (feat_config["feature_dim"],)
-    local_scale_conf = feat_config.get("local_minmax_scaling")
-    if local_scale_conf:
+    sample_scale_conf = feat_config.get("sample_minmax_scaling")
+    if sample_scale_conf:
         # Apply feature scaling on each sample
-        a = local_scale_conf["min"]
-        b = local_scale_conf["max"]
-        axis = local_scale_conf["axis"]
+        a = sample_scale_conf["min"]
+        b = sample_scale_conf["max"]
+        axis = sample_scale_conf["axis"]
         @tf.function
         def scale_minmax(feats, *meta):
             min = tf.math.reduce_min(feats, axis=axis, keepdims=True)

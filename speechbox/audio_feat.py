@@ -29,7 +29,7 @@ def power_to_db(S, ref=reduce_max, amin=1e-10, top_db=80.0):
     return maximum(log_spec, reduce_max(log_spec) - top_db)
 
 @tf.function
-def spectrograms(signals, frame_length=400, frame_step=160, power=1.0):
+def spectrograms(signals, frame_length=512, frame_step=160, power=2.0):
     S = abs(tf.signal.stft(signals, frame_length, frame_step))
     return pow(S, power)
 
@@ -45,7 +45,7 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def energy_vad(signal, frame_length=400, strength=0.3, min_rms_threshold=1e-3):
+def energy_vad(signal, frame_length=512, strength=0.3, min_rms_threshold=1e-3):
     """
     Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
     'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
