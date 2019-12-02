@@ -88,15 +88,18 @@ def prepare_dataset_for_training(ds, config, label2onehot):
             return (imgs, *meta)
         ds = ds.map(convert_to_images)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
-    to_model_input = lambda feats, *meta: (
-        feats,
-        label2onehot(meta[0][1]),
-        # utterance id
-        meta[0][0],
-        # original waveform, reshaping the array here to add a mono channel
-        tf.expand_dims(meta[1], -1),
-        *meta[2:]
-    )
+    def to_model_input(feats, *meta):
+        model_input = (
+            feats,
+            label2onehot(meta[0][1]),
+            # utterance id
+            meta[0][0],
+        )
+        if len(meta) == 1:
+            return model_input
+        else:
+            # original waveform, reshaping the array here to add a mono channel
+            return model_input + (tf.expand_dims(meta[1], -1), *meta[2:])
     ds = ds.map(to_model_input)
     shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
     if shuffle_buffer_size:
@@ -149,11 +152,19 @@ def not_empty(feats, meta):
     return not tf.reduce_all(tf.math.equal(feats, 0))
 
 def update_wav_summary(stats, wav_ds, key):
-    stats["num_wavs"][key] = int(count_dataset(wav_ds))
-    wav_sizes_float = wav_ds.map(lambda wav, *meta: (tf.expand_dims(tf.dtypes.cast(tf.size(wav), tf.float32), -1), *meta))
-    stats["mean_wav_length"][key] = float(reduce_mean(wav_sizes_float))
-    stats["min_wav_length"][key] = float(reduce_min(wav_sizes_float))
-    stats["max_wav_length"][key] = float(reduce_max(wav_sizes_float))
+    stats["num_wavs"][key] = count_dataset(wav_ds)
+    wav_sizes_float = wav_ds.map(lambda wav, *meta: (tf.expand_dims(tf.dtypes.cast(tf.size(wav), tf.float64), -1), *meta))
+    stats["mean_wav_length"][key] = reduce_mean(wav_sizes_float)
+    stats["min_wav_length"][key] = reduce_min(wav_sizes_float)
+    stats["max_wav_length"][key] = reduce_max(wav_sizes_float)
+    return stats
+
+def update_feat_summary(stats, feat_ds, key, shape):
+    stats["num_feats"][key] = count_dataset(feat_ds)
+    feat_num_frames_float = feat_ds.map(lambda feat, *meta: (tf.expand_dims(tf.dtypes.cast(tf.shape(feat)[0], tf.float64), -1), *meta))
+    stats["mean_feat_length"][key] = reduce_mean(feat_num_frames_float, shape=shape)
+    stats["min_feat_length"][key] = reduce_min(feat_num_frames_float, shape=shape)
+    stats["max_feat_length"][key] = reduce_max(feat_num_frames_float, shape=shape)
     return stats
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
@@ -211,22 +222,22 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             # We expect the metadata to still be in a single tensor
             wavs.map(lambda _, meta: meta),
             # Copy the waveform into new tensor
-            wavs.map(lambda wav, _: tf.identity(wav)),
+            wavs.map(lambda wav, _: tf.identity(wav) if debug else tf.zeros([1])),
         ))
         features = (wavs_extended
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_feats, num_parallel_calls=num_parallel_calls)
                       .unbatch())
     features = features.cache(filename=cache_path)
+    feat_shape = (feat_config["feature_dim"],)
     if debug:
-        stats["num_features"]["00_total"] = int(count_dataset(features))
+        stats = update_feat_summary(stats, features, "00_before_filtering", feat_shape)
     min_seq_len = feat_config.get("min_sequence_length", 0)
     if min_seq_len:
         not_too_short = lambda feats, *meta: tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
         features = features.filter(not_too_short)
         if debug:
-            stats["num_features"]["01_after_too_short_filter"] = int(count_dataset(features))
-    feat_shape = (feat_config["feature_dim"],)
+            stats = update_feat_summary(stats, features, "01_after_too_short_filter", feat_shape)
     sample_scale_conf = feat_config.get("sample_minmax_scaling")
     if sample_scale_conf:
         # Apply feature scaling on each sample

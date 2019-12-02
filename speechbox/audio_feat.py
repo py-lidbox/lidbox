@@ -48,7 +48,7 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
 def energy_vad(signal, frame_length=512, strength=0.3, min_rms_threshold=1e-3):
     """
     Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
-    'strength' is multiplied with the mean RMS (larger values increase VAD aggressiveness).
+    VAD threshold is 'strength' multiplied by mean RMS (larger 'strength' values increase VAD aggressiveness and drops more frames).
     """
     tf.debugging.assert_greater(frame_length, 0, "energy_vad requires a non zero frame_length to do VAD on")
     tf.debugging.assert_rank(signal, 1, "energy_vad supports VAD only on one signal at a time, e.g. not batches")

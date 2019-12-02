@@ -102,8 +102,10 @@ class KerasWrapper:
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))
+        loss_conf = training_config["loss"]
+        loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
         self.model.compile(
-            loss=training_config["loss"],
+            loss=loss,
             optimizer=optimizer,
             metrics=parse_metrics(training_config["metrics"], output_shape)
         )

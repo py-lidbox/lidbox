@@ -166,7 +166,7 @@ class Train(StatefulCommand):
             cache_path=ds_cache_path,
             debug=args.debug_dataset
         )
-        if args.verbosity > 1:
+        if args.debug_dataset:
             print("Global dataset stats:")
             pprint.pprint(dict(stats))
             for key in ("global_min", "global_max"):
@@ -193,10 +193,6 @@ class Train(StatefulCommand):
             if "melspectrogram" not in feat_config:
                 feat_config["melspectrogram"] = {}
             feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
-        if "spectrogram" in feat_config and "voice_activity_detection" in feat_config:
-            for k in ("frame_length", "frame_step"):
-                if k in feat_config["spectrogram"]:
-                    feat_config["voice_activity_detection"][k] = feat_config["spectrogram"][k]
         labels = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(labels)
         label2onehot = lambda label: OH[label2int.lookup(label)]
