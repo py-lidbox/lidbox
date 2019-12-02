@@ -53,28 +53,39 @@ class OneHotAvgEER(Metric):
 
 class AverageDetectionCost(Metric):
     """
-    C_avg as defined in equation 32 in
+    TensorFlow implementation of C_avg equation 32 from
     Li, H., Ma, B. and Lee, K.A., 2013. Spoken language recognition: from fundamentals to practice. Proceedings of the IEEE, 101(5), pp.1136-1159.
     https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=6451097
-
-    The following variables have been renamed:
-    num_targets == N
-    P_target == P_tar
     """
-    def __init__(self, num_targets, C_miss=1.0, C_fa=1.0, P_target=0.5, **kwargs):
-        super().__init__(**kwargs)
-        raise NotImplementedError
-        # P_miss = fn
-        # P_fa = fp
+    def __init__(self, N, name="C_avg", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.P_miss = [FalseNegatives() for _ in range(N)]
+        self.P_fa = [[FalsePositives() for _ in range(N - 1)] for _ in range(N)]
 
     def update_state(self, y_true, y_pred, **kwargs):
-        #FIXME just pseudocode
-        # for L, (yt_batch, yp_batch) in enumerate(zip(y_true_batches, y_pred_batches)):
-            # P_miss[L] = false_negative_rate(yt_batch, yp_batch)
-        pass
+        """
+        Given a batch of true labels and predicted labels, update P_miss and P_fa for each label.
+        """
+        # Update false negatives for each target l
+        for l, fn in enumerate(self.P_miss):
+            fn.update_state(y_true[:,l], y_pred[:,l], **kwargs)
+        # Update false positives for each target l and non-target m pair (l, m), such that l != m
+        for l, p_fa in enumerate(self.P_fa):
+            for m, fp in enumerate(p_fa):
+                m += int(m >= l)
+                fp.update_state(y_true[:,m], y_pred[:,m], **kwargs)
 
     def reset_states(self):
-        pass
+        for fn in self.P_miss:
+            fn.reset_states()
+        for fps in self.P_fa:
+            for fp in fps:
+                fp.reset_states()
 
-    def result(self):
-        return 0
+    def result(self, C_miss=1.0, C_fa=1.0, P_tar=0.5):
+        """
+        Return final C_avg value as a scalar tensor.
+        """
+        avg_P_miss = tf.reduce_mean([fn.result() for fn in self.P_miss])
+        avg_P_fa = tf.reduce_mean([tf.reduce_mean([fp.result() for fp in fps]) for fps in self.P_fa])
+        return C_miss * P_tar * avg_P_miss + C_fa * (1 - P_tar) * avg_P_fa
