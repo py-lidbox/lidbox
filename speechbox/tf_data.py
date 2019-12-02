@@ -40,35 +40,33 @@ def count_dataset(ds):
 
 @tf.function
 def reduce_mean(ds, shape=[]):
-    sum = ds.reduce(tf.zeros(shape), lambda sum, t: sum + t[0])
-    return sum / tf.dtypes.cast(count_dataset(ds), tf.float32)
+    sum = ds.reduce(
+        tf.zeros(shape, dtype=tf.float64),
+        lambda sum, t: sum + tf.dtypes.cast(t[0], tf.float64)
+    )
+    return sum / tf.dtypes.cast(count_dataset(ds), tf.float64)
 
 @tf.function
 def reduce_min(ds, shape=[]):
     return ds.reduce(
-        tf.fill(shape, float("inf")),
-        lambda min, t: tf.math.minimum(min, tf.math.reduce_min(t[0], axis=0))
+        tf.fill(shape, tf.dtypes.cast(float("inf"), tf.float64)),
+        lambda min, t: tf.math.minimum(min, tf.math.reduce_min(tf.dtypes.cast(t[0], tf.float64), axis=0))
     )
 
 @tf.function
 def reduce_max(ds, shape=[]):
     return ds.reduce(
-        tf.fill(shape, -float("inf")),
-        lambda max, t: tf.math.maximum(max, tf.math.reduce_max(t[0], axis=0))
+        tf.fill(shape, tf.dtypes.cast(-float("inf"), tf.float64)),
+        lambda max, t: tf.math.maximum(max, tf.math.reduce_max(tf.dtypes.cast(t[0], tf.float64), axis=0))
     )
 
 @tf.function
 def frame_and_unbatch(frame_len, frame_step, sequences, meta, pad_zeros=False):
     frames = tf.signal.frame(sequences, frame_len, frame_step, pad_end=pad_zeros, axis=0)
-    #FIXME
-    wav_frames = tf.signal.frame(meta[1], 10*frame_len, 10*frame_step)
-    # Repeat context meta for all frames and zip with original waveform
+    # Repeat the same context meta over all frames (subsequences)
     frames_with_meta = tf.data.Dataset.zip((
         tf.data.Dataset.from_tensor_slices(frames),
-        tf.data.Dataset.from_tensors(meta[0]).repeat(),
-        tf.data.Dataset.from_tensor_slices(wav_frames),
-        # If meta has more than 2 elements
-        # *[tf.data.Dataset.from_tensors(m).repeat() for m in meta[2:]],
+        *[tf.data.Dataset.from_tensors(m).repeat() for m in meta],
     ))
     return frames_with_meta
 
