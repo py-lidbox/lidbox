@@ -1,5 +1,5 @@
 """
-bi-GRU architecture from
+bi-GRU RNN used in
 Mateju, Lukas et al. (2018). "Using Deep Neural Networks for Identification of Slavic Languages from Acoustic Signal". In: Proc. Interspeech 2018, pp. 1803–1807. DOI: 10.21437/Interspeech.2018-1165. URL: http://dx.doi.org/10.21437/Interspeech.2018-1165.
 """
 from tensorflow.keras.layers import (
@@ -9,11 +9,10 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras import Sequential
 
-def loader(input_shape, num_outputs, merge_mode="ave", size_reduction=1):
-    x = size_reduction
+def loader(input_shape, num_outputs, merge_mode="ave", num_gru_units=1024):
     return Sequential([
-        Bidirectional(GRU(1024//x, return_sequences=True), input_shape=input_shape, merge_mode=merge_mode, name="biGRU_1"),
-        Bidirectional(GRU(1024//x), merge_mode=merge_mode, name="biGRU_2"),
-        Dense(1024//x, activation="relu", name="relu"),
+        Bidirectional(GRU(num_gru_units, return_sequences=True), input_shape=input_shape, merge_mode=merge_mode, name="biGRU_1"),
+        Bidirectional(GRU(num_gru_units), merge_mode=merge_mode, name="biGRU_2"),
+        Dense(1024, activation="relu", name="relu"),
         Dense(num_outputs, activation="softmax", name="output"),
     ])

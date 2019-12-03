@@ -235,6 +235,7 @@ class Kaldi(Command):
         required.add_argument("wavscp", type=str, action=ExpandAbspath)
         required.add_argument("durations", type=str, action=ExpandAbspath)
         required.add_argument("utt2lang", type=str, action=ExpandAbspath)
+        required.add_argument("utt2seg", type=str, action=ExpandAbspath)
         required.add_argument("task", choices=("uniform-segment",))
         optional = parser.add_argument_group("kaldi options")
         optional.add_argument("--offset", type=float)
@@ -247,9 +248,8 @@ class Kaldi(Command):
                 for line in f:
                     yield line.strip().split()
         args = self.args
-        segfile = os.path.join(os.path.dirname(args.wavscp), "segments")
-        if os.path.exists(segfile):
-            print("error: segments file already exists, not overwriting: {}".format(segfile))
+        if os.path.exists(args.utt2seg):
+            print("error: segments file already exists, not overwriting: {}".format(args.utt2seg))
             return 1
         file2lang = dict(parse_kaldifile(args.utt2lang))
         utt2seg = {}
@@ -265,7 +265,7 @@ class Kaldi(Command):
                 utt2lang[uttid] = file2lang[fileid]
         # assume mono left
         channel = 0
-        with open(segfile, "w") as f:
+        with open(args.utt2seg, "w") as f:
             for uttid, (fileid, start, end) in utt2seg.items():
                 print(
                     uttid,
