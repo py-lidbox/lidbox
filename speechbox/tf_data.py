@@ -61,8 +61,8 @@ def reduce_max(ds, shape=[]):
     )
 
 @tf.function
-def frame_and_unbatch(frame_len, frame_step, sequences, meta, pad_zeros=False):
-    frames = tf.signal.frame(sequences, frame_len, frame_step, pad_end=pad_zeros, axis=0)
+def frame_and_unbatch(frame_len, frame_step, features, meta, pad_zeros=False):
+    frames = tf.signal.frame(features, frame_len, frame_step, pad_end=pad_zeros, axis=0)
     # Repeat the same context meta over all frames (subsequences)
     frames_with_meta = tf.data.Dataset.zip((
         tf.data.Dataset.from_tensor_slices(frames),
@@ -70,12 +70,46 @@ def frame_and_unbatch(frame_len, frame_step, sequences, meta, pad_zeros=False):
     ))
     return frames_with_meta
 
-def prepare_dataset_for_training(ds, config, label2onehot):
+@tf.function
+def frame_and_unbatch_with_wav_in_meta(frame_len, frame_step, features, meta, feat_frame_len, feat_frame_step, pad_zeros=False):
+    frames = tf.signal.frame(features, frame_len, frame_step, pad_end=pad_zeros, axis=0)
+    # Take frames of the waveform such that each frame match the frames taken from 'features'
+    wav_window_len = feat_frame_len + (frame_len-1)*feat_frame_step
+    wav_window_step = feat_frame_len + (frame_step-1)*feat_frame_step
+    meta_frames = tf.signal.frame(meta[1], wav_window_len, wav_window_step, pad_end=pad_zeros)
+    frames_with_meta = tf.data.Dataset.zip((
+        tf.data.Dataset.from_tensor_slices(frames),
+        tf.data.Dataset.from_tensors(meta[0]).repeat(),
+        tf.data.Dataset.from_tensor_slices(meta_frames),
+        *[tf.data.Dataset.from_tensors(m).repeat() for m in meta[2:]],
+    ))
+    return frames_with_meta
+
+def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
     if "frames" in config:
         # Extract frames from all features, using the same metadata for each frame of one sample of features
         seq_len, seq_step = config["frames"]["length"], config["frames"]["step"]
         pad_zeros = config["frames"].get("pad_zeros", False)
-        ds = ds.flat_map(lambda feats, *meta: frame_and_unbatch(seq_len, seq_step, feats, meta, pad_zeros=pad_zeros))
+        if "dataset_logger" in config:
+            # Original waveforms have been copied into the metadata and we need to split those to frames also
+            to_frames = lambda feats, *meta: frame_and_unbatch_with_wav_in_meta(
+                seq_len,
+                seq_step,
+                feats,
+                meta,
+                feat_config["spectrogram"]["frame_length"],
+                feat_config["spectrogram"]["frame_step"],
+                pad_zeros=pad_zeros
+            )
+        else:
+            to_frames = lambda feats, *meta: frame_and_unbatch(
+                seq_len,
+                seq_step,
+                feats,
+                meta,
+                pad_zeros=pad_zeros
+            )
+        ds = ds.flat_map(to_frames)
     image_size = config.get("resize_input_as_images")
     if image_size:
         def convert_to_images(feats, *meta):
@@ -167,7 +201,7 @@ def update_feat_summary(stats, feat_ds, key, shape):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path='', debug=False):
+def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path='', debug=False, copy_waveforms_to_meta=False):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -212,15 +246,14 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             ),
             *meta
         )
-        #TODO if dataset logging is not enabled, skip waveform copying to save space in the cache
         # Duplicate audio data into meta so we can listen to it in Tensorboard
         # Feature extraction will replace the non-meta audio data with features
         wavs_extended = tf.data.Dataset.zip((
             wavs.map(lambda wav, _: wav),
             # We expect the metadata to still be in a single tensor
             wavs.map(lambda _, meta: meta),
-            # Copy the waveform into new tensor
-            wavs.map(lambda wav, _: tf.identity(wav) if debug else tf.zeros([1])),
+            # Copy the waveform into new tensor or use a dummy wav with a single zero frame
+            wavs.map(lambda wav, _: tf.identity(wav) if copy_waveforms_to_meta else tf.zeros([1])),
         ))
         features = (wavs_extended
                       .batch(feat_config.get("batch_size", 1))

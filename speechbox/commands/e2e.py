@@ -120,7 +120,7 @@ class Train(StatefulCommand):
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
-    def extract_features(self, config, datagroup_key):
+    def extract_features(self, config, datagroup_key, has_dataset_logger):
         args = self.args
         datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
@@ -164,7 +164,8 @@ class Train(StatefulCommand):
             paths,
             paths_meta,
             cache_path=ds_cache_path,
-            debug=args.debug_dataset
+            debug=args.debug_dataset,
+            copy_waveforms_to_meta=has_dataset_logger,
         )
         if args.debug_dataset:
             print("Global dataset stats:")
@@ -211,12 +212,13 @@ class Train(StatefulCommand):
                 pprint.pprint(training_config[ds])
             ds_config = dict(training_config, **training_config[ds])
             del ds_config["train"], ds_config["validation"]
-            dataset[ds] = tf_data.prepare_dataset_for_training(
-                self.extract_features(feat_config, ds_config.pop("datagroup")),
-                ds_config,
-                label2onehot
-            )
             summary_kwargs = ds_config.get("dataset_logger")
+            dataset[ds] = tf_data.prepare_dataset_for_training(
+                self.extract_features(feat_config, ds_config.pop("datagroup"), has_dataset_logger=summary_kwargs is not None),
+                ds_config,
+                feat_config,
+                label2onehot,
+            )
             if summary_kwargs:
                 logdir = os.path.join(model.tensorboard.log_dir, ds)
                 self.make_named_dir(logdir)
