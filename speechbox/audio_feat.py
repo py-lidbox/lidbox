@@ -23,9 +23,8 @@ import tensorflow as tf
 # Also note that we are using tf.math, not the Python standard library.
 
 @tf.function
-def power_to_db(S, ref=reduce_max, amin=1e-10, top_db=80.0):
-    e = exp(1.0)
-    log_spec = e * (log(maximum(amin, S)) - log(maximum(amin, ref(S))))
+def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
+    log_spec = exp(1.0) * (log(maximum(amin, S)) - log(maximum(amin, ref(S))))
     return maximum(log_spec, reduce_max(log_spec) - top_db)
 
 @tf.function

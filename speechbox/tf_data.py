@@ -8,7 +8,7 @@ import tensorflow as tf
 
 
 @tf.function
-def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs):
+def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs):
     feat = audio_feat.spectrograms(signals, **spec_kwargs)
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
         feat = audio_feat.melspectrograms(feat, **melspec_kwargs)
@@ -19,6 +19,8 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
                 coef_end = mfcc_kwargs.get("coef_end", 13)
                 mfccs = tf.signal.mfccs_from_log_mel_spectrograms(feat)
                 feat = mfccs[..., coef_begin:coef_end]
+    elif feattype in ("db_spectrogram",):
+        feat = audio_feat.power_to_db(feat, **db_spec_kwargs)
     return feat
 
 @tf.function
@@ -243,6 +245,7 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
                 feat_config.get("spectrogram", {}),
                 feat_config.get("melspectrogram", {}),
                 feat_config.get("mfcc", {}),
+                feat_config.get("db_spectrogram", {}),
             ),
             *meta
         )
