@@ -188,18 +188,18 @@ def not_empty(feats, meta):
 
 def update_wav_summary(stats, wav_ds, key):
     stats["num_wavs"][key] = count_dataset(wav_ds)
-    wav_sizes_float = wav_ds.map(lambda wav, *meta: (tf.expand_dims(tf.dtypes.cast(tf.size(wav), tf.float64), -1), *meta))
-    stats["mean_wav_length"][key] = reduce_mean(wav_sizes_float)
-    stats["min_wav_length"][key] = reduce_min(wav_sizes_float)
-    stats["max_wav_length"][key] = reduce_max(wav_sizes_float)
+    wav_sizes = wav_ds.map(lambda wav, *meta: (tf.expand_dims(tf.dtypes.cast(tf.size(wav), tf.float64), -1), *meta))
+    stats["mean_wav_length"][key] = reduce_mean(wav_sizes)
+    stats["min_wav_length"][key] = reduce_min(wav_sizes)
+    stats["max_wav_length"][key] = reduce_max(wav_sizes)
     return stats
 
-def update_feat_summary(stats, feat_ds, key, shape):
+def update_feat_summary(stats, feat_ds, key):
     stats["num_feats"][key] = count_dataset(feat_ds)
-    feat_num_frames_float = feat_ds.map(lambda feat, *meta: (tf.expand_dims(tf.dtypes.cast(tf.shape(feat)[0], tf.float64), -1), *meta))
-    stats["mean_feat_length"][key] = reduce_mean(feat_num_frames_float, shape=shape)
-    stats["min_feat_length"][key] = reduce_min(feat_num_frames_float, shape=shape)
-    stats["max_feat_length"][key] = reduce_max(feat_num_frames_float, shape=shape)
+    feat_num_frames = feat_ds.map(lambda feat, *meta: (tf.expand_dims(tf.dtypes.cast(tf.shape(feat)[0], tf.float64), -1), *meta))
+    stats["mean_feat_length"][key] = reduce_mean(feat_num_frames)
+    stats["min_feat_length"][key] = reduce_min(feat_num_frames)
+    stats["max_feat_length"][key] = reduce_max(feat_num_frames)
     return stats
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
@@ -266,13 +266,13 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
     features = features.cache(filename=cache_path)
     feat_shape = (feat_config["feature_dim"],)
     if debug:
-        stats = update_feat_summary(stats, features, "00_before_filtering", feat_shape)
+        stats = update_feat_summary(stats, features, "00_before_filtering")
     min_seq_len = feat_config.get("min_sequence_length", 0)
     if min_seq_len:
         not_too_short = lambda feats, *meta: tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
         features = features.filter(not_too_short)
         if debug:
-            stats = update_feat_summary(stats, features, "01_after_too_short_filter", feat_shape)
+            stats = update_feat_summary(stats, features, "01_after_too_short_filter")
     sample_scale_conf = feat_config.get("sample_minmax_scaling")
     if sample_scale_conf:
         # Apply feature scaling on each sample
