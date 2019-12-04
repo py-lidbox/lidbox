@@ -143,7 +143,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
-def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=None, colormap="gray"):
+def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=None, colormap="gray", copy_original_audio=False):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -168,7 +168,8 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=No
             image = tf.image.resize(image, image_size, method="nearest")
         common = {"step": batch_idx, "max_outputs": max_image_samples}
         tf.summary.image(features_name, image, **common)
-        tf.summary.audio("original_audio", signal, 16000, **common)
+        if copy_original_audio:
+            tf.summary.audio("original_audio", signal, 16000, **common)
         del common["max_outputs"]
         tf.summary.text("utterance_ids", uttid, **common)
         return batch
@@ -203,7 +204,7 @@ def update_feat_summary(stats, feat_ds, key, shape):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path='', debug=False, copy_waveforms_to_meta=False):
+def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path='', debug=False, copy_original_audio=False):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -256,7 +257,7 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             # We expect the metadata to still be in a single tensor
             wavs.map(lambda _, meta: meta),
             # Copy the waveform into new tensor or use a dummy wav with a single zero frame
-            wavs.map(lambda wav, _: tf.identity(wav) if copy_waveforms_to_meta else tf.zeros([1])),
+            wavs.map(lambda wav, _: tf.identity(wav) if copy_original_audio else tf.zeros([1])),
         ))
         features = (wavs_extended
                       .batch(feat_config.get("batch_size", 1))
