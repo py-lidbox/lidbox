@@ -104,10 +104,14 @@ class KerasWrapper:
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))
         loss_conf = training_config["loss"]
         loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
+        if "metrics" in training_config:
+            metrics = parse_metrics(training_config["metrics"], output_shape)
+        else:
+            metrics = None
         self.model.compile(
             loss=loss,
             optimizer=optimizer,
-            metrics=parse_metrics(training_config["metrics"], output_shape)
+            metrics=metrics,
         )
 
     @with_device
