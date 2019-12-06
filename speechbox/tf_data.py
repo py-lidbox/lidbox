@@ -65,6 +65,8 @@ def reduce_max(ds, shape=[]):
 @tf.function
 def frame_and_unbatch(frame_len, frame_step, features, meta, pad_zeros=False):
     frames = tf.signal.frame(features, frame_len, frame_step, pad_end=pad_zeros, axis=0)
+    # Skip dummy wavs
+    meta = (meta[0], *meta[2:])
     # Repeat the same context meta over all frames (subsequences)
     frames_with_meta = tf.data.Dataset.zip((
         tf.data.Dataset.from_tensor_slices(frames),
@@ -104,6 +106,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
                 pad_zeros=pad_zeros
             )
         else:
+            # index 1 in meta are dummy wavs with length 0
             to_frames = lambda feats, *meta: frame_and_unbatch(
                 seq_len,
                 seq_step,
@@ -204,7 +207,7 @@ def update_feat_summary(stats, feat_ds, key):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path='', debug=False, copy_original_audio=False):
+def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path=None, debug=False, copy_original_audio=False):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -263,7 +266,8 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_feats, num_parallel_calls=num_parallel_calls)
                       .unbatch())
-    features = features.cache(filename=cache_path)
+    if cache_path:
+        features = features.cache(filename=cache_path)
     feat_shape = (feat_config["feature_dim"],)
     if debug:
         stats = update_feat_summary(stats, features, "00_before_filtering")

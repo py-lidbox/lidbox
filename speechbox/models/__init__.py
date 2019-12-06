@@ -98,7 +98,8 @@ class KerasWrapper:
         return model_path
 
     @with_device
-    def prepare(self, input_shape, output_shape, training_config):
+    def prepare(self, output_shape, training_config):
+        input_shape = training_config["input_shape"]
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))
@@ -136,14 +137,8 @@ class KerasWrapper:
         )
 
     @with_device
-    def predict(self, utterances):
-        #TODO compute all inside the tf graph
-        expected_num_labels = self.model.layers[-1].output_shape[-1]
-        predictions = np.zeros((len(utterances), expected_num_labels))
-        for i, sequences in enumerate(utterances):
-            prob_by_frame = self.model.predict(sequences)
-            predictions[i] = prob_by_frame.mean(axis=0)
-        return predictions
+    def predict(self, testset):
+        return self.model.predict(testset)
 
     @with_device
     def count_params(self):

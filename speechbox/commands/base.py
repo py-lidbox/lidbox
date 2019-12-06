@@ -104,13 +104,13 @@ class StatefulCommand(Command):
             type=str,
             action=ExpandAbspath,
             help="Path to a yaml-file containing the experiment configuration, e.g. path to the cache directory, feature extractors, model hyperparameters etc.")
-        suboptions = parser.add_argument_group("state interaction")
+        suboptions = parser.add_argument_group("(deprecated) state interaction")
         suboptions.add_argument("--load-state",
             action="store_true",
-            help="Load state from cache regardless of command. Only required if a command has required_state != State.none.")
+            help="(deprecated) Load state from cache regardless of command. Only required if a command has required_state != State.none.")
         suboptions.add_argument("--save-state",
             action="store_true",
-            help="Save command state to the cache directory.")
+            help="(deprecated) Save command state to the cache directory.")
         return parser
 
     def __init__(self, args):
