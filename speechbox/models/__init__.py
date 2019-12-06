@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 import speechbox.metrics
-import speechbox.tf_data
+from speechbox.tf_data import without_metadata
 
 # Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
 def with_device(method):
@@ -102,7 +102,11 @@ class KerasWrapper:
         input_shape = training_config["input_shape"]
         self.model = self.model_loader(input_shape, output_shape)
         opt_conf = training_config["optimizer"]
-        optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_conf.get("kwargs", {}))
+        opt_kwargs = opt_conf.get("kwargs", {})
+        if "lr_scheduler" in opt_kwargs:
+            lr_scheduler = opt_kwargs.pop("lr_scheduler")
+            opt_kwargs["learning_rate"] = getattr(tf.keras.optimizers.schedules, lr_scheduler["cls"])(**lr_scheduler["kwargs"])
+        optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_kwargs)
         loss_conf = training_config["loss"]
         loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
         if "metrics" in training_config:
@@ -123,14 +127,14 @@ class KerasWrapper:
     @with_device
     def fit(self, training_set, validation_set, model_config):
         self.model.fit(
-            speechbox.tf_data.without_metadata(training_set),
+            without_metadata(training_set),
             callbacks=self.callbacks,
             class_weight=model_config.get("class_weight"),
             epochs=model_config["epochs"],
             initial_epoch=self.initial_epoch,
             shuffle=False,
             steps_per_epoch=model_config.get("steps_per_epoch"),
-            validation_data=speechbox.tf_data.without_metadata(validation_set),
+            validation_data=without_metadata(validation_set),
             validation_freq=model_config.get("validation_freq", 1),
             validation_steps=model_config.get("validation_steps"),
             verbose=model_config.get("verbose", 2),
@@ -138,7 +142,7 @@ class KerasWrapper:
 
     @with_device
     def predict(self, testset):
-        return self.model.predict(testset)
+        return self.model.predict(without_metadata(testset))
 
     @with_device
     def count_params(self):

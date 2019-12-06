@@ -115,15 +115,6 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
                 pad_zeros=pad_zeros
             )
         ds = ds.flat_map(to_frames)
-    image_size = config.get("resize_input_as_images")
-    if image_size:
-        def convert_to_images(feats, *meta):
-            # Add single grayscale channel
-            imgs = tf.expand_dims(feats, -1)
-            # Resize
-            imgs = tf.image.resize(imgs, (image_size["width"], image_size["height"]))
-            return (imgs, *meta)
-        ds = ds.map(convert_to_images)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
     def to_model_input(feats, *meta):
         model_input = (
@@ -158,6 +149,8 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=No
     @tf.function
     def inspect_batches(batch_idx, batch):
         image, onehot, uttid, signal = batch
+        # Drop explicit grayscale channel from image resizing (if it exists)
+        image = tf.squeeze(image, -1)
         # Scale grayscale channel between 0 and 1
         min, max = tf.math.reduce_min(image), tf.math.reduce_max(image)
         image = tf.math.divide_no_nan(image - min, max - min)
@@ -207,7 +200,7 @@ def update_feat_summary(stats, feat_ds, key):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), cache_path=None, debug=False, copy_original_audio=False):
+def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu_count(), debug=False, copy_original_audio=False, trim_audio=None):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -262,21 +255,36 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
             # Copy the waveform into new tensor or use a dummy wav with a single zero frame
             wavs.map(lambda wav, _: tf.identity(wav) if copy_original_audio else tf.zeros([1])),
         ))
+        if trim_audio:
+            # Ensure all wav files in the metadata contains precisely 'trim_audio' amount of frames
+            def pad_or_slice(wav, meta, metawav):
+                padding = [[0, tf.maximum(0, trim_audio - tf.size(metawav))]]
+                trimmed = tf.pad(metawav[:trim_audio], padding)
+                return (wav, meta, trimmed)
+            wavs_extended = wavs_extended.map(pad_or_slice)
         features = (wavs_extended
                       .batch(feat_config.get("batch_size", 1))
                       .map(extract_feats, num_parallel_calls=num_parallel_calls)
                       .unbatch())
-    if cache_path:
-        features = features.cache(filename=cache_path)
-    feat_shape = (feat_config["feature_dim"],)
-    if debug:
-        stats = update_feat_summary(stats, features, "00_before_filtering")
-    min_seq_len = feat_config.get("min_sequence_length", 0)
+    min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
-        not_too_short = lambda feats, *meta: tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
+        def not_too_short(feats, *_):
+            return tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
         features = features.filter(not_too_short)
         if debug:
             stats = update_feat_summary(stats, features, "01_after_too_short_filter")
+    image_size = feat_config.get("resize_as_image")
+    if image_size:
+        img_shape = image_size["width"], image_size["height"]
+        def convert_to_images(feats, *meta):
+            # Add single grayscale channel
+            imgs = tf.expand_dims(feats, -1)
+            # Resize
+            imgs = tf.image.resize(imgs, img_shape)
+            return (imgs, *meta)
+        features = features.map(convert_to_images)
+    if debug:
+        stats = update_feat_summary(stats, features, "00_before_filtering")
     sample_scale_conf = feat_config.get("sample_minmax_scaling")
     if sample_scale_conf:
         # Apply feature scaling on each sample
@@ -291,8 +299,10 @@ def extract_features_from_paths(feat_config, paths, meta, num_parallel_calls=cpu
         features = features.map(scale_minmax)
     global_scale_conf = feat_config.get("global_minmax_scaling")
     if debug or global_scale_conf:
-        stats["features"]["global_min"] = reduce_min(features, shape=feat_shape)
-        stats["features"]["global_max"] = reduce_max(features, shape=feat_shape)
+        feat_shape = (feat_config["feature_dim"],)
+        without_channels = features.map(lambda feats, *meta: (tf.squeeze(feats, -1), *meta))
+        stats["features"]["global_min"] = reduce_min(without_channels, shape=feat_shape)
+        stats["features"]["global_max"] = reduce_max(without_channels, shape=feat_shape)
     if global_scale_conf:
         # Apply feature scaling on each feature dimension over whole dataset
         a = global_scale_conf["min"]

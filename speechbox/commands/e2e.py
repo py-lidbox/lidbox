@@ -45,20 +45,6 @@ def make_label2onehot(labels):
     OH = tf.one_hot(labels_enum, len(labels))
     return label2int, OH
 
-def patch_feature_dim(config):
-    if config["type"] == "mfcc":
-        config["feature_dim"] = config["mfcc"]["coef_end"] - config["mfcc"]["coef_begin"]
-    elif config["type"] in ("melspectrogram", "logmelspectrogram"):
-        config["feature_dim"] = config["melspectrogram"]["num_mel_bins"]
-    elif config["type"] == "spectrogram":
-        config["feature_dim"] = config["spectrogram"]["frame_length"] // 2 + 1
-    elif config["type"] == "sparsespeech":
-        assert "feature_dim" in config, "feature dimensions for sparsespeech decodings is equal to the number of mem entries (embedding output dim) and must be specified explicitly"
-    else:
-        assert False, "Error: unknown feature type '{}'".format(config["type"])
-    assert config["feature_dim"] > 0
-    return config
-
 
 class E2EBase(StatefulCommand):
     requires_state = State.none
@@ -112,7 +98,7 @@ class E2EBase(StatefulCommand):
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
-    def extract_features(self, config, datagroup_key, copy_original_audio, use_cache=True):
+    def extract_features(self, config, datagroup_key, copy_original_audio, trim_audio):
         args = self.args
         datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         if args.verbosity > 2:
@@ -160,13 +146,6 @@ class E2EBase(StatefulCommand):
                 continue
             paths.append(utt2path[utt])
             paths_meta.append((utt, label))
-        if use_cache:
-            ds_cache_path = os.path.join(self.cache_dir, "features", config["type"], datagroup_key)
-            self.make_named_dir(os.path.dirname(ds_cache_path), "tf.data.Dataset features cache")
-            if args.verbosity:
-                print("Using cache for features: '{}'".format(ds_cache_path))
-        else:
-            ds_cache_path = None
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
             if num_dropped:
@@ -181,10 +160,15 @@ class E2EBase(StatefulCommand):
             config,
             paths,
             paths_meta,
-            cache_path=ds_cache_path,
             debug=args.debug_dataset,
             copy_original_audio=copy_original_audio,
+            trim_audio=trim_audio,
         )
+        ds_cache_path = os.path.join(self.cache_dir, "features", config["type"], datagroup_key)
+        self.make_named_dir(os.path.dirname(ds_cache_path), "tf.data.Dataset features cache")
+        if args.verbosity:
+            print("Using cache for features: '{}'".format(ds_cache_path))
+        extractor_ds = extractor_ds.cache(filename=ds_cache_path)
         if args.debug_dataset:
             print("Global dataset stats:")
             pprint.pprint(dict(stats))
@@ -218,7 +202,6 @@ class Train(E2EBase):
             print("Using feature extraction parameters:")
             pprint.pprint(feat_config)
             print()
-        feat_config = patch_feature_dim(feat_config)
         if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
             assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
             if "melspectrogram" not in feat_config:
@@ -246,7 +229,8 @@ class Train(E2EBase):
             features = self.extract_features(
                 feat_config,
                 ds_config.pop("datagroup"),
-                copy_original_audio=summary_kwargs.get("copy_original_audio", False)
+                copy_original_audio=summary_kwargs.get("copy_original_audio", False),
+                trim_audio=summary_kwargs.pop("trim_audio", False),
             )
             dataset[ds] = tf_data.prepare_dataset_for_training(
                 features,
@@ -324,7 +308,6 @@ class Evaluate(E2EBase):
             print("Using feature extraction parameters:")
             pprint.pprint(feat_config)
             print()
-        feat_config = patch_feature_dim(feat_config)
         if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
             assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
             if "melspectrogram" not in feat_config:
@@ -392,7 +375,6 @@ class Evaluate(E2EBase):
                 feat_config,
                 [utt2path[utt]],
                 [(utt, label)],
-                cache_path=None,
                 debug=False,
                 copy_original_audio=False,
             )
@@ -404,7 +386,7 @@ class Evaluate(E2EBase):
             )
             pred = model.predict(feature_frames)
             mean = pred.mean(axis=0)
-            print(utt, int2label[mean.argmax()], label, *["{:.3f}".format(x) for x in mean])
+            print(utt, int2label[mean.argmax()], label, *["{:.3f}".format(x) for x in mean], sep="\t")
 
     def run(self):
         super().run()
