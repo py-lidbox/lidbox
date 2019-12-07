@@ -98,7 +98,7 @@ class E2EBase(StatefulCommand):
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
-    def extract_features(self, config, datagroup_key, copy_original_audio, trim_audio):
+    def extract_features(self, config, datagroup_key, copy_original_audio, trim_audio, debug_squeeze_last_dim):
         args = self.args
         datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         if args.verbosity > 2:
@@ -151,30 +151,20 @@ class E2EBase(StatefulCommand):
             if num_dropped:
                 print("Amount of files ignored since they had a label that was not in the labels list dataset.labels: {}".format(num_dropped.most_common(None)))
             if args.debug_dataset:
-                print("--debug-dataset given, stats will be gathered from extracted features by doing several linear passes over the dataset before training starts.")
+                print("--debug-dataset given, stats will be gathered from extracted features by doing several linear passes over the dataset before training starts. Features will not be cached.")
             if args.verbosity > 3:
                 print("Using paths:")
                 for path, (utt, label) in zip(paths, paths_meta):
                     print(utt, path, label)
-        extractor_ds, stats = tf_data.extract_features_from_paths(
+        return tf_data.extract_features_from_paths(
             config,
             paths,
             paths_meta,
             debug=args.debug_dataset,
             copy_original_audio=copy_original_audio,
             trim_audio=trim_audio,
+            debug_squeeze_last_dim=debug_squeeze_last_dim,
         )
-        ds_cache_path = os.path.join(self.cache_dir, "features", config["type"], datagroup_key)
-        self.make_named_dir(os.path.dirname(ds_cache_path), "tf.data.Dataset features cache")
-        if args.verbosity:
-            print("Using cache for features: '{}'".format(ds_cache_path))
-        extractor_ds = extractor_ds.cache(filename=ds_cache_path)
-        if args.debug_dataset:
-            print("Global dataset stats:")
-            pprint.pprint(dict(stats))
-            for key in ("global_min", "global_max"):
-                tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
-        return extractor_ds
 
 
 class Train(E2EBase):
@@ -186,6 +176,10 @@ class Train(E2EBase):
         optional.add_argument("--skip-training",
             action="store_true",
             default=False)
+        optional.add_argument("--exhaust-dataset-iterator",
+            action="store_true",
+            default=False,
+            help="Explictly iterate once over the feature extractor tf.data.Dataset object in order to evaluate the feature extraction pipeline and fill the feature cache on disk. Using this with --skip-training allows you to extract features on multiple CPUs without needing a GPU.")
         return parser
 
     def train(self):
@@ -226,14 +220,37 @@ class Train(E2EBase):
             ds_config = dict(training_config, **training_config[ds])
             del ds_config["train"], ds_config["validation"]
             summary_kwargs = ds_config.get("dataset_logger", {})
-            features = self.extract_features(
+            debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
+            datagroup_key = ds_config.pop("datagroup")
+            extractor_ds, stats = self.extract_features(
                 feat_config,
-                ds_config.pop("datagroup"),
+                datagroup_key,
                 copy_original_audio=summary_kwargs.get("copy_original_audio", False),
                 trim_audio=summary_kwargs.pop("trim_audio", False),
+                debug_squeeze_last_dim=debug_squeeze_last_dim,
             )
+            if args.debug_dataset:
+                print("Global dataset stats:")
+                pprint.pprint(dict(stats))
+                for key in ("global_min", "global_max"):
+                    tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
+            else:
+                features_cache = os.path.join(self.cache_dir, "features", feat_config["type"], datagroup_key)
+                self.make_named_dir(os.path.dirname(features_cache), "tf.data.Dataset features cache")
+                if args.verbosity:
+                    print("Using cache for features: '{}'".format(features_cache))
+                extractor_ds = extractor_ds.cache(filename=features_cache)
+            if args.exhaust_dataset_iterator:
+                if args.verbosity:
+                    print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator.")
+                # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
+                for i, x in enumerate(extractor_ds):
+                    if args.verbosity > 1 and i % 1000 == 0:
+                        print(i, "elements seen")
+                        if args.verbosity > 3:
+                            print("element", i, "is", x)
             dataset[ds] = tf_data.prepare_dataset_for_training(
-                features,
+                extractor_ds,
                 ds_config,
                 feat_config,
                 label2onehot,
@@ -242,6 +259,7 @@ class Train(E2EBase):
                 logdir = os.path.join(model.tensorboard.log_dir, ds)
                 self.make_named_dir(logdir)
                 writer = tf.summary.create_file_writer(logdir)
+                summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
                 with writer.as_default():
                     dataset[ds] = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
                 # Tensorboard expects the file writer python object to be alive when writing starts, so we shove it into the dict
