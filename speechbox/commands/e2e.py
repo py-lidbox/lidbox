@@ -261,14 +261,22 @@ class Train(E2EBase):
             )
             if summary_kwargs:
                 logdir = os.path.join(model.tensorboard.log_dir, ds)
+                if args.verbosity > 1:
+                    print("Datagroup '{}' has a dataset logger defined. We will iterate over the dataset once to create TensorBoard summaries of the input data into '{}'.".format(ds, logdir))
                 self.make_named_dir(logdir)
                 writer = tf.summary.create_file_writer(logdir)
                 summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
                 with writer.as_default():
-                    dataset[ds] = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
-                # Tensorboard expects the file writer python object to be alive when writing starts, so we shove it into the dict
-                # it has no other use
-                dataset[ds + "-writer"] = writer
+                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                    if args.verbosity:
+                        print("Exhausting the '{}' dataset iterator once to write TensorBoard summaries of input data".format(ds))
+                    for i, elem in enumerate(logged_dataset):
+                        # Do nothing explicitly on every element to ensure tensorflow does not detect unused elements and do something 'smart' about them
+                        tf.print(elem, output_stream="file:///dev/null")
+                        if args.verbosity > 1 and i % 5000 == 0:
+                            print(i, "batches done")
+                    if args.verbosity > 1:
+                        print(i, "batches done")
         if args.verbosity > 1:
             print("Compiling model")
         model.prepare(len(labels), training_config)
