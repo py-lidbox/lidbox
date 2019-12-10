@@ -156,6 +156,9 @@ class E2EBase(StatefulCommand):
                 print("Using paths:")
                 for path, (utt, label) in zip(paths, paths_meta):
                     print(utt, path, label)
+        num_cores = len(os.sched_getaffinity(0))
+        if args.verbosity:
+            print("This process has been assigned {0} physical cores, using {0} parallel calls during feature extraction".format(num_cores))
         return tf_data.extract_features_from_paths(
             config,
             paths,
@@ -164,6 +167,7 @@ class E2EBase(StatefulCommand):
             copy_original_audio=copy_original_audio,
             trim_audio=trim_audio,
             debug_squeeze_last_dim=debug_squeeze_last_dim,
+            num_cores=num_cores,
         )
 
 
@@ -395,6 +399,7 @@ class Evaluate(E2EBase):
                 [(utt, label)],
                 debug=False,
                 copy_original_audio=False,
+                num_cores=len(os.sched_getaffinity(0)),
             )
             feature_frames = tf_data.prepare_dataset_for_training(
                 extractor_ds,

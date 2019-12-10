@@ -1,4 +1,3 @@
-from multiprocessing import cpu_count
 import collections
 
 from . import audio_feat
@@ -200,7 +199,7 @@ def update_feat_summary(stats, feat_ds, key):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False):
+def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, num_cores=1):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
@@ -221,7 +220,7 @@ def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_orig
         )
     else:
         wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
-                  .map(load_wav, num_parallel_calls=8*cpu_count()))
+                  .map(load_wav, num_parallel_calls=num_cores))
         if debug:
             stats = update_wav_summary(stats, wavs, "00_before_filtering")
         vad_config = feat_config.get("voice_activity_detection")
@@ -265,7 +264,7 @@ def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_orig
             wavs_extended = wavs_extended.map(pad_or_slice_metawavs)
         features = (wavs_extended
                       .batch(feat_config.get("batch_size", 1))
-                      .map(extract_feats, num_parallel_calls=2*cpu_count())
+                      .map(extract_feats, num_parallel_calls=num_cores)
                       .unbatch())
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
