@@ -144,7 +144,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
-def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False):
+def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -167,8 +167,8 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_size=No
         # Prepare for tensorboard
         image = tf.image.transpose(image)
         image = tf.image.flip_up_down(image)
-        if image_size:
-            image = tf.image.resize(image, image_size, method="nearest")
+        if image_resize_kwargs:
+            image = tf.image.resize(image, **image_resize_kwargs)
         common = {"step": batch_idx, "max_outputs": max_image_samples}
         tf.summary.image(features_name, image, **common)
         if copy_original_audio:
