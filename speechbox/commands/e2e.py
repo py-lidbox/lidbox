@@ -180,6 +180,10 @@ class Train(E2EBase):
         optional.add_argument("--skip-training",
             action="store_true",
             default=False)
+        optional.add_argument("--inspect-dataset",
+            action="store_true",
+            default=False,
+            help="Iterate once over the whole dataset before training, writing TensorBoard summaries of the data. This requires the dataset_logger key to be defined in the config file.")
         optional.add_argument("--exhaust-dataset-iterator",
             action="store_true",
             default=False,
@@ -246,21 +250,26 @@ class Train(E2EBase):
                 extractor_ds = extractor_ds.cache(filename=features_cache)
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
-                    print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator.")
+                    print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 for i, x in enumerate(extractor_ds):
                     if args.verbosity > 1 and i % 1000 == 0:
                         print(i, "elements seen")
                         if args.verbosity > 3:
                             print("element", i, "is", x)
+            if args.verbosity > 2:
+                print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(
                 extractor_ds,
                 ds_config,
                 feat_config,
                 label2onehot,
             )
-            if summary_kwargs:
-                logdir = os.path.join(model.tensorboard.log_dir, ds)
+            if args.inspect_dataset:
+                if not summary_kwargs:
+                    print("Error: --inspect-dataset given but dataset_logger not defined in the config file, unable to attach dataset logger for inspecting dataset.", file=sys.stderr)
+                    return 1
+                logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
                 if args.verbosity > 1:
                     print("Datagroup '{}' has a dataset logger defined. We will iterate over the dataset once to create TensorBoard summaries of the input data into '{}'.".format(ds, logdir))
                 self.make_named_dir(logdir)
@@ -269,11 +278,9 @@ class Train(E2EBase):
                 with writer.as_default():
                     logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
                     if args.verbosity:
-                        print("Exhausting the '{}' dataset iterator once to write TensorBoard summaries of input data".format(ds))
+                        print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                     for i, elem in enumerate(logged_dataset):
-                        # Do nothing explicitly on every element to ensure tensorflow does not detect unused elements and do something 'smart' about them
-                        tf.print(elem, output_stream="file:///dev/null")
-                        if args.verbosity > 1 and i % 5000 == 0:
+                        if args.verbosity > 1 and i % 1000 == 0:
                             print(i, "batches done")
                     if args.verbosity > 1:
                         print(i, "batches done")
