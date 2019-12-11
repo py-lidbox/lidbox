@@ -7,7 +7,7 @@ import tensorflow as tf
 
 
 @tf.function
-def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs):
+def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs):
     feat = audio_feat.spectrograms(signals, **spec_kwargs)
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
         feat = audio_feat.melspectrograms(feat, **melspec_kwargs)
@@ -20,6 +20,14 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
                 feat = mfccs[..., coef_begin:coef_end]
     elif feattype in ("db_spectrogram",):
         feat = audio_feat.power_to_db(feat, **db_spec_kwargs)
+    if feat_scale_kwargs:
+        # Apply feature scaling to get all feature values in range [a, b]
+        a = feat_scale_kwargs["min"]
+        b = feat_scale_kwargs["max"]
+        axis = feat_scale_kwargs["axis"]
+        min = tf.math.reduce_min(feat, axis=axis, keepdims=True)
+        max = tf.math.reduce_max(feat, axis=axis, keepdims=True)
+        feat = a + (b - a) * tf.math.divide_no_nan(feat - min, max - min)
     return feat
 
 @tf.function
@@ -243,6 +251,7 @@ def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_orig
                 feat_config.get("melspectrogram", {}),
                 feat_config.get("mfcc", {}),
                 feat_config.get("db_spectrogram", {}),
+                feat_config.get("sample_minmax_scaling", {}),
             ),
             *meta
         )
@@ -284,18 +293,6 @@ def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_orig
         features = features.map(convert_to_images)
     if debug:
         stats = update_feat_summary(stats, features, "00_before_filtering")
-    sample_scale_conf = feat_config.get("sample_minmax_scaling")
-    if sample_scale_conf:
-        # Apply feature scaling on each sample
-        a = sample_scale_conf["min"]
-        b = sample_scale_conf["max"]
-        axis = sample_scale_conf["axis"]
-        @tf.function
-        def scale_minmax(feats, *meta):
-            min = tf.math.reduce_min(feats, axis=axis, keepdims=True)
-            max = tf.math.reduce_max(feats, axis=axis, keepdims=True)
-            return (a + (b - a) * tf.math.divide_no_nan(feats - min, max - min), *meta)
-        features = features.map(scale_minmax)
     global_scale_conf = feat_config.get("global_minmax_scaling")
     if debug or global_scale_conf:
         feat_shape = (feat_config["feature_dim"],)
