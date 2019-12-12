@@ -161,6 +161,7 @@ class E2EBase(StatefulCommand):
             print("This process has been assigned {0} physical cores, using {0} parallel calls during feature extraction".format(num_cores))
         return tf_data.extract_features_from_paths(
             config,
+            self.experiment_config["dataset"],
             paths,
             paths_meta,
             debug=args.debug_dataset,
@@ -253,7 +254,7 @@ class Train(E2EBase):
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 for i, x in enumerate(extractor_ds):
-                    if args.verbosity > 1 and i % 1000 == 0:
+                    if args.verbosity > 1 and i % 2000 == 0:
                         print(i, "elements seen")
                         if args.verbosity > 3:
                             print("element", i, "is", x)
@@ -280,7 +281,7 @@ class Train(E2EBase):
                     if args.verbosity:
                         print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                     for i, elem in enumerate(logged_dataset):
-                        if args.verbosity > 1 and i % 1000 == 0:
+                        if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                             print(i, "batches done")
                     if args.verbosity > 1:
                         print(i, "batches done")
@@ -410,6 +411,7 @@ class Evaluate(E2EBase):
                 continue
             extractor_ds, _ = tf_data.extract_features_from_paths(
                 feat_config,
+                self.experiment_config["dataset"],
                 [utt2path[utt]],
                 [(utt, label)],
                 debug=False,
