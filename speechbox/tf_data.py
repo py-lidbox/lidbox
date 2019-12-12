@@ -186,8 +186,8 @@ def unbatch_ragged(ragged, meta):
     return tf.data.Dataset.from_tensor_slices((ragged.to_tensor(), meta))
 
 @tf.function
-def not_empty(feats, meta):
-    return not tf.reduce_all(tf.math.equal(feats, 0))
+def not_empty(x, *meta):
+    return not tf.reduce_all(tf.math.equal(x, 0))
 
 def update_wav_summary(stats, wav_ds, key):
     stats["num_wavs"][key] = count_dataset(wav_ds)
@@ -233,7 +233,8 @@ def extract_features_from_paths(feat_config, paths, meta, debug=False, copy_orig
             stats = update_wav_summary(stats, wavs, "00_before_filtering")
         vad_config = feat_config.get("voice_activity_detection")
         if vad_config:
-            wavs = wavs.map(lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta))
+            apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
+            wavs = wavs.map(apply_vad).filter(not_empty)
             if debug:
                 stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
         if "frames" in feat_config:
