@@ -78,8 +78,9 @@ class KerasWrapper:
         self.device_str = device_str
         self.model = None
         self.initial_epoch = 0
-        import_path = "speechbox.models." + model_definition["name"]
-        self.model_loader = functools.partial(importlib.import_module(import_path).loader, **model_definition.get("kwargs", {}))
+        model_module = importlib.import_module("speechbox.models." + model_definition["name"])
+        self.model_loader = functools.partial(model_module.loader, **model_definition.get("kwargs", {}))
+        self.predict_fn = model_module.predict
         self.callbacks = []
         if tensorboard:
             self.tensorboard = tf.keras.callbacks.TensorBoard(**tensorboard)
@@ -142,7 +143,7 @@ class KerasWrapper:
 
     @with_device
     def predict(self, testset):
-        return self.model.predict(without_metadata(testset))
+        return self.predict_fn(self.model, testset)
 
     @with_device
     def count_params(self):

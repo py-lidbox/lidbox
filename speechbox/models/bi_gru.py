@@ -9,10 +9,15 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras import Sequential
 
-def loader(input_shape, num_outputs, merge_mode="ave", num_gru_units=1024):
+def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024):
     return Sequential([
         Bidirectional(GRU(num_gru_units, return_sequences=True), input_shape=input_shape, merge_mode=merge_mode, name="biGRU_1"),
         Bidirectional(GRU(num_gru_units), merge_mode=merge_mode, name="biGRU_2"),
         Dense(1024, activation="relu", name="relu"),
         Dense(num_outputs, activation="softmax", name="output"),
     ])
+
+def predict(model, utterances):
+    for frames in utterances:
+        frame_probs = model.predict(frames)
+        yield frame_probs.mean(axis=0)

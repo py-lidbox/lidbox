@@ -145,6 +145,25 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
+def prepare_dataset_for_prediction(ds, config, feat_config):
+    if "frames" in feat_config:
+        # Partition each utterance into frames without flattening to retain one tensor per utterance
+        seq_len = feat_config["frames"]["length"]
+        seq_step = feat_config["frames"]["step"]
+        pad_zeros = feat_config["frames"].get("pad_zeros", False)
+        to_frames = lambda wavs, *meta: (
+            tf.signal.frame(wavs, seq_len, seq_step, pad_end=pad_zeros, axis=0),
+            *meta,
+        )
+        ds = ds.map(to_frames)
+    shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
+    if shuffle_buffer_size:
+        ds = ds.shuffle(shuffle_buffer_size)
+    ds = ds.batch(config.get("batch_size", 1))
+    if "prefetch" in config:
+        ds = ds.prefetch(config["prefetch"])
+    return ds
+
 def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
