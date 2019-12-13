@@ -2,7 +2,6 @@ import collections
 import os
 import pprint
 import random
-import shutil
 import sys
 import time
 
@@ -66,7 +65,7 @@ class E2EBase(StatefulCommand):
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
         return os.path.join(model_cache_dir, "checkpoints")
 
-    def create_model(self, config):
+    def create_model(self, config, skip_training=False):
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
         tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "logs")
         now_str = str(int(time.time()))
@@ -90,8 +89,9 @@ class E2EBase(StatefulCommand):
             "early_stopping": config.get("early_stopping"),
             "tensorboard": tensorboard_config,
         }
-        self.make_named_dir(tensorboard_dir, "tensorboard")
-        self.make_named_dir(checkpoint_dir, "checkpoints")
+        if not skip_training:
+            self.make_named_dir(tensorboard_dir, "tensorboard")
+            self.make_named_dir(checkpoint_dir, "checkpoints")
         if self.args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
             pprint.pprint(callbacks_kwargs)
@@ -220,7 +220,7 @@ class Train(E2EBase):
                 l = tf.constant(l, dtype=tf.string)
                 tf.print(l, "\t", label2onehot(l), summarize=-1, output_stream=sys.stdout)
         self.model_id = training_config["name"]
-        model = self.create_model(training_config)
+        model = self.create_model(dict(training_config), args.skip_training)
         dataset = {}
         for ds in ("train", "validation"):
             if args.verbosity > 2:
@@ -228,7 +228,7 @@ class Train(E2EBase):
                 pprint.pprint(training_config[ds])
             ds_config = dict(training_config, **training_config[ds])
             del ds_config["train"], ds_config["validation"]
-            summary_kwargs = ds_config.get("dataset_logger", {})
+            summary_kwargs = dict(ds_config.get("dataset_logger", {}))
             debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
             datagroup_key = ds_config.pop("datagroup")
             extractor_ds, stats = self.extract_features(
@@ -244,7 +244,8 @@ class Train(E2EBase):
                 for key in ("global_min", "global_max"):
                     tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
             else:
-                features_cache = os.path.join(self.cache_dir, "features", feat_config["type"], datagroup_key)
+                features_cache_name = feat_config.get("name", feat_config["type"])
+                features_cache = os.path.join(self.cache_dir, "features", features_cache_name, datagroup_key)
                 self.make_named_dir(os.path.dirname(features_cache), "tf.data.Dataset features cache")
                 if args.verbosity:
                     print("Using cache for features: '{}'".format(features_cache))
@@ -255,9 +256,9 @@ class Train(E2EBase):
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 for i, x in enumerate(extractor_ds):
                     if args.verbosity > 1 and i % 2000 == 0:
-                        print(i, "elements seen")
+                        print(i, "samples done")
                         if args.verbosity > 3:
-                            print("element", i, "is", x)
+                            print("sample", i, "shape is", tf.shape(x))
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(
@@ -277,7 +278,8 @@ class Train(E2EBase):
                 writer = tf.summary.create_file_writer(logdir)
                 summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
                 with writer.as_default():
-                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                    num_cores = len(os.sched_getaffinity(0))
+                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], num_cores=num_cores, **summary_kwargs)
                     if args.verbosity:
                         print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                     for i, elem in enumerate(logged_dataset):
@@ -289,7 +291,7 @@ class Train(E2EBase):
             print("Compiling model")
         model.prepare(len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
-        checkpoints = os.listdir(checkpoint_dir)
+        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
         if checkpoints:
             checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key="epoch"))
             if args.verbosity:
@@ -361,12 +363,12 @@ class Evaluate(E2EBase):
                 l = tf.constant(l, dtype=tf.string)
                 tf.print(l, "\t", label2onehot(l), summarize=-1, output_stream=sys.stdout)
         self.model_id = training_config["name"]
-        model = self.create_model(training_config)
+        model = self.create_model(dict(training_config), skip_training=True)
         if args.verbosity > 1:
             print("Compiling model")
         model.prepare(len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
-        checkpoints = os.listdir(checkpoint_dir)
+        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
         if not checkpoints:
             print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
             return 1
@@ -433,6 +435,108 @@ class Evaluate(E2EBase):
         return self.evaluate()
 
 
+class Predict(E2EBase):
+
+    @classmethod
+    def create_argparser(cls, parent_parser):
+        parser = super().create_argparser(parent_parser)
+        optional = parser.add_argument_group("evaluate options")
+        optional.add_argument("--checkpoint",
+            type=str,
+            help="Specify which Keras checkpoint to load model weights from, instead of using the most recent one.")
+        return parser
+
+    def predict(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for prediction")
+        training_config = self.experiment_config["experiment"]
+        feat_config = self.experiment_config["features"]
+        if args.verbosity > 1:
+            print("Using model parameters:")
+            pprint.pprint(training_config)
+            print()
+        if args.verbosity > 1:
+            print("Using feature extraction parameters:")
+            pprint.pprint(feat_config)
+            print()
+        if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
+            assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
+            if "melspectrogram" not in feat_config:
+                feat_config["melspectrogram"] = {}
+            feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
+        self.model_id = training_config["name"]
+        model = self.create_model(dict(training_config), skip_training=True)
+        if args.verbosity > 1:
+            print("Compiling model")
+        labels = self.experiment_config["dataset"]["labels"]
+        model.prepare(len(labels), training_config)
+        checkpoint_dir = self.get_checkpoint_dir()
+        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
+        if not checkpoints:
+            print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
+            return 1
+        latest_checkpoint = models.get_best_checkpoint(checkpoints, key="epoch")
+        checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint or latest_checkpoint)
+        if args.verbosity:
+            print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
+        model.load_weights(checkpoint_path)
+        if args.verbosity:
+            print("\nEvaluating testset with model:")
+            print(str(model))
+            print()
+        ds = "test"
+        if args.verbosity > 2:
+            print("Dataset config for '{}'".format(ds))
+            pprint.pprint(training_config[ds])
+        ds_config = dict(training_config, **training_config[ds])
+        del ds_config["train"], ds_config["validation"]
+        if args.verbosity and "dataset_logger" in ds_config:
+            print("Warning: dataset_logger in the test datagroup has no effect.")
+        datagroup = self.experiment_config["dataset"]["datagroups"][ds_config.pop("datagroup")]
+        utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
+        utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
+        utt2path = collections.OrderedDict(
+            row[:2] for row in parse_space_separated(utt2path_path)
+        )
+        utt2label = collections.OrderedDict(
+            row[:2] for row in parse_space_separated(utt2label_path)
+        )
+        keys = list(utt2path.keys())
+        if args.file_limit:
+            keys = keys[:args.file_limit]
+            if args.verbosity > 3:
+                print("Using utterance ids:")
+                pprint.pprint(keys)
+        int2label = self.experiment_config["dataset"]["labels"]
+        labels_set = set(int2label)
+        paths = []
+        paths_meta = []
+        for utt in keys:
+            label = utt2label[utt]
+            if label not in labels_set:
+                continue
+            paths.append(utt2path[utt])
+            paths_meta.append((utt, label))
+        if args.verbosity:
+            print("Extracting test set features for prediction")
+        features = tf_data.extract_features_for_prediction(
+            feat_config,
+            self.experiment_config["dataset"],
+            paths,
+            paths_meta,
+            num_cores=len(os.sched_getaffinity(0)),
+        )
+        for feats, meta in features:
+            utt, lang = meta[0], meta[1]
+            pred = model.predict(features)
+            tf.print(utt, lang, tf.shape(feats), int2label[pred.argmax()], pred, summarize=-1, output_stream=sys.stdout)
+
+    def run(self):
+        super().run()
+        return self.predict()
+
+
 command_tree = [
-    (E2E, [Train, Evaluate]),
+    (E2E, [Train, Evaluate, Predict]),
 ]

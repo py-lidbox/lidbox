@@ -41,5 +41,5 @@ def loader(input_shape, num_outputs):
     crnn.add(Dense(num_outputs, activation="softmax", name="output"))
     return crnn
 
-def predict(*args):
-    pass
+def predict(model, utterance_frames):
+    return model.predict(utterance_frames).mean(axis=0)

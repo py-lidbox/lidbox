@@ -145,26 +145,74 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
-def prepare_dataset_for_prediction(ds, config, feat_config):
+def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_cores=None):
+    paths = tf.constant(list(paths), dtype=tf.string)
+    meta = tf.constant(list(meta), dtype=tf.string)
+    tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
+    if feat_config["type"] == "sparsespeech":
+        raise NotImplementedError
+    else:
+        wavs = tf.data.Dataset.from_tensor_slices((paths, meta)).map(load_wav, num_parallel_calls=num_cores)
+        vad_config = feat_config.get("voice_activity_detection")
+        if vad_config:
+            apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
+            wavs = wavs.map(apply_vad, num_parallel_calls=num_cores).filter(not_empty)
+        if "wav_to_frames" in wav_config:
+            frame_len = wav_config["wav_to_frames"]["length"]
+            frame_step = wav_config["wav_to_frames"]["step"]
+            pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
+            wav_to_wavframes = lambda wav, *meta: (
+                tf.signal.frame(wav, frame_len, frame_step, pad_end=pad_zeros, axis=0),
+                *meta,
+            )
+            wavs = wavs.map(wav_to_wavframes).filter(not_empty)
+        else:
+            wavs = wavs.batch(1)
+        extract_feats = lambda _wavs, *meta: (
+            extract_features(
+                _wavs,
+                feat_config["type"],
+                feat_config.get("spectrogram", {}),
+                feat_config.get("melspectrogram", {}),
+                feat_config.get("mfcc", {}),
+                feat_config.get("db_spectrogram", {}),
+                feat_config.get("sample_minmax_scaling", {}),
+            ),
+            *meta
+        )
+        features = wavs.map(extract_feats, num_parallel_calls=num_cores)
+    min_seq_len = feat_config.get("min_sequence_length")
+    if min_seq_len:
+        def not_too_short(feats, *_):
+            return tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
+        features = features.filter(not_too_short)
+    image_resize_kwargs = dict(feat_config.get("convert_to_images", {}))
+    if image_resize_kwargs:
+        # the 'size' key is always required
+        image_size = image_resize_kwargs.pop("size")
+        @tf.function
+        def convert_to_images(feats, *meta):
+            # Add single grayscale channel
+            imgs = tf.expand_dims(feats, -1)
+            # Ensure timesteps are the columns of the image
+            imgs = tf.image.transpose(imgs)
+            # Resize
+            imgs = tf.image.resize(imgs, image_size, **image_resize_kwargs)
+            return (imgs, *meta)
+        features = features.map(convert_to_images, num_parallel_calls=num_cores)
     if "frames" in feat_config:
         # Partition each utterance into frames without flattening to retain one tensor per utterance
         seq_len = feat_config["frames"]["length"]
         seq_step = feat_config["frames"]["step"]
         pad_zeros = feat_config["frames"].get("pad_zeros", False)
-        to_frames = lambda wavs, *meta: (
-            tf.signal.frame(wavs, seq_len, seq_step, pad_end=pad_zeros, axis=0),
+        feats_to_frames = lambda feats, *meta: (
+            tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=0),
             *meta,
         )
-        ds = ds.map(to_frames)
-    shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
-    if shuffle_buffer_size:
-        ds = ds.shuffle(shuffle_buffer_size)
-    ds = ds.batch(config.get("batch_size", 1))
-    if "prefetch" in config:
-        ds = ds.prefetch(config["prefetch"])
-    return ds
+        features = features.map(feats_to_frames)
+    return features
 
-def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False):
+def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False, num_cores=None):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -185,10 +233,12 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_
         indices = tf.dtypes.cast(tf.math.round(image * num_colors), tf.int32)
         image = tf.gather(colors, indices)
         # Prepare for tensorboard
-        image = tf.image.transpose(image)
-        image = tf.image.flip_up_down(image)
         if image_resize_kwargs:
+            image = tf.image.transpose(image)
+            image = tf.image.flip_up_down(image)
             image = tf.image.resize(image, **image_resize_kwargs)
+        else:
+            image = tf.image.flip_up_down(image)
         common = {"step": batch_idx, "max_outputs": max_image_samples}
         tf.summary.image(features_name, image, **common)
         if copy_original_audio:
@@ -196,7 +246,7 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_
         del common["max_outputs"]
         tf.summary.text("utterance_ids", uttid, **common)
         return batch
-    return ds.enumerate().map(inspect_batches)
+    return ds.enumerate().map(inspect_batches, num_parallel_calls=num_cores)
 
 def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
@@ -207,7 +257,7 @@ def unbatch_ragged(ragged, meta):
 
 @tf.function
 def not_empty(x, *meta):
-    return not tf.reduce_all(tf.math.equal(x, 0))
+    return not (tf.size(x) == 0 or tf.reduce_all(x == 0))
 
 def update_wav_summary(stats, wav_ds, key):
     stats["num_wavs"][key] = count_dataset(wav_ds)
@@ -249,26 +299,26 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
     else:
         wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
                   .map(load_wav, num_parallel_calls=num_cores))
-        if debug:
-            stats = update_wav_summary(stats, wavs, "00_before_filtering")
+        # if debug:
+            # stats = update_wav_summary(stats, wavs, "00_before_filtering")
         vad_config = feat_config.get("voice_activity_detection")
         if vad_config:
             apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
             wavs = wavs.map(apply_vad).filter(not_empty)
-            if debug:
-                stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
+            # if debug:
+                # stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
         if "wav_to_frames" in wav_config:
             frame_len = wav_config["wav_to_frames"]["length"]
             frame_step = wav_config["wav_to_frames"]["step"]
             pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
             wav_to_wavframes = lambda wav, *meta: frame_and_unbatch(frame_len, frame_step, wav, meta, pad_zeros=pad_zeros)
             wavs = wavs.flat_map(wav_to_wavframes)
-            if debug:
-                stats = update_wav_summary(stats, wavs, "02_after_partitioning_to_frames")
+            # if debug:
+                # stats = update_wav_summary(stats, wavs, "02_after_partitioning_to_frames")
         # This function expects batches of wavs
-        extract_feats = lambda wavs, *meta: (
+        extract_feats = lambda _wavs, *meta: (
             extract_features(
-                wavs,
+                _wavs,
                 feat_config["type"],
                 feat_config.get("spectrogram", {}),
                 feat_config.get("melspectrogram", {}),
@@ -303,21 +353,26 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
         def not_too_short(feats, *_):
             return tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
         features = features.filter(not_too_short)
-        if debug:
-            stats = update_feat_summary(stats, features, "01_after_too_short_filter")
-    image_resize_kwargs = feat_config.get("convert_to_images")
+        # if debug:
+            # stats = update_feat_summary(stats, features, "01_after_too_short_filter")
+    image_resize_kwargs = dict(feat_config.get("convert_to_images", {}))
     if image_resize_kwargs:
+        # the 'size' key is always required
+        image_size = image_resize_kwargs.pop("size")
+        @tf.function
         def convert_to_images(feats, *meta):
             # Add single grayscale channel
             imgs = tf.expand_dims(feats, -1)
+            # Ensure timesteps are the columns of the image
+            imgs = tf.image.transpose(imgs)
             # Resize
-            imgs = tf.image.resize(imgs, **image_resize_kwargs)
+            imgs = tf.image.resize(imgs, image_size, **image_resize_kwargs)
             return (imgs, *meta)
-        features = features.map(convert_to_images)
-    if debug:
-        stats = update_feat_summary(stats, features, "00_before_filtering")
+        features = features.map(convert_to_images, num_parallel_calls=num_cores)
+    # if debug:
+        # stats = update_feat_summary(stats, features, "00_before_filtering")
     global_scale_conf = feat_config.get("global_minmax_scaling")
-    if debug or global_scale_conf:
+    if global_scale_conf:
         feat_shape = (feat_config["feature_dim"],)
         if debug_squeeze_last_dim:
             without_channels = features.map(lambda feats, *meta: (tf.squeeze(feats, -1), *meta))
@@ -325,7 +380,6 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
             without_channels = features
         stats["features"]["global_min"] = reduce_min(without_channels, shape=feat_shape)
         stats["features"]["global_max"] = reduce_max(without_channels, shape=feat_shape)
-    if global_scale_conf:
         # Apply feature scaling on each feature dimension over whole dataset
         a = global_scale_conf["min"]
         b = global_scale_conf["max"]

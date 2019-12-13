@@ -17,7 +17,5 @@ def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024):
         Dense(num_outputs, activation="softmax", name="output"),
     ])
 
-def predict(model, utterances):
-    for frames in utterances:
-        frame_probs = model.predict(frames)
-        yield frame_probs.mean(axis=0)
+def predict(model, utterance_frames):
+    return model.predict(utterance_frames).mean(axis=0)
