@@ -1,10 +1,18 @@
 import collections
 
 from . import audio_feat
+import kaldiio
 import matplotlib.cm
 import numpy as np
 import tensorflow as tf
 
+
+@tf.function
+def feature_scaling(X, min, max, axis):
+    # Apply feature scaling to get all feature values in range [min, max]
+    X_min = tf.math.reduce_min(X, axis=axis, keepdims=True)
+    X_max = tf.math.reduce_max(X, axis=axis, keepdims=True)
+    return min + (max - min) * tf.math.divide_no_nan(X - X_min, X_max - X_min)
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs):
@@ -21,13 +29,7 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
     elif feattype in ("db_spectrogram",):
         feat = audio_feat.power_to_db(feat, **db_spec_kwargs)
     if feat_scale_kwargs:
-        # Apply feature scaling to get all feature values in range [a, b]
-        a = feat_scale_kwargs["min"]
-        b = feat_scale_kwargs["max"]
-        axis = feat_scale_kwargs["axis"]
-        min = tf.math.reduce_min(feat, axis=axis, keepdims=True)
-        max = tf.math.reduce_max(feat, axis=axis, keepdims=True)
-        feat = a + (b - a) * tf.math.divide_no_nan(feat - min, max - min)
+        feat = feature_scaling(feat, **feat_scale_kwargs)
     return feat
 
 @tf.function
@@ -102,7 +104,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         seq_len = feat_config["frames"]["length"]
         seq_step = feat_config["frames"]["step"]
         pad_zeros = feat_config["frames"].get("pad_zeros", False)
-        if "dataset_logger" in config:
+        if config.get("dataset_logger", {}).get("copy_original_audio", False):
             # Original waveforms have been copied into the metadata and we need to split those to frames also
             to_frames = lambda feats, *meta: frame_and_unbatch_with_wav_in_meta(
                 seq_len,
@@ -223,7 +225,7 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_
     colors = tf.constant(cmap(np.arange(num_colors + 1))[:,:3], dtype=tf.float32)
     @tf.function
     def inspect_batches(batch_idx, batch):
-        image, onehot, uttid, signal = batch
+        image, onehot, uttid = batch[:3]
         if debug_squeeze_last_dim:
             image = tf.squeeze(image, -1)
         # Scale grayscale channel between 0 and 1
@@ -242,7 +244,7 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_
         common = {"step": batch_idx, "max_outputs": max_image_samples}
         tf.summary.image(features_name, image, **common)
         if copy_original_audio:
-            tf.summary.audio("original_audio", signal, 16000, **common)
+            tf.summary.audio("original_audio", batch[3], 16000, **common)
         del common["max_outputs"]
         tf.summary.text("utterance_ids", uttid, **common)
         return batch
@@ -275,6 +277,41 @@ def update_feat_summary(stats, feat_ds, key):
     stats["max_feat_length"][key] = reduce_max(feat_num_frames)
     return stats
 
+def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):
+    ss_input = kaldiio.load_scp(feat_path)
+    with open(enc_path, "rb") as f:
+        ss_encoding = np.load(f, fix_imports=False, allow_pickle=True).item()
+    assert set(ss_input.keys()) == set(ss_encoding.keys()), "missing utterances, maybe all were not encoded?"
+    keys = list(ss_encoding.keys())
+    assert all(ss_encoding[k].ndim == ss_input[k].ndim for k in keys), "ss input and output must have the same dimensions"
+    assert all(ss_encoding[k].shape[0] == ss_input[k].shape[0] for k in keys), "mismatching amount of time steps in ss input and the output encoding"
+    encodingtype = tf.as_dtype(ss_encoding[keys[0]].dtype)
+    noise_mean = feat_config.get("noise_mean", 0.0)
+    noise_stddev = feat_config.get("noise_stddev", 0.01)
+    feat_scale_kwargs = feat_config.get("sample_minmax_scaling", {})
+    labels_only = feat_config.get("labels_only", False)
+    def datagen():
+        for seg_id, onehot_enc in ss_encoding.items():
+            label = utt2label[seg2utt[seg_id]]
+            noise = tf.random.normal(onehot_enc.shape, mean=noise_mean, stddev=noise_stddev, dtype=encodingtype)
+            input_feat = ss_input[seg_id]
+            output_feat = onehot_enc + noise
+            # Apply feature scaling separately
+            if feat_scale_kwargs:
+                input_feat = feature_scaling(input_feat, **feat_scale_kwargs)
+                output_feat = feature_scaling(output_feat, **feat_scale_kwargs)
+            if labels_only:
+                out = output_feat
+            else:
+                # Stack input and output features
+                out = tf.concat((input_feat, output_feat), 1)
+            yield out, (seg_id, label)
+    return tf.data.Dataset.from_generator(
+        datagen,
+        (encodingtype, tf.string),
+        (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])),
+    )
+
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
 def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, num_cores=1):
@@ -282,72 +319,57 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
     stats = collections.defaultdict(dict)
-    if feat_config["type"] == "sparsespeech":
-        with open(feat_config["path"], "rb") as f:
-            data = np.load(f, fix_imports=False, allow_pickle=True).item()
-        data = [(data[m[0].numpy().decode("utf-8")], m) for m in meta]
-        datatype = tf.as_dtype(data[0][0].dtype)
-        def datagen():
-            for d, m in data:
-                noise = tf.random.normal(d.shape, mean=0, stddev=0.01, dtype=datatype)
-                yield d + noise, m
-        features = tf.data.Dataset.from_generator(
-            datagen,
-            (datatype, tf.string),
-            (tf.TensorShape([None, feat_config["feature_dim"]]), tf.TensorShape([2])),
-        )
-    else:
-        wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
-                  .map(load_wav, num_parallel_calls=num_cores))
+    wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
+              .map(load_wav, num_parallel_calls=num_cores))
+    # if debug:
+        # stats = update_wav_summary(stats, wavs, "00_before_filtering")
+    vad_config = feat_config.get("voice_activity_detection")
+    if vad_config:
+        apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
+        wavs = wavs.map(apply_vad).filter(not_empty)
         # if debug:
-            # stats = update_wav_summary(stats, wavs, "00_before_filtering")
-        vad_config = feat_config.get("voice_activity_detection")
-        if vad_config:
-            apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
-            wavs = wavs.map(apply_vad).filter(not_empty)
-            # if debug:
-                # stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
-        if "wav_to_frames" in wav_config:
-            frame_len = wav_config["wav_to_frames"]["length"]
-            frame_step = wav_config["wav_to_frames"]["step"]
-            pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
-            wav_to_wavframes = lambda wav, *meta: frame_and_unbatch(frame_len, frame_step, wav, meta, pad_zeros=pad_zeros)
-            wavs = wavs.flat_map(wav_to_wavframes)
-            # if debug:
-                # stats = update_wav_summary(stats, wavs, "02_after_partitioning_to_frames")
-        # This function expects batches of wavs
-        extract_feats = lambda _wavs, *meta: (
-            extract_features(
-                _wavs,
-                feat_config["type"],
-                feat_config.get("spectrogram", {}),
-                feat_config.get("melspectrogram", {}),
-                feat_config.get("mfcc", {}),
-                feat_config.get("db_spectrogram", {}),
-                feat_config.get("sample_minmax_scaling", {}),
-            ),
-            *meta
-        )
-        # Duplicate audio data into meta so we can listen to it in Tensorboard
-        # Feature extraction will replace the non-meta audio data with features
-        wavs_extended = tf.data.Dataset.zip((
-            wavs.map(lambda wav, _: wav),
-            # We expect the metadata to still be in a single tensor
-            wavs.map(lambda _, meta: meta),
-            # Copy the waveform into new tensor or use a dummy wav with a single zero frame
-            wavs.map(lambda wav, _: tf.identity(wav) if copy_original_audio else tf.zeros([1])),
-        ))
-        if trim_audio:
-            # Ensure all wav files in the metadata contains precisely 'trim_audio' amount of frames
-            def pad_or_slice_metawavs(wav, meta, metawav):
-                padding = [[0, tf.maximum(0, trim_audio - tf.size(metawav))]]
-                trimmed = tf.pad(metawav[:trim_audio], padding)
-                return (wav, meta, trimmed)
-            wavs_extended = wavs_extended.map(pad_or_slice_metawavs)
-        features = (wavs_extended
-                      .batch(feat_config.get("batch_size", 1))
-                      .map(extract_feats, num_parallel_calls=num_cores)
-                      .unbatch())
+            # stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
+    if "wav_to_frames" in wav_config:
+        frame_len = wav_config["wav_to_frames"]["length"]
+        frame_step = wav_config["wav_to_frames"]["step"]
+        pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
+        wav_to_wavframes = lambda wav, *meta: frame_and_unbatch(frame_len, frame_step, wav, meta, pad_zeros=pad_zeros)
+        wavs = wavs.flat_map(wav_to_wavframes)
+        # if debug:
+            # stats = update_wav_summary(stats, wavs, "02_after_partitioning_to_frames")
+    # This function expects batches of wavs
+    extract_feats = lambda _wavs, *meta: (
+        extract_features(
+            _wavs,
+            feat_config["type"],
+            feat_config.get("spectrogram", {}),
+            feat_config.get("melspectrogram", {}),
+            feat_config.get("mfcc", {}),
+            feat_config.get("db_spectrogram", {}),
+            feat_config.get("sample_minmax_scaling", {}),
+        ),
+        *meta
+    )
+    # Duplicate audio data into meta so we can listen to it in Tensorboard
+    # Feature extraction will replace the non-meta audio data with features
+    wavs_extended = tf.data.Dataset.zip((
+        wavs.map(lambda wav, _: wav),
+        # We expect the metadata to still be in a single tensor
+        wavs.map(lambda _, meta: meta),
+        # Copy the waveform into new tensor or use a dummy wav with a single zero frame
+        wavs.map(lambda wav, _: tf.identity(wav) if copy_original_audio else tf.zeros([1])),
+    ))
+    if trim_audio:
+        # Ensure all wav files in the metadata contains precisely 'trim_audio' amount of frames
+        def pad_or_slice_metawavs(wav, meta, metawav):
+            padding = [[0, tf.maximum(0, trim_audio - tf.size(metawav))]]
+            trimmed = tf.pad(metawav[:trim_audio], padding)
+            return (wav, meta, trimmed)
+        wavs_extended = wavs_extended.map(pad_or_slice_metawavs)
+    features = (wavs_extended
+                  .batch(feat_config.get("batch_size", 1))
+                  .map(extract_feats, num_parallel_calls=num_cores)
+                  .unbatch())
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
         def not_too_short(feats, *_):

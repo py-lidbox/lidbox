@@ -159,18 +159,32 @@ class E2EBase(StatefulCommand):
         num_cores = len(os.sched_getaffinity(0))
         if args.verbosity:
             print("This process has been assigned {0} physical cores, using {0} parallel calls during feature extraction".format(num_cores))
-        return tf_data.extract_features_from_paths(
-            config,
-            self.experiment_config["dataset"],
-            paths,
-            paths_meta,
-            debug=args.debug_dataset,
-            copy_original_audio=copy_original_audio,
-            trim_audio=trim_audio,
-            debug_squeeze_last_dim=debug_squeeze_last_dim,
-            num_cores=num_cores,
-        )
-
+        if config["type"] == "sparsespeech":
+            seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
+            if args.verbosity:
+                print("Parsing SparseSpeech features")
+                print("Reading utterance segmentation data from seg2utt file '{}'".format(seg2utt_path))
+            seg2utt = collections.OrderedDict(
+                row[:2] for row in parse_space_separated(seg2utt_path)
+            )
+            enc_path = config["sparsespeech_paths"]["output"][datagroup_key]
+            feat_path = config["sparsespeech_paths"]["input"][datagroup_key]
+            if args.verbosity:
+                print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
+            feat, stats = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label), {}
+        else:
+            feat, stats = tf_data.extract_features_from_paths(
+                config,
+                self.experiment_config["dataset"],
+                paths,
+                paths_meta,
+                debug=args.debug_dataset,
+                copy_original_audio=copy_original_audio,
+                trim_audio=trim_audio,
+                debug_squeeze_last_dim=debug_squeeze_last_dim,
+                num_cores=num_cores,
+            )
+        return feat, stats
 
 class Train(E2EBase):
 
@@ -311,128 +325,6 @@ class Train(E2EBase):
     def run(self):
         super().run()
         return self.train()
-
-
-class Evaluate(E2EBase):
-
-    @classmethod
-    def create_argparser(cls, parent_parser):
-        parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("evaluate options")
-        optional.add_argument("--checkpoint",
-            type=str,
-            help="Specify which Keras checkpoint to load model weights from, instead of using the most recent one.")
-        optional.add_argument("--confusion-matrix-path",
-            type=str,
-            action=ExpandAbspath,
-            metavar="./cache/evaluations/cm.png",
-            help="Path for the confusion matrix output image. Given directly to plt.savefig so you can also choose the filetype with this arg.")
-        optional.add_argument("--eval-result-dir",
-            type=str,
-            action=ExpandAbspath,
-            metavar="./cache/evaluations",
-            help="Write evaluation results into this directory.")
-        return parser
-
-    def evaluate(self):
-        args = self.args
-        if args.verbosity:
-            print("Preparing model for evaluation")
-        training_config = self.experiment_config["experiment"]
-        feat_config = self.experiment_config["features"]
-        if args.verbosity > 1:
-            print("Using model parameters:")
-            pprint.pprint(training_config)
-            print()
-        if args.verbosity > 1:
-            print("Using feature extraction parameters:")
-            pprint.pprint(feat_config)
-            print()
-        if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
-            assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
-            if "melspectrogram" not in feat_config:
-                feat_config["melspectrogram"] = {}
-            feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
-        labels = self.experiment_config["dataset"]["labels"]
-        label2int, OH = make_label2onehot(labels)
-        label2onehot = lambda label: OH[label2int.lookup(label)]
-        if args.verbosity > 2:
-            print("Generating onehot encoding from labels:", ', '.join(labels))
-            print("Generated onehot encoding as tensors:")
-            for l in labels:
-                l = tf.constant(l, dtype=tf.string)
-                tf.print(l, "\t", label2onehot(l), summarize=-1, output_stream=sys.stdout)
-        self.model_id = training_config["name"]
-        model = self.create_model(dict(training_config), skip_training=True)
-        if args.verbosity > 1:
-            print("Compiling model")
-        model.prepare(len(labels), training_config)
-        checkpoint_dir = self.get_checkpoint_dir()
-        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
-        if not checkpoints:
-            print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
-            return 1
-        latest_checkpoint = models.get_best_checkpoint(checkpoints, key="epoch")
-        checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint or latest_checkpoint)
-        if args.verbosity:
-            print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
-        model.load_weights(checkpoint_path)
-        if args.verbosity:
-            print("\nEvaluating testset with model:")
-            print(str(model))
-            print()
-        ds = "test"
-        if args.verbosity > 2:
-            print("Dataset config for '{}'".format(ds))
-            pprint.pprint(training_config[ds])
-        ds_config = dict(training_config, **training_config[ds])
-        del ds_config["train"], ds_config["validation"]
-        if "dataset_logger" in ds_config and args.verbosity:
-            print("Warning: dataset_logger in the test datagroup has no effect.")
-        datagroup = self.experiment_config["dataset"]["datagroups"][ds_config.pop("datagroup")]
-        utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
-        utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
-        utt2path = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2path_path)
-        )
-        utt2label = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2label_path)
-        )
-        keys = list(utt2path.keys())
-        if args.file_limit:
-            keys = keys[:args.file_limit]
-            if args.verbosity > 3:
-                print("Using utterance ids:")
-                pprint.pprint(keys)
-        int2label = self.experiment_config["dataset"]["labels"]
-        labels_set = set(int2label)
-        print("utt, pred, real, likelihoods")
-        for utt in keys:
-            label = utt2label[utt]
-            if label not in labels_set:
-                continue
-            extractor_ds, _ = tf_data.extract_features_from_paths(
-                feat_config,
-                self.experiment_config["dataset"],
-                [utt2path[utt]],
-                [(utt, label)],
-                debug=False,
-                copy_original_audio=False,
-                num_cores=len(os.sched_getaffinity(0)),
-            )
-            feature_frames = tf_data.prepare_dataset_for_training(
-                extractor_ds,
-                ds_config,
-                feat_config,
-                label2onehot,
-            )
-            pred = model.predict(feature_frames)
-            mean = pred.mean(axis=0)
-            print(utt, int2label[mean.argmax()], label, *["{:.3f}".format(x) for x in mean], sep="\t")
-
-    def run(self):
-        super().run()
-        return self.evaluate()
 
 
 class Predict(E2EBase):
