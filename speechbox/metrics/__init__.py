@@ -15,6 +15,7 @@ def avg_eer(y_true, y_pred):
     fnr = fn / (fn + tp)
     return (0.5 * (fpr + fnr)).mean()
 
+# TODO not sure if this is even correct
 class OneHotAvgEER(Metric):
     """
     Average Equal Error Rate for one-hot encoded targets containing 'num_classes' of different classes.

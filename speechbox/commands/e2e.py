@@ -15,6 +15,7 @@ import speechbox.models as models
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
 import speechbox.visualization as visualization
+from speechbox.metrics import AverageDetectionCost
 
 
 class E2E(Command):
@@ -429,6 +430,28 @@ class Predict(E2EBase):
         return self.predict()
 
 
+class Evaluate(E2EBase):
+    """Evaluate predicted scores."""
+
+    @classmethod
+    def create_argparser(cls, parent_parser):
+        parser = super().create_argparser(parent_parser)
+        required = parser.add_argument_group("evaluate arguments")
+        required.add_argument("predicted_scores", type=str)
+        optional = parser.add_argument_group("evaluate options")
+        cavg = AverageDetectionCost.__name__
+        optional.add_argument("--metric", choices=(cavg,), default=cavg, type=str)
+        return parser
+
+    def evaluate(self):
+        args = self.args
+        scores = {utt: [float(s) for s in scores] for utt, *scores in parse_space_separated(args.predicted_scores)}
+
+    def run(self):
+        super().run()
+        return self.evaluate()
+
+
 command_tree = [
-    (E2E, [Train, Evaluate, Predict]),
+    (E2E, [Train, Predict, Evaluate]),
 ]
