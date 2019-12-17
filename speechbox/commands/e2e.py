@@ -10,7 +10,7 @@ import tensorflow as tf
 import numpy as np
 
 from speechbox.commands.base import Command, State, StatefulCommand
-from speechbox.metrics import AverageDetectionCost
+from speechbox.metrics import AverageDetectionCost, AverageEqualErrorRate
 import speechbox.models as models
 import speechbox.tf_data as tf_data
 
@@ -492,7 +492,7 @@ class Evaluate(E2EBase):
                 one = tf.constant(1.0, dtype=tf.float32)
                 tf.debugging.assert_near(tf.reduce_sum(scores), one, message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1")
         if args.verbosity > 1:
-            print("Generating {} threshold bins for C_avg".format(args.threshold_bins))
+            print("Generating {} threshold bins".format(args.threshold_bins))
         assert args.threshold_bins > 0
         max_score = tf.constant(-float("inf"), dtype=tf.float32)
         min_score = tf.constant(float("inf"), dtype=tf.float32)
@@ -506,6 +506,7 @@ class Evaluate(E2EBase):
             print("Score thresholds for language detection decisions:")
             tf.print(thresholds, output_stream=sys.stdout, summarize=-1)
         cavg = AverageDetectionCost(len(langs), theta_det=list(thresholds.numpy()))
+        avg_eer = AverageEqualErrorRate(len(langs), theta_det=list(thresholds.numpy()))
         trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
         for utt, g in itertools.groupby(trials_by_utt, key=lambda t: t[1]):
             if utt not in utt2scores:
@@ -515,11 +516,18 @@ class Evaluate(E2EBase):
             gsorted = sorted(g, key=lambda t: lang2int[t[0]])
             y_true = tf.constant([float(target == "target") for _, _, target in gsorted])
             y_pred = utt2scores[utt]
-            # Update metric state using singleton batches
+            # Update metrics state using singleton batches
             cavg.update_state(
                 tf.expand_dims(y_true, 0),
                 tf.expand_dims(y_pred, 0),
             )
+            avg_eer.update_state(
+                tf.expand_dims(y_true, 0),
+                tf.expand_dims(y_pred, 0),
+            )
+        print("EER_avg\tthreshold")
+        avg_eer_float = avg_eer.result().numpy()
+        print("{:.3f}\t{:.3f}".format(avg_eer_float, thresholds[avg_eer.min_index].numpy()))
         cavg_results_at_thresholds = [(cavg, thresh) for cavg, thresh in zip(cavg.result().numpy(), thresholds.numpy())]
         # Sort by C_avg values (smaller is better)
         cavg_results_at_thresholds.sort(key=lambda t: t[0])
