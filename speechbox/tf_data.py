@@ -151,38 +151,35 @@ def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_co
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    if feat_config["type"] == "sparsespeech":
-        raise NotImplementedError
-    else:
-        wavs = tf.data.Dataset.from_tensor_slices((paths, meta)).map(load_wav, num_parallel_calls=num_cores)
-        vad_config = feat_config.get("voice_activity_detection")
-        if vad_config:
-            apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
-            wavs = wavs.map(apply_vad, num_parallel_calls=num_cores).filter(not_empty)
-        if "wav_to_frames" in wav_config:
-            frame_len = wav_config["wav_to_frames"]["length"]
-            frame_step = wav_config["wav_to_frames"]["step"]
-            pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
-            wav_to_wavframes = lambda wav, *meta: (
-                tf.signal.frame(wav, frame_len, frame_step, pad_end=pad_zeros, axis=0),
-                *meta,
-            )
-            wavs = wavs.map(wav_to_wavframes).filter(not_empty)
-        else:
-            wavs = wavs.batch(1)
-        extract_feats = lambda _wavs, *meta: (
-            extract_features(
-                _wavs,
-                feat_config["type"],
-                feat_config.get("spectrogram", {}),
-                feat_config.get("melspectrogram", {}),
-                feat_config.get("mfcc", {}),
-                feat_config.get("db_spectrogram", {}),
-                feat_config.get("sample_minmax_scaling", {}),
-            ),
-            *meta
+    wavs = tf.data.Dataset.from_tensor_slices((paths, meta)).map(load_wav, num_parallel_calls=num_cores)
+    vad_config = feat_config.get("voice_activity_detection")
+    if vad_config:
+        apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
+        wavs = wavs.map(apply_vad, num_parallel_calls=num_cores).filter(not_empty)
+    if "wav_to_frames" in wav_config:
+        frame_len = wav_config["wav_to_frames"]["length"]
+        frame_step = wav_config["wav_to_frames"]["step"]
+        pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
+        wav_to_wavframes = lambda wav, *meta: (
+            tf.signal.frame(wav, frame_len, frame_step, pad_end=pad_zeros, axis=0),
+            *meta,
         )
-        features = wavs.map(extract_feats, num_parallel_calls=num_cores)
+        wavs = wavs.map(wav_to_wavframes).filter(not_empty)
+    else:
+        wavs = wavs.batch(1)
+    extract_feats = lambda _wavs, *meta: (
+        extract_features(
+            _wavs,
+            feat_config["type"],
+            feat_config.get("spectrogram", {}),
+            feat_config.get("melspectrogram", {}),
+            feat_config.get("mfcc", {}),
+            feat_config.get("db_spectrogram", {}),
+            feat_config.get("sample_minmax_scaling", {}),
+        ),
+        *meta
+    )
+    features = wavs.map(extract_feats, num_parallel_calls=num_cores)
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
         def not_too_short(feats, *_):
