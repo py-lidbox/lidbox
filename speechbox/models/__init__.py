@@ -89,6 +89,7 @@ class KerasWrapper:
             self.callbacks.append(tf.keras.callbacks.EarlyStopping(**early_stopping))
         if checkpoints:
             if "epoch_interval" in checkpoints:
+                # This is for saving checkpoints at regular epoch intervals, regardless of the values that ModelCheckpoint is monitoring
                 self.callbacks.append(EpochModelCheckpoint(checkpoints.pop("epoch_interval"), checkpoints["filepath"]))
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
 

@@ -303,7 +303,7 @@ class Train(E2EBase):
             print("Compiling model")
         model.prepare(len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
-        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
+        checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
         if checkpoints:
             checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key="epoch"))
             if args.verbosity:
