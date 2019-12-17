@@ -40,7 +40,7 @@ def parse_metrics(metrics, output_shape):
     for m in metrics:
         metric = None
         name = m["name"]
-        kwargs = m.get("kwargs", {})
+        kwargs = dict(m.get("kwargs", {}))
         if name == "accuracy":
             #FIXME why aren't Accuracy instances working?
             # metric = tf.keras.metrics.Accuracy()
@@ -49,10 +49,10 @@ def parse_metrics(metrics, output_shape):
             metric = tf.keras.metrics.Precision(**kwargs)
         elif name == "recall":
             metric = tf.keras.metrics.Recall(**kwargs)
-        elif name == "equal_error_rate":
-            metric = speechbox.metrics.OneHotAvgEER(output_shape, **kwargs)
+        elif name == "avg_equal_error_rate":
+            metric = speechbox.metrics.AverageEqualErrorRate(kwargs.pop("num_targets"), **kwargs)
         elif name == "C_avg":
-            metric = speechbox.metrics.AverageDetectionCost(**kwargs)
+            metric = speechbox.metrics.AverageDetectionCost(kwargs.pop("num_targets"), **kwargs)
         assert metric is not None, "metric not implemented: '{}'".format(m)
         keras_metrics.append(metric)
     return keras_metrics
