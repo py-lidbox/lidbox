@@ -27,3 +27,6 @@ def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, 
         lstm_layers = layers
     output = tf.keras.layers.Dense(output_shape, activation="softmax", name="output")
     return tf.keras.models.Sequential(lstm_layers + [output])
+
+def predict(model, utterance_frames):
+    return model.predict(utterance_frames).mean(axis=0)

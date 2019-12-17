@@ -24,4 +24,4 @@ def loader(input_shape, num_outputs):
     ])
 
 def predict(model, samples):
-    return samples
+    return model.predict(samples)

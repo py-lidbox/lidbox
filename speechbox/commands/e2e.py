@@ -1,21 +1,18 @@
 import collections
+import itertools
 import os
 import pprint
 import random
 import sys
 import time
 
-import sklearn.metrics
 import tensorflow as tf
+import numpy as np
 
-from speechbox.commands.base import Command, State, StatefulCommand, ExpandAbspath
-import speechbox.dataset as dataset
-import speechbox.tf_data as tf_data
-import speechbox.models as models
-import speechbox.preprocess.transformations as transformations
-import speechbox.system as system
-import speechbox.visualization as visualization
+from speechbox.commands.base import Command, State, StatefulCommand
 from speechbox.metrics import AverageDetectionCost
+import speechbox.models as models
+import speechbox.tf_data as tf_data
 
 
 class E2E(Command):
@@ -329,11 +326,18 @@ class Train(E2EBase):
 
 
 class Predict(E2EBase):
+    """
+    Use a trained model to produce likelihoods for all target languages from all utterances in the test set.
+    Writes all predictions as scores and information about the target and non-target languages into the cache dir.
+    """
 
     @classmethod
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("evaluate options")
+        optional = parser.add_argument_group("predict options")
+        optional.add_argument("--score-precision", type=int, default=3)
+        optional.add_argument("--trials", type=str)
+        optional.add_argument("--scores", type=str)
         optional.add_argument("--checkpoint",
             type=str,
             help="Specify which Keras checkpoint to load model weights from, instead of using the most recent one.")
@@ -343,6 +347,12 @@ class Predict(E2EBase):
         args = self.args
         if args.verbosity:
             print("Preparing model for prediction")
+        if not args.trials:
+            args.trials = os.path.join(self.cache_dir, "predictions", "trials")
+        if not args.scores:
+            args.scores = os.path.join(self.cache_dir, "predictions", "scores")
+        self.make_named_dir(os.path.dirname(args.trials))
+        self.make_named_dir(os.path.dirname(args.scores))
         training_config = self.experiment_config["experiment"]
         feat_config = self.experiment_config["features"]
         if args.verbosity > 1:
@@ -420,10 +430,27 @@ class Predict(E2EBase):
             paths_meta,
             num_cores=len(os.sched_getaffinity(0)),
         )
-        for feats, meta in features:
-            utt, lang = meta[0], meta[1]
-            pred = model.predict(features)
-            tf.print(utt, lang, tf.shape(feats), int2label[pred.argmax()], pred, summarize=-1, output_stream=sys.stdout)
+        # Gather utterance ids, this also causes the extraction pipeline to be evaluated
+        utterance_ids = [meta[0][0].numpy().decode("utf-8") for _, meta in features]
+        features = features.map(lambda feats, meta: feats)
+        if args.verbosity:
+            print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
+        with open(args.trials, "w") as trials_f:
+            for utt, target in utt2label.items():
+                for lang in int2label:
+                    print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
+        if args.verbosity:
+            print("Starting prediction")
+        predictions = model.predict(features)
+        with open(args.scores, "w") as scores_f:
+            print(*int2label, file=scores_f)
+            with np.printoptions(precision=args.score_precision, suppress=True, floatmode='fixed'):
+                for num_predictions, (utt, pred) in enumerate(zip(utterance_ids, predictions)):
+                    # Numpy array as string without square brackets and comma delimiters
+                    scores_str = np.array_str(pred)[1:-1]
+                    print(utt, scores_str, file=scores_f)
+        if args.verbosity:
+            print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
 
     def run(self):
         super().run()
@@ -431,21 +458,74 @@ class Predict(E2EBase):
 
 
 class Evaluate(E2EBase):
-    """Evaluate predicted scores."""
+    """Evaluate predicted scores by average detection cost (C_avg)."""
 
     @classmethod
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
-        required = parser.add_argument_group("evaluate arguments")
-        required.add_argument("predicted_scores", type=str)
         optional = parser.add_argument_group("evaluate options")
-        cavg = AverageDetectionCost.__name__
-        optional.add_argument("--metric", choices=(cavg,), default=cavg, type=str)
+        optional.add_argument("--trials", type=str)
+        optional.add_argument("--scores", type=str)
+        optional.add_argument("--threshold-bins", type=int, default=20)
+        optional.add_argument("--top-k", type=int, default=5)
+        optional.add_argument("--log-to-prob", action="store_true", default=False)
         return parser
 
     def evaluate(self):
         args = self.args
-        scores = {utt: [float(s) for s in scores] for utt, *scores in parse_space_separated(args.predicted_scores)}
+        if not args.trials:
+            args.trials = os.path.join(self.cache_dir, "predictions", "trials")
+        if not args.scores:
+            args.scores = os.path.join(self.cache_dir, "predictions", "scores")
+        if args.verbosity > 1:
+            print("Evaluating minimum average detection cost using trials '{}' and scores '{}'".format(args.trials, args.scores))
+        score_lines = list(parse_space_separated(args.scores))
+        langs = score_lines[0]
+        lang2int = {l: i for i, l in enumerate(langs)}
+        utt2scores = {utt: tf.constant([float(s) for s in scores]) for utt, *scores in score_lines[1:]}
+        if args.verbosity > 1:
+            print("Parsed scores for {} utterances".format(len(utt2scores)))
+        if args.log_to_prob:
+            print("Converting log likelihood scores into probabilities")
+            utt2scores = {utt: tf.math.exp(scores) for utt, scores in utt2scores.items()}
+            for utt, scores in utt2scores.items():
+                one = tf.constant(1.0, dtype=tf.float32)
+                tf.debugging.assert_near(tf.reduce_sum(scores), one, message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1")
+        if args.verbosity > 1:
+            print("Generating {} threshold bins for C_avg".format(args.threshold_bins))
+        assert args.threshold_bins > 0
+        max_score = tf.constant(-float("inf"), dtype=tf.float32)
+        min_score = tf.constant(float("inf"), dtype=tf.float32)
+        for utt, scores in utt2scores.items():
+            max_score = tf.math.maximum(max_score, tf.math.reduce_max(scores))
+            min_score = tf.math.minimum(min_score, tf.math.reduce_min(scores))
+        if args.verbosity > 2:
+            tf.print("Max score", max_score, "min score", min_score, output_stream=sys.stdout, summarize=-1)
+        thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
+        if args.verbosity > 3:
+            print("Score thresholds for language detection decisions:")
+            tf.print(thresholds, output_stream=sys.stdout, summarize=-1)
+        cavg = AverageDetectionCost(len(langs), theta_det=list(thresholds.numpy()))
+        trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
+        for utt, g in itertools.groupby(trials_by_utt, key=lambda t: t[1]):
+            if utt not in utt2scores:
+                print("Warning: correct class for utterance '{}' listed in trials but it has no predicted scores, skipping".format(utt), file=sys.stderr)
+                continue
+            # Sort by lang index
+            gsorted = sorted(g, key=lambda t: lang2int[t[0]])
+            y_true = tf.constant([float(target == "target") for _, _, target in gsorted])
+            y_pred = utt2scores[utt]
+            # Update metric state using singleton batches
+            cavg.update_state(
+                tf.expand_dims(y_true, 0),
+                tf.expand_dims(y_pred, 0),
+            )
+        cavg_results_at_thresholds = [(cavg, thresh) for cavg, thresh in zip(cavg.result().numpy(), thresholds.numpy())]
+        # Sort by C_avg values (smaller is better)
+        cavg_results_at_thresholds.sort(key=lambda t: t[0])
+        print("C_avg\tthreshold")
+        for cavg, thresh in cavg_results_at_thresholds[:args.top_k]:
+            print("{:.3f}\t{:.3f}".format(cavg, thresh))
 
     def run(self):
         super().run()
