@@ -300,7 +300,7 @@ class Train(E2EBase):
                     if args.verbosity > 1:
                         print(i, "batches done")
         if args.verbosity > 1:
-            print("Compiling model")
+            print("Preparing model")
         model.prepare(len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
@@ -371,16 +371,21 @@ class Predict(E2EBase):
         self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), skip_training=True)
         if args.verbosity > 1:
-            print("Compiling model")
+            print("Preparing model")
         labels = self.experiment_config["dataset"]["labels"]
         model.prepare(len(labels), training_config)
         checkpoint_dir = self.get_checkpoint_dir()
-        checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
-        if not checkpoints:
-            print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
-            return 1
-        latest_checkpoint = models.get_best_checkpoint(checkpoints, key="epoch")
-        checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint or latest_checkpoint)
+        if args.checkpoint:
+            checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
+        elif "best_checkpoint" in self.experiment_config.get("prediction", {}):
+            checkpoint_path = os.path.join(checkpoint_dir, self.experiment_config["prediction"]["best_checkpoint"])
+        else:
+            checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
+            if not checkpoints:
+                print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
+                return 1
+            latest_checkpoint = models.get_best_checkpoint(checkpoints, key="epoch")
+            checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
         if args.verbosity:
             print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
         model.load_weights(checkpoint_path)
