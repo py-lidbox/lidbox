@@ -183,7 +183,7 @@ def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_co
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
         def not_too_short(feats, *_):
-            return tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
+            return tf.math.greater_equal(tf.shape(feats)[1], min_seq_len)
         features = features.filter(not_too_short)
     image_resize_kwargs = dict(feat_config.get("convert_to_images", {}))
     if image_resize_kwargs:

@@ -435,9 +435,13 @@ class Predict(E2EBase):
             paths_meta,
             num_cores=len(os.sched_getaffinity(0)),
         )
+        first = list(features.take(1))
+        assert first, "feature extraction failed, 'features' tf.data.Dataset does not contain any elements"
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
         utterance_ids = [meta[0][0].numpy().decode("utf-8") for _, meta in features]
-        features = features.map(lambda feats, meta: feats)
+        features = features.map(lambda feats, *meta: feats)
+        if "batch_size" in ds_config:
+            features = features.unbatch().batch(ds_config["batch_size"])
         if args.verbosity:
             print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
         with open(args.trials, "w") as trials_f:
@@ -447,10 +451,11 @@ class Predict(E2EBase):
         if args.verbosity:
             print("Starting prediction")
         predictions = model.predict(features)
+        num_predictions = 0
         with open(args.scores, "w") as scores_f:
             print(*int2label, file=scores_f)
             with np.printoptions(precision=args.score_precision, suppress=True, floatmode='fixed'):
-                for num_predictions, (utt, pred) in enumerate(zip(utterance_ids, predictions)):
+                for num_predictions, (utt, pred) in enumerate(zip(utterance_ids, predictions), start=1):
                     # Numpy array as string without square brackets and comma delimiters
                     scores_str = np.array_str(pred)[1:-1]
                     print(utt, scores_str, file=scores_f)
