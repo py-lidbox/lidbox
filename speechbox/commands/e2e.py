@@ -253,12 +253,13 @@ class Train(E2EBase):
                 for key in ("global_min", "global_max"):
                     tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
             else:
-                features_cache_name = feat_config.get("name", feat_config["type"])
-                features_cache = os.path.join(self.cache_dir, "features", features_cache_name, datagroup_key)
-                self.make_named_dir(os.path.dirname(features_cache), "tf.data.Dataset features cache")
+                tmp_features_cache = os.path.join("/tmp", self.experiment_config["dataset"]["key"], ds, feat_config["type"])
+                if args.verbosity > 1:
+                    print("Caching feature extractor dataset to '{}'".format(tmp_features_cache))
+                self.make_named_dir(os.path.dirname(tmp_features_cache), "features cache")
                 if args.verbosity:
-                    print("Using cache for features: '{}'".format(features_cache))
-                extractor_ds = extractor_ds.cache(filename=features_cache)
+                    print("Using cache for features: '{}'".format(tmp_features_cache))
+                extractor_ds = extractor_ds.cache(filename=tmp_features_cache)
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
@@ -429,6 +430,11 @@ class Predict(E2EBase):
             paths,
             paths_meta,
         )
+        tmp_features_cache = os.path.join("/tmp", self.experiment_config["dataset"]["key"], ds, feat_config["type"])
+        if args.verbosity > 1:
+            print("Caching feature extractor dataset to '{}'".format(tmp_features_cache))
+        self.make_named_dir(os.path.dirname(tmp_features_cache), "features cache")
+        features = features.cache(tmp_features_cache)
         first = list(features.take(1))
         assert first, "feature extraction failed, 'features' tf.data.Dataset does not contain any elements"
         if args.verbosity > 2:
