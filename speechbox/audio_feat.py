@@ -52,17 +52,14 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def energy_vad(signal, frame_length=400, strength=0.5, min_rms_threshold=1e-3):
+def framewise_energy_vad_decisions(signals, frame_length=400, frame_step=160, strength=0.5, min_rms_threshold=1e-3):
     """
-    Perform frame-wise vad decisions based on mean RMS value for each frame in a given 'signal'.
-    VAD threshold is 'strength' multiplied by mean RMS (larger 'strength' values increase VAD aggressiveness and drops more frames).
+    For a batch of 1D-signals, compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal (separately for each signal).
+    VAD threshold is 'strength' multiplied by mean RMS, i.e. larger 'strength' values increase VAD aggressiveness.
     """
-    tf.debugging.assert_rank(signal, 1, "energy_vad supports VAD only on one signal at a time, e.g. not batches")
-    frames = tf.signal.frame(signal, frame_length, frame_length)
-    rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=1))
-    mean_rms = tf.math.reduce_mean(rms, axis=0, keepdims=True)
+    tf.debugging.assert_rank(signals, 2, message="energy_vad_decisions expects batches of single channel signals")
+    frames = tf.signal.frame(signals, frame_length, frame_step)
+    rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=2))
+    mean_rms = tf.math.reduce_mean(rms, axis=1, keepdims=True)
     threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
-    # Take only frames that have rms greater than the threshold
-    filtered_frames = tf.boolean_mask(frames, tf.math.greater(rms, threshold))
-    # Concat all frames and return a new signal with silence removed
-    return tf.reshape(filtered_frames, [-1])
+    return tf.math.greater(rms, threshold)
