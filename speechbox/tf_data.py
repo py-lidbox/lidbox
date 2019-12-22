@@ -14,21 +14,28 @@ def feature_scaling(X, min, max, axis):
     X_max = tf.math.reduce_max(X, axis=axis, keepdims=True)
     return min + (max - min) * tf.math.divide_no_nan(X - X_min, X_max - X_min)
 
-# TODO use variable length windows on the edges instead of zero padding, since zeros will dilute means and stddevs
 @tf.function
 def cmvn_slide(X, window_len=300):
     """Apply CMVN on batches of cepstral coef matrices X with a given cmvn window length."""
     tf.debugging.assert_rank_at_least(X, 3, message="Input to cmvn_slide should be batches of cepstral coef matrices (or tensors) with shape (Batch, Timedim, Coefs, ...)")
-    # Pad beginning and end with zeros to fit window
-    padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
-    X_padded = tf.pad(X, padding, mode="CONSTANT", constant_values=0.0)
-    cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
-    tf.debugging.assert_equal(tf.shape(cmvn_windows)[1], tf.shape(X)[1], message="Mismatching amount of CMVN output windows and time steps in the input")
-    # Standardize within each window and return result of same shape as X
-    return tf.math.divide_no_nan(
-        X - tf.math.reduce_mean(cmvn_windows, axis=2),
-        tf.math.reduce_std(cmvn_windows, axis=2)
-    )
+    if tf.shape(X)[1] < window_len:
+        # All frames of X fit inside one window, no need for sliding cmvn
+        return tf.math.divide_no_nan(
+            X - tf.math.reduce_mean(X, axis=2, keepdims=True),
+            tf.math.reduce_std(X, axis=2, keepdims=True)
+        )
+    else:
+        # Pad beginning and end with zeros to fit window
+        padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
+        # Padding by reflecting the coefs along the time dimension should not dilute the means and stddevs as much as zeros would
+        X_padded = tf.pad(X, padding, mode="REFLECT")
+        cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
+        tf.debugging.assert_equal(tf.shape(cmvn_windows)[1], tf.shape(X)[1], message="Mismatching amount of CMVN output windows and time steps in the input")
+        # Standardize within each window and return result of same shape as X
+        return tf.math.divide_no_nan(
+            X - tf.math.reduce_mean(cmvn_windows, axis=2),
+            tf.math.reduce_std(cmvn_windows, axis=2)
+        )
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, cmvn_kwargs):
