@@ -10,9 +10,10 @@ import tensorflow as tf
 import numpy as np
 
 from speechbox.commands.base import Command, State, StatefulCommand
-from speechbox.metrics import AverageDetectionCost, AverageEqualErrorRate
+from speechbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
 import speechbox.models as models
 import speechbox.tf_data as tf_data
+import speechbox.system as system
 
 
 class E2E(Command):
@@ -301,7 +302,7 @@ class Train(E2EBase):
                         print(i, "batches done")
         if args.verbosity > 1:
             print("Preparing model")
-        model.prepare(len(labels), training_config)
+        model.prepare(labels, training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
         if checkpoints:
@@ -373,7 +374,7 @@ class Predict(E2EBase):
         if args.verbosity > 1:
             print("Preparing model")
         labels = self.experiment_config["dataset"]["labels"]
-        model.prepare(len(labels), training_config)
+        model.prepare(labels, training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         if args.checkpoint:
             checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
@@ -476,8 +477,7 @@ class Evaluate(E2EBase):
         optional = parser.add_argument_group("evaluate options")
         optional.add_argument("--trials", type=str)
         optional.add_argument("--scores", type=str)
-        optional.add_argument("--threshold-bins", type=int, default=20)
-        optional.add_argument("--top-k", type=int, default=5)
+        optional.add_argument("--threshold-bins", type=int, default=40)
         optional.add_argument("--log-to-prob", action="store_true", default=False)
         return parser
 
@@ -492,7 +492,7 @@ class Evaluate(E2EBase):
         score_lines = list(parse_space_separated(args.scores))
         langs = score_lines[0]
         lang2int = {l: i for i, l in enumerate(langs)}
-        utt2scores = {utt: tf.constant([float(s) for s in scores]) for utt, *scores in score_lines[1:]}
+        utt2scores = {utt: tf.constant([float(s) for s in scores], dtype=tf.float32) for utt, *scores in score_lines[1:]}
         if args.verbosity > 1:
             print("Parsed scores for {} utterances".format(len(utt2scores)))
         if args.log_to_prob:
@@ -512,38 +512,67 @@ class Evaluate(E2EBase):
         if args.verbosity > 2:
             tf.print("Max score", max_score, "min score", min_score, output_stream=sys.stdout, summarize=-1)
         thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
-        if args.verbosity > 3:
+        if args.verbosity > 2:
             print("Score thresholds for language detection decisions:")
-            tf.print(thresholds, output_stream=sys.stdout, summarize=-1)
-        cavg = AverageDetectionCost(len(langs), theta_det=list(thresholds.numpy()))
-        avg_eer = AverageEqualErrorRate(len(langs), theta_det=list(thresholds.numpy()))
+            tf.print(thresholds, output_stream=sys.stdout)
+        # First do C_avg to get the best threshold
+        cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
         trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
-        for utt, g in itertools.groupby(trials_by_utt, key=lambda t: t[1]):
+        trials_by_utt = [
+            (utt, tf.constant([float(t == "target") for _, _, t in sorted(group, key=lambda t: lang2int[t[0]])], dtype=tf.float32))
+            for utt, group in itertools.groupby(trials_by_utt, key=lambda t: t[1])
+        ]
+        if args.verbosity:
+            print("Computing minimum C_avg using {} score thresholds".format(len(thresholds)))
+        # Collect labels and predictions for confusion matrix
+        cm_labels = []
+        cm_predictions = []
+        for utt, y_true in trials_by_utt:
             if utt not in utt2scores:
                 print("Warning: correct class for utterance '{}' listed in trials but it has no predicted scores, skipping".format(utt), file=sys.stderr)
                 continue
-            # Sort by lang index
-            gsorted = sorted(g, key=lambda t: lang2int[t[0]])
-            y_true = tf.constant([float(target == "target") for _, _, target in gsorted])
             y_pred = utt2scores[utt]
-            # Update metrics state using singleton batches
+            # Update using singleton batches
             cavg.update_state(
                 tf.expand_dims(y_true, 0),
-                tf.expand_dims(y_pred, 0),
+                tf.expand_dims(y_pred, 0)
             )
-            avg_eer.update_state(
-                tf.expand_dims(y_true, 0),
-                tf.expand_dims(y_pred, 0),
-            )
-        print("EER_avg\tthreshold")
-        avg_eer_float = avg_eer.result().numpy()
-        print("{:.3f}\t{:.3f}".format(avg_eer_float, thresholds[avg_eer.min_index].numpy()))
-        cavg_results_at_thresholds = [(cavg, thresh) for cavg, thresh in zip(cavg.result().numpy(), thresholds.numpy())]
-        # Sort by C_avg values (smaller is better)
-        cavg_results_at_thresholds.sort(key=lambda t: t[0])
-        print("C_avg\tthreshold")
-        for cavg, thresh in cavg_results_at_thresholds[:args.top_k]:
-            print("{:.3f}\t{:.3f}".format(cavg, thresh))
+            cm_labels.append(tf.math.argmax(y_true))
+            cm_predictions.append(tf.math.argmax(y_pred))
+        # Evaluating the cavg result has a side effect of generating the argmin of the minimum cavg into cavg.min_index
+        _ = cavg.result()
+        min_threshold = thresholds[cavg.min_index].numpy()
+        def print_metric(m):
+            print("{:15s}\t{:.3f}".format(m.name + ":", m.result().numpy()))
+        print("min C_avg at threshold {:.6f}".format(min_threshold))
+        print_metric(cavg)
+        # Now we know the threshold that minimizes C_avg and use the same threshold to compute all other metrics
+        metrics = [
+            AverageEqualErrorRate(langs, thresholds=min_threshold),
+            AveragePrecision(langs, thresholds=min_threshold),
+            AverageRecall(langs, thresholds=min_threshold),
+        ]
+        if args.verbosity:
+            print("Computing rest of the metrics using threshold {:.6f}".format(min_threshold))
+        for utt, y_true in trials_by_utt:
+            if utt not in utt2scores:
+                continue
+            y_true_batch = tf.expand_dims(y_true, 0)
+            y_pred = tf.expand_dims(utt2scores[utt], 0)
+            for m in metrics:
+                m.update_state(y_true_batch, y_pred)
+        for avg_m in metrics:
+            print_metric(avg_m)
+        print("\nMetrics by target, using threshold {:.6f}".format(min_threshold))
+        for avg_m in metrics:
+            print(avg_m.name)
+            for m in avg_m:
+                print_metric(m)
+        print("\nConfusion matrix")
+        cm_labels = tf.cast(tf.stack(cm_labels), dtype=tf.int32)
+        cm_predictions = tf.cast(tf.stack(cm_predictions), dtype=tf.int32)
+        confusion_matrix = tf.math.confusion_matrix(cm_labels, cm_predictions, len(langs))
+        tf.print(confusion_matrix, summarize=-1, output_stream=sys.stdout)
 
     def run(self):
         super().run()

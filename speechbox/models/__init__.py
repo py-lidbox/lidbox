@@ -35,25 +35,28 @@ def get_best_checkpoint(checkpoints, key="epoch"):
         # Greatest validation accuracy value
         return max(checkpoints, key=lambda p: float(key_fn(p)))
 
-def parse_metrics(metrics, output_shape):
+def parse_metrics(metrics, target_names):
     keras_metrics = []
     for m in metrics:
         metric = None
-        name = m["name"]
         kwargs = dict(m.get("kwargs", {}))
-        if name == "accuracy":
-            #FIXME why aren't Accuracy instances working?
-            # metric = tf.keras.metrics.Accuracy()
-            metric = name
-        elif name == "precision":
-            metric = tf.keras.metrics.Precision(**kwargs)
-        elif name == "recall":
-            metric = tf.keras.metrics.Recall(**kwargs)
-        elif name == "avg_equal_error_rate":
-            metric = speechbox.metrics.AverageEqualErrorRate(kwargs.pop("num_targets"), **kwargs)
-        elif name == "C_avg":
-            metric = speechbox.metrics.AverageDetectionCost(kwargs.pop("num_targets"), **kwargs)
-        assert metric is not None, "metric not implemented: '{}'".format(m)
+        if "cls" in m:
+            metric = getattr(tf.keras.metrics, m["cls"])(**kwargs)
+        else:
+            name = m["name"]
+            if name == "accuracy":
+                #FIXME why aren't Accuracy instances working?
+                # metric = tf.keras.metrics.Accuracy()
+                metric = name
+            elif name == "precision":
+                metric = tf.keras.metrics.Precision(**kwargs)
+            elif name == "recall":
+                metric = tf.keras.metrics.Recall(**kwargs)
+            elif name == "avg_equal_error_rate":
+                metric = speechbox.metrics.AverageEqualErrorRate(target_names, **kwargs)
+            elif name == "C_avg":
+                metric = speechbox.metrics.AverageDetectionCost(target_names, **kwargs)
+        assert metric is not None, "unknown metric: '{}'".format(m)
         keras_metrics.append(metric)
     return keras_metrics
 
@@ -100,9 +103,9 @@ class KerasWrapper:
         return model_path
 
     @with_device
-    def prepare(self, output_shape, training_config):
+    def prepare(self, target_names, training_config):
         input_shape = training_config["input_shape"]
-        self.model = self.model_loader(input_shape, output_shape)
+        self.model = self.model_loader(input_shape, len(target_names))
         opt_conf = training_config["optimizer"]
         opt_kwargs = opt_conf.get("kwargs", {})
         if "lr_scheduler" in opt_kwargs:
@@ -112,7 +115,7 @@ class KerasWrapper:
         loss_conf = training_config["loss"]
         loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
         if "metrics" in training_config:
-            metrics = parse_metrics(training_config["metrics"], output_shape)
+            metrics = parse_metrics(training_config["metrics"], target_names)
         else:
             metrics = None
         self.model.compile(
