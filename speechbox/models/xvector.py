@@ -19,6 +19,8 @@ class StatsPooling(Layer):
         std = tf.math.reduce_std(inputs, axis=1)
         return tf.concat((mean, std), axis=1)
 
+xvector_layer_names = ["frame{}".format(i) for i in range(1, 6)] + ["stats_pooling", "segment6"]
+
 def loader(input_shape, num_outputs):
     return tf.keras.Sequential([
         Conv1D(512, 5, 1, padding="same", activation="relu", name="frame1", input_shape=input_shape),
@@ -34,8 +36,7 @@ def loader(input_shape, num_outputs):
     ])
 
 def extract_xvectors(model, inputs):
-    """Generator that embeds all elements of a tf.data.Dataset as X-vectors using the given, pretrained Sequential instance."""
-    xvector_layer_names = ["frame{}".format(i) for i in range(1, 6)] + ["stats_pooling", "segment6"]
+    """Generator that embeds all elements of a tf.data.Dataset as X-vectors using the given, pretrained Sequential instance returned by 'loader'."""
     xvector_extractor = tf.keras.Sequential([model.get_layer(l) for l in xvector_layer_names])
     for x in inputs:
         yield xvector_extractor(x)

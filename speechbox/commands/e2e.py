@@ -243,7 +243,7 @@ class Train(E2EBase):
             extractor_ds, stats = self.extract_features(
                 feat_config,
                 datagroup_key,
-                copy_original_audio=summary_kwargs.get("copy_original_audio", False),
+                copy_original_audio=summary_kwargs.get("copy_original_audio", False) or feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False),
                 trim_audio=summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim=debug_squeeze_last_dim,
             )
@@ -276,10 +276,7 @@ class Train(E2EBase):
                 feat_config,
                 label2onehot,
             )
-            if args.inspect_dataset:
-                if not summary_kwargs:
-                    print("Error: --inspect-dataset given but dataset_logger not defined in the config file, unable to attach dataset logger for inspecting dataset.", file=sys.stderr)
-                    return 1
+            if args.inspect_dataset and summary_kwargs:
                 logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
                 if args.verbosity > 1:
                     print("Datagroup '{}' has a dataset logger defined. We will iterate over the dataset once to create TensorBoard summaries of the input data into '{}'.".format(ds, logdir))
@@ -287,15 +284,16 @@ class Train(E2EBase):
                 writer = tf.summary.create_file_writer(logdir)
                 summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
                 with writer.as_default():
-                    num_cores = len(os.sched_getaffinity(0))
-                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], num_cores=num_cores, **summary_kwargs)
+                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
                     if args.verbosity:
                         print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
+                    i = 0
                     for i, elem in enumerate(logged_dataset):
                         if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                             print(i, "batches done")
                     if args.verbosity > 1:
                         print(i, "batches done")
+                    del logged_dataset
         if args.verbosity > 1:
             print("Preparing model")
         model.prepare(labels, training_config)
@@ -430,14 +428,17 @@ class Predict(E2EBase):
             self.experiment_config["dataset"],
             paths,
             paths_meta,
-            num_cores=len(os.sched_getaffinity(0)),
         )
         first = list(features.take(1))
         assert first, "feature extraction failed, 'features' tf.data.Dataset does not contain any elements"
+        if args.verbosity > 2:
+            print("Peeking first element in the features dataset iterator:", first)
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
         utterance_ids = [meta[0][0].numpy().decode("utf-8") for _, meta in features]
         features = features.map(lambda feats, *meta: feats)
         if "batch_size" in ds_config:
+            if args.verbosity > 1:
+                print("Predicting in batches, batching to {}".format(ds_config["batch_size"]))
             features = features.unbatch().batch(ds_config["batch_size"])
         if args.verbosity:
             print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))

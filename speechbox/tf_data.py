@@ -408,21 +408,21 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
         features = features.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     # if debug:
         # stats = update_feat_summary(stats, features, "00_before_filtering")
-    global_scale_conf = feat_config.get("global_minmax_scaling")
-    if global_scale_conf:
-        feat_shape = (feat_config["feature_dim"],)
-        if debug_squeeze_last_dim:
-            without_channels = features.map(lambda feats, *meta: (tf.squeeze(feats, -1), *meta))
-        else:
-            without_channels = features
-        stats["features"]["global_min"] = reduce_min(without_channels, shape=feat_shape)
-        stats["features"]["global_max"] = reduce_max(without_channels, shape=feat_shape)
-        # Apply feature scaling on each feature dimension over whole dataset
-        a = global_scale_conf["min"]
-        b = global_scale_conf["max"]
-        c = stats["features"]["global_max"] - stats["features"]["global_min"]
-        scale_minmax = lambda feats, *meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), *meta)
-        features = features.map(scale_minmax)
+    # global_scale_conf = feat_config.get("global_minmax_scaling")
+    # if global_scale_conf:
+    #     feat_shape = (feat_config["feature_dim"],)
+    #     if debug_squeeze_last_dim:
+    #         without_channels = features.map(lambda feats, *meta: (tf.squeeze(feats, -1), *meta))
+    #     else:
+    #         without_channels = features
+    #     stats["features"]["global_min"] = reduce_min(without_channels, shape=feat_shape)
+    #     stats["features"]["global_max"] = reduce_max(without_channels, shape=feat_shape)
+    #     # Apply feature scaling on each feature dimension over whole dataset
+    #     a = global_scale_conf["min"]
+    #     b = global_scale_conf["max"]
+    #     c = stats["features"]["global_max"] - stats["features"]["global_min"]
+    #     scale_minmax = lambda feats, *meta: (a + (b - a) * tf.math.divide_no_nan(feats - global_min, c), *meta)
+    #     features = features.map(scale_minmax)
     return features, stats
 
 
