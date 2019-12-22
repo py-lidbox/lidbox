@@ -155,9 +155,6 @@ class E2EBase(StatefulCommand):
                 print("Using paths:")
                 for path, (utt, label) in zip(paths, paths_meta):
                     print(utt, path, label)
-        num_cores = len(os.sched_getaffinity(0))
-        if args.verbosity:
-            print("This process has been assigned {0} physical cores, using {0} parallel calls during feature extraction".format(num_cores))
         if config["type"] == "sparsespeech":
             seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
             if args.verbosity:
@@ -181,7 +178,6 @@ class E2EBase(StatefulCommand):
                 copy_original_audio=copy_original_audio,
                 trim_audio=trim_audio,
                 debug_squeeze_last_dim=debug_squeeze_last_dim,
-                num_cores=num_cores,
             )
         return feat, stats
 
@@ -451,7 +447,7 @@ class Predict(E2EBase):
                     print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
         if args.verbosity:
             print("Starting prediction")
-        predictions = model.predict(features)
+        predictions = model.predict(features.prefetch(tf.data.experimental.AUTOTUNE))
         num_predictions = 0
         with open(args.scores, "w") as scores_f:
             print(*int2label, file=scores_f)

@@ -165,15 +165,11 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot):
         ds = ds.prefetch(config["prefetch"])
     return ds
 
-def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_cores=None):
+def extract_features_for_prediction(feat_config, wav_config, paths, meta):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    wavs = tf.data.Dataset.from_tensor_slices((paths, meta)).map(load_wav, num_parallel_calls=num_cores)
-    vad_config = feat_config.get("voice_activity_detection")
-    if vad_config:
-        apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
-        wavs = wavs.map(apply_vad, num_parallel_calls=num_cores).filter(not_empty)
+    wavs = tf.data.Dataset.from_tensor_slices((paths, meta)).map(load_wav, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     if "wav_to_frames" in wav_config:
         frame_len = wav_config["wav_to_frames"]["length"]
         frame_step = wav_config["wav_to_frames"]["step"]
@@ -198,7 +194,7 @@ def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_co
         ),
         *meta
     )
-    features = wavs.map(extract_feats, num_parallel_calls=num_cores)
+    features = wavs.map(extract_feats, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
         def not_too_short(feats, *_):
@@ -217,20 +213,20 @@ def extract_features_for_prediction(feat_config, wav_config, paths, meta, num_co
             # Resize
             imgs = tf.image.resize(imgs, image_size, **image_resize_kwargs)
             return (imgs, *meta)
-        features = features.map(convert_to_images, num_parallel_calls=num_cores)
+        features = features.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     if "frames" in feat_config:
         # Partition each utterance into frames without flattening to retain one tensor per utterance
         seq_len = feat_config["frames"]["length"]
         seq_step = feat_config["frames"]["step"]
         pad_zeros = feat_config["frames"].get("pad_zeros", False)
         feats_to_frames = lambda feats, *meta: (
-            tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=0),
+            tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=1),
             *meta,
         )
         features = features.map(feats_to_frames)
     return features
 
-def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False, num_cores=None):
+def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -264,7 +260,7 @@ def attach_dataset_logger(ds, features_name, max_image_samples=10, image_resize_
         del common["max_outputs"]
         tf.summary.text("utterance_ids", uttid, **common)
         return batch
-    return ds.enumerate().map(inspect_batches, num_parallel_calls=num_cores)
+    return ds.enumerate().map(inspect_batches, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
 def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
@@ -330,21 +326,15 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, num_cores=1):
+def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False):
     paths = tf.constant(list(paths), dtype=tf.string)
     meta = tf.constant(list(meta), dtype=tf.string)
     tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
     stats = collections.defaultdict(dict)
     wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
-              .map(load_wav, num_parallel_calls=num_cores))
+              .map(load_wav, num_parallel_calls=tf.data.experimental.AUTOTUNE))
     # if debug:
         # stats = update_wav_summary(stats, wavs, "00_before_filtering")
-    vad_config = feat_config.get("voice_activity_detection")
-    if vad_config:
-        apply_vad = lambda wav, *meta: (audio_feat.energy_vad(wav, **vad_config), *meta)
-        wavs = wavs.map(apply_vad).filter(not_empty)
-        # if debug:
-            # stats = update_wav_summary(stats, wavs, "01_after_vad_filter")
     if "wav_to_frames" in wav_config:
         frame_len = wav_config["wav_to_frames"]["length"]
         frame_step = wav_config["wav_to_frames"]["step"]
@@ -385,8 +375,16 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
         wavs_extended = wavs_extended.map(pad_or_slice_metawavs)
     features = (wavs_extended
                   .batch(feat_config.get("batch_size", 1))
-                  .map(extract_feats, num_parallel_calls=num_cores)
+                  .map(extract_feats, num_parallel_calls=tf.data.experimental.AUTOTUNE)
                   .unbatch())
+    vad_config = dict(feat_config.get("voice_activity_detection", {}))
+    if vad_config and vad_config.pop("match_feature_frames", False):
+        _do_vad = lambda feats, meta, wav: (
+            tf.boolean_mask(feats, tf.squeeze(audio_feat.framewise_energy_vad_decisions(tf.expand_dims(wav, 0), **vad_config), 0)),
+            meta,
+            wav,
+        )
+        features = features.map(_do_vad)
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:
         def not_too_short(feats, *_):
@@ -407,7 +405,7 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
             # Resize
             imgs = tf.image.resize(imgs, image_size, **image_resize_kwargs)
             return (imgs, *meta)
-        features = features.map(convert_to_images, num_parallel_calls=num_cores)
+        features = features.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     # if debug:
         # stats = update_feat_summary(stats, features, "00_before_filtering")
     global_scale_conf = feat_config.get("global_minmax_scaling")
