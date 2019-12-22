@@ -46,7 +46,12 @@ class Command:
             help="Set maximum verbosity and enable extra debugging information regardless of performance impacts.")
         group.add_argument("--run-cProfile",
             action="store_true",
+            default=False,
             help="Do profiling on all Python function calls and write results into a file in the working directory.")
+        group.add_argument("--run-tf-profiler",
+            action="store_true",
+            default=False,
+            help="Run the TensorFlow profiler and create a trace event file.")
         return parser
 
     def __init__(self, args):

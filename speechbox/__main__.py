@@ -1,7 +1,9 @@
 """
 Command line entrypoint.
 """
+import os
 import sys
+import time
 
 import speechbox
 from speechbox.commands import create_argparser
@@ -21,9 +23,18 @@ def main():
         parser.error("Too few arguments, run '{} --help' for more information.".format(speechbox.__name__))
     # TODO when a subcommand is used incorrectly, get usage strings for its subparser  instead of the root parser
     args = parser.parse_args()
+    tf_profiler = None
+    if args.run_tf_profiler:
+        from tensorflow.python.eager import profiler as tf_profiler
+        tf_profile_file = os.path.abspath(os.path.join("tf_profile", str(int(time.time()))))
+        print("Running TensorFlow profiler, writing output to '{}'".format(tf_profile_file), file=sys.stderr)
+        tf_profiler.start()
     # Initialize a Command object from the class specified in args.cmd_class and remove the class from args
     command = args.__dict__.pop("cmd_class")(args)
     ret = command.run() or command.exit()
+    if tf_profiler:
+        tf_profiler_result = tf_profiler.stop()
+        tf_profiler.save(tf_profile_file, tf_profiler_result)
     if profile:
         profile.disable()
         with open(profile_file, "w") as out_f:
