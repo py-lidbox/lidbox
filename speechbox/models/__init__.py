@@ -28,10 +28,10 @@ def get_best_checkpoint(checkpoints, key="epoch"):
     if key == "epoch":
         # Greatest epoch value
         return max(checkpoints, key=lambda p: int(key_fn(p)))
-    elif key == "val_loss":
+    elif key in ("val_loss", "val_avg_eer"):
         # Smallest validation loss value
         return min(checkpoints, key=lambda p: float(key_fn(p)))
-    elif key == "val_accuracy":
+    elif key in ("val_accuracy", "val_categorical_accuracy"):
         # Greatest validation accuracy value
         return max(checkpoints, key=lambda p: float(key_fn(p)))
 

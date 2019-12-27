@@ -10,19 +10,24 @@ from tensorflow.keras.layers import (
     Layer,
     ReLU,
 )
-import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras import backend
+
+
+xvector_layer_names = ["frame{:d}".format(i) for i in range(1, 6)] + ["stats_pooling", "segment6"]
 
 class StatsPooling(Layer):
     """Compute arithmetic mean and standard deviation of the inputs over the time dimension, then output the concatenation of the computed stats."""
     def call(self, inputs):
-        mean = tf.math.reduce_mean(inputs, axis=1)
-        std = tf.math.reduce_std(inputs, axis=1)
-        return tf.concat((mean, std), axis=1)
+        # channels_last
+        steps_axis = 1
+        mean = backend.mean(inputs, axis=steps_axis)
+        std = backend.std(inputs, axis=steps_axis)
+        return backend.concatenate((mean, std), axis=1)
 
-xvector_layer_names = ["frame{}".format(i) for i in range(1, 6)] + ["stats_pooling", "segment6"]
 
 def loader(input_shape, num_outputs):
-    return tf.keras.Sequential([
+    return Sequential([
         Conv1D(512, 5, 1, padding="same", activation="relu", name="frame1", input_shape=input_shape),
         Conv1D(512, 5, 1, padding="same", activation="relu", name="frame2"),
         Conv1D(512, 7, 1, padding="same", activation="relu", name="frame3"),
@@ -37,7 +42,7 @@ def loader(input_shape, num_outputs):
 
 def extract_xvectors(model, inputs):
     """Generator that embeds all elements of a tf.data.Dataset as X-vectors using the given, pretrained Sequential instance returned by 'loader'."""
-    xvector_extractor = tf.keras.Sequential([model.get_layer(l) for l in xvector_layer_names])
+    xvector_extractor = Sequential([model.get_layer(l) for l in xvector_layer_names])
     for x in inputs:
         yield xvector_extractor(x)
 

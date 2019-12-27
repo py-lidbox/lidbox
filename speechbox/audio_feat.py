@@ -54,7 +54,7 @@ def melspectrograms(S, sample_rate=16000, num_mel_bins=40, fmin=60.0, fmax=6000.
 @tf.function
 def framewise_energy_vad_decisions(signals, frame_length=400, frame_step=160, strength=0.5, min_rms_threshold=1e-3):
     """
-    For a batch of 1D-signals, compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal (separately for each signal).
+    For a batch of 1D-signals, compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal (separately for each signal), such that True means the frame is voiced and False unvoiced.
     VAD threshold is 'strength' multiplied by mean RMS, i.e. larger 'strength' values increase VAD aggressiveness.
     """
     tf.debugging.assert_rank(signals, 2, message="energy_vad_decisions expects batches of single channel signals")

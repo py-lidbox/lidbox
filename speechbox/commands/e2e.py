@@ -174,6 +174,7 @@ class E2EBase(StatefulCommand):
                 self.experiment_config["dataset"],
                 paths,
                 paths_meta,
+                verbosity=args.verbosity,
                 debug=args.debug_dataset,
                 copy_original_audio=copy_original_audio,
                 trim_audio=trim_audio,
@@ -243,9 +244,9 @@ class Train(E2EBase):
             extractor_ds, stats = self.extract_features(
                 feat_config,
                 datagroup_key,
-                copy_original_audio=summary_kwargs.get("copy_original_audio", False) or feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False),
-                trim_audio=summary_kwargs.pop("trim_audio", False),
-                debug_squeeze_last_dim=debug_squeeze_last_dim,
+                summary_kwargs.get("copy_original_audio", False) or feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False),
+                summary_kwargs.pop("trim_audio", False),
+                debug_squeeze_last_dim,
             )
             if args.debug_dataset:
                 print("Global dataset stats:")
@@ -301,7 +302,11 @@ class Train(E2EBase):
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
         if checkpoints:
-            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key="epoch"))
+            if "checkpoints" in training_config:
+                monitor_value = training_config["checkpoints"]["monitor"]
+            else:
+                monitor_value = "epoch"
+            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value))
             if args.verbosity:
                 print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
             model.load_weights(checkpoint_path)
@@ -312,9 +317,19 @@ class Train(E2EBase):
         if args.skip_training:
             print("--skip-training given, will not call model.fit")
             return
-        model.fit(dataset["train"], dataset["validation"], training_config)
+        history = model.fit(dataset["train"], dataset["validation"], training_config)
         if args.verbosity:
-            print("\nTraining finished\n")
+            print("\nTraining finished at epoch {}".format(history.epoch[-1]))
+            print("metric:\tmin (epoch),\tmax (epoch):")
+            for name, epoch_vals in history.history.items():
+                vals = np.array(epoch_vals)
+                print("{}:\t{:.6f} ({:d}),\t{:.6f} ({:d})".format(
+                    name,
+                    val.min(),
+                    val.argmin(),
+                    val.max(),
+                    val.argmax()
+                ))
 
     def run(self):
         super().run()
@@ -380,7 +395,12 @@ class Predict(E2EBase):
             if not checkpoints:
                 print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
                 return 1
-            latest_checkpoint = models.get_best_checkpoint(checkpoints, key="epoch")
+                if "checkpoints" in training_config:
+                    monitor_value = training_config["checkpoints"]["monitor"]
+                else:
+                    monitor_value = "epoch"
+                checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value))
+            latest_checkpoint = models.get_best_checkpoint(checkpoints, key=monitor_value)
             checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
         if args.verbosity:
             print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
@@ -413,6 +433,8 @@ class Predict(E2EBase):
                 print("Using utterance ids:")
                 pprint.pprint(keys)
         int2label = self.experiment_config["dataset"]["labels"]
+        label2int, OH = make_label2onehot(int2label)
+        label2onehot = lambda label: OH[label2int.lookup(label)]
         labels_set = set(int2label)
         paths = []
         paths_meta = []
@@ -424,28 +446,33 @@ class Predict(E2EBase):
             paths_meta.append((utt, label))
         if args.verbosity:
             print("Extracting test set features for prediction")
-        features = tf_data.extract_features_for_prediction(
+
+        copy_original_audio = feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False)
+        features, _ = self.extract_features(
             feat_config,
-            self.experiment_config["dataset"],
-            paths,
-            paths_meta,
+            "test",
+            copy_original_audio,
+            False,
+            ds_config["input_shape"][-1] == 1,
         )
+        features = tf_data.prepare_dataset_for_training(
+            features,
+            ds_config,
+            feat_config,
+            label2onehot,
+            copy_original_audio,
+        )
+        # drop meta wavs required only for vad
+        features = features.map(lambda feats, label, uttid, _: (feats, label, uttid))
         tmp_features_cache = os.path.join("/tmp", self.experiment_config["dataset"]["key"], ds, feat_config["type"])
         if args.verbosity > 1:
             print("Caching feature extractor dataset to '{}'".format(tmp_features_cache))
         self.make_named_dir(os.path.dirname(tmp_features_cache), "features cache")
         features = features.cache(tmp_features_cache)
-        first = list(features.take(1))
-        assert first, "feature extraction failed, 'features' tf.data.Dataset does not contain any elements"
-        if args.verbosity > 2:
-            print("Peeking first element in the features dataset iterator:", first)
+        if args.verbosity:
+            print("Starting feature extraction")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
-        utterance_ids = [meta[0][0].numpy().decode("utf-8") for _, meta in features]
-        features = features.map(lambda feats, *meta: feats)
-        if "batch_size" in ds_config:
-            if args.verbosity > 1:
-                print("Predicting in batches, batching to {}".format(ds_config["batch_size"]))
-            features = features.unbatch().batch(ds_config["batch_size"])
+        utterance_ids = [uttid.decode("utf-8") for _, _, uttids in features for uttid in uttids.numpy()]
         if args.verbosity:
             print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
         with open(args.trials, "w") as trials_f:
@@ -454,15 +481,18 @@ class Predict(E2EBase):
                     print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
         if args.verbosity:
             print("Starting prediction")
-        predictions = model.predict(features.prefetch(tf.data.experimental.AUTOTUNE))
+        predictions = model.predict(features)
+        if args.verbosity > 1:
+            print("Done predicting, model returned predictions of shape {}".format(predictions.shape))
         num_predictions = 0
         with open(args.scores, "w") as scores_f:
             print(*int2label, file=scores_f)
             with np.printoptions(precision=args.score_precision, suppress=True, floatmode='fixed'):
-                for num_predictions, (utt, pred) in enumerate(zip(utterance_ids, predictions), start=1):
+                for utt, pred in zip(utterance_ids, predictions):
                     # Numpy array as string without square brackets and comma delimiters
                     scores_str = np.array_str(pred)[1:-1]
                     print(utt, scores_str, file=scores_f)
+                    num_predictions += 1
         if args.verbosity:
             print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
 

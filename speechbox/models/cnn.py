@@ -13,7 +13,7 @@ from tensorflow.keras import Sequential
 
 def loader(input_shape, num_outputs):
     return Sequential([
-        Conv1D(500, 5, 1, input_shape=input_shape, padding="same", activation="relu", name="conv_1"),
+        Conv1D(500, 5, 1, padding="same", activation="relu", name="conv_1", input_shape=input_shape),
         Conv1D(500, 7, 2, padding="same", activation="relu", name="conv_2"),
         Conv1D(500, 1, 1, padding="same", activation="relu", name="conv_3"),
         Conv1D(3000, 1, 1, padding="same", activation="relu", name="conv_4"),
