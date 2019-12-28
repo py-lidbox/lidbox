@@ -1,5 +1,6 @@
 import collections
 import pprint
+import sys
 
 from . import audio_feat
 import kaldiio
@@ -58,13 +59,14 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
         feat = cmvn_slide(feat, **cmvn_kwargs)
     return feat
 
-@tf.function
-def load_wav(path, meta):
+# tf.autograph blocks on this call for some reason
+# @tf.function
+def load_wav(path):
     wav = tf.audio.decode_wav(tf.io.read_file(path))
-    tf.debugging.assert_equal(wav.sample_rate, 16000, message="Failed to load audio file '{}'. Currently only 16 kHz sampling rate is supported.".format(path))
+    tf.debugging.assert_equal(wav.sample_rate, 16000, message=tf.strings.format("Failed to load audio file '{}'. Currently only 16 kHz sampling rate is supported.", (path,)))
     # Merge channels by averaging over channels.
     # For mono this just drops the channel dim.
-    return (tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), meta)
+    return tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
 
 @tf.function
 def write_wav(path, wav):
@@ -277,28 +279,66 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
         (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])),
     )
 
+def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
+    chunk_config = wav_config["wav_to_random_chunks"]
+    sample_rate = wav_config["sample_rate"]
+    lengths = tf.cast(
+        tf.linspace(
+            float(sample_rate * chunk_config["length"]["min"]),
+            float(sample_rate * chunk_config["length"]["max"]),
+            int(chunk_config["length"]["num_bins"]),
+        ),
+        tf.int32
+    )
+    overlap_ratio = float(chunk_config["length"]["overlap_ratio"])
+    assert overlap_ratio < 1.0
+    logits_all_half = tf.fill([1, tf.size(lengths)], tf.math.log(0.5))
+    min_chunk_length = int(sample_rate * chunk_config["min_chunk_length"])
+    def random_chunk_loader():
+        for p, *m in zip(paths, meta):
+            wav = load_wav(tf.constant(p, tf.string))
+            begin = 0
+            rand_index = tf.random.categorical(logits_all_half, 1)[0]
+            rand_len = tf.gather(lengths, rand_index)[0]
+            chunk = wav[begin:begin+rand_len]
+            while len(chunk) >= min_chunk_length:
+                yield (chunk, *m)
+                begin += round((1.0 - overlap_ratio) * float(rand_len))
+                rand_index = tf.random.categorical(logits_all_half, 1)[0]
+                rand_len = tf.gather(lengths, rand_index)[0]
+                tf.debugging.assert_non_negative(rand_index)
+                tf.debugging.assert_less(rand_index, tf.cast(tf.size(lengths), tf.int64))
+                chunk = wav[begin:begin+rand_len]
+    if verbosity:
+        tf.print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length", summarize=-1, output_stream=sys.stdout)
+    return random_chunk_loader
+
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=False, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
-    paths = tf.constant(list(paths), dtype=tf.string)
-    meta = tf.constant(list(meta), dtype=tf.string)
-    tf.debugging.assert_equal(tf.shape(paths)[0], tf.shape(meta)[0], "The amount paths must match the length of the metadata list")
-    stats = collections.defaultdict(dict)
-    wavs = (tf.data.Dataset.from_tensor_slices((paths, meta))
-              .map(load_wav, num_parallel_calls=tf.data.experimental.AUTOTUNE))
-    # if debug:
-        # stats = update_wav_summary(stats, wavs, "00_before_filtering")
+def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
+    paths, meta = list(paths), list(meta)
+    assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
+    if "wav_to_random_chunks" in wav_config:
+        # TODO interleave or without generator might improve performance
+        wavs = tf.data.Dataset.from_generator(
+            get_random_chunk_loader(paths[:], meta[:], dict(wav_config), verbosity),
+            (tf.float32, tf.string),
+            (tf.TensorShape([None]), tf.TensorShape([None]))
+        )
+    else:
+        tf_paths = tf.constant(paths, dtype=tf.string)
+        tf_meta = tf.constant(meta, dtype=tf.string)
+        wavs = (tf.data.Dataset.from_tensor_slices((tf_paths, tf_meta))
+                .map(lambda path, *_meta: (load_wav(path), *_meta),
+                     num_parallel_calls=tf.data.experimental.AUTOTUNE))
     if "wav_to_frames" in wav_config:
         frame_len = wav_config["wav_to_frames"]["length"]
         frame_step = wav_config["wav_to_frames"]["step"]
         pad_zeros = wav_config["wav_to_frames"].get("pad_zeros", False)
-        wav_to_wavframes = lambda wav, *meta: frame_and_unbatch(frame_len, frame_step, wav, meta, pad_zeros=pad_zeros)
+        wav_to_wavframes = lambda _wav, *_meta: frame_and_unbatch(frame_len, frame_step, _wav, _meta, pad_zeros=pad_zeros)
         if verbosity:
             print("Framing input wavs into frames of length {} with step {} (samples)".format(frame_len, frame_step))
         wavs = wavs.flat_map(wav_to_wavframes)
-        # if debug:
-            # stats = update_wav_summary(stats, wavs, "02_after_partitioning_to_frames")
-    # This function expects batches of wavs
     feat_extract_args = [
         feat_config["type"],
         feat_config.get("spectrogram", {}),
@@ -308,19 +348,12 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
         feat_config.get("sample_minmax_scaling", {}),
         feat_config.get("cmvn", {}),
     ]
+    # This function expects batches of wavs
     extract_feats = lambda _wavs, *meta: (
         extract_features(_wavs, *feat_extract_args),
-        *meta
+        *meta,
+        _wavs,
     )
-    # Duplicate audio data into meta so we can listen to it in Tensorboard
-    # Feature extraction will replace the non-meta audio data with features
-    wavs_extended = tf.data.Dataset.zip((
-        wavs.map(lambda wav, _: wav),
-        # We expect the metadata to still be in a single tensor
-        wavs.map(lambda _, meta: meta),
-        # Copy the waveform into new tensor or use a dummy wav with a single zero frame
-        wavs.map(lambda wav, _: tf.identity(wav) if copy_original_audio else tf.zeros([1])),
-    ))
     if trim_audio:
         # Ensure all wav files in the metadata contains precisely 'trim_audio' amount of frames
         def pad_or_slice_metawavs(wav, meta, metawav):
@@ -329,14 +362,13 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
             return (wav, meta, trimmed)
         if verbosity:
             print("Trimming metawavs")
-        wavs_extended = wavs_extended.map(pad_or_slice_metawavs)
+        wavs = wavs.map(pad_or_slice_metawavs)
     if verbosity:
         print("Extracting features with args")
         pprint.pprint(feat_extract_args)
-    features = (wavs_extended
-                  .batch(feat_config.get("batch_size", 1))
-                  .map(extract_feats, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-                  .unbatch())
+    features = (wavs.batch(feat_config.get("batch_size", 1))
+                    .map(extract_feats, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                    .unbatch())
     vad_config = dict(feat_config.get("voice_activity_detection", {}))
     if vad_config and vad_config.pop("match_feature_frames", False):
         _do_vad = lambda feats, meta, wav: (
@@ -355,8 +387,6 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
         if verbosity:
             print("Dropping features with axis 0 shape shorter than {}".format(min_seq_len))
         features = features.filter(not_too_short)
-        # if debug:
-            # stats = update_feat_summary(stats, features, "01_after_too_short_filter")
     image_resize_kwargs = dict(feat_config.get("convert_to_images", {}))
     if image_resize_kwargs:
         # the 'size' key is always required
@@ -374,7 +404,7 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, debug=Fals
             print("Converting features into images of size {} using resize kwargs:".format(image_size))
             pprint.pprint(image_resize_kwargs)
         features = features.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    return features, stats
+    return features
 
 
 # TF serialization functions, not really needed if features are cached using tf.data.Dataset.cache

@@ -88,6 +88,7 @@ class E2EBase(StatefulCommand):
             "checkpoints": checkpoints_config,
             "early_stopping": config.get("early_stopping"),
             "tensorboard": tensorboard_config,
+            "other_callbacks": config.get("other_callbacks", []),
         }
         if not skip_training:
             self.make_named_dir(tensorboard_dir, "tensorboard")
