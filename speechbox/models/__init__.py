@@ -1,7 +1,9 @@
+import datetime
 import functools
 import importlib
 import io
 import os
+import sys
 
 import numpy as np
 import tensorflow as tf
@@ -23,17 +25,17 @@ def with_device(method):
 def parse_checkpoint_value(tf_checkpoint_path, key):
     return tf_checkpoint_path.split(key)[-1].split("__")[0].split(".hdf5")[0]
 
-def get_best_checkpoint(checkpoints, key="epoch"):
+def get_best_checkpoint(checkpoints, key="epoch", mode=None):
     key_fn = lambda p: parse_checkpoint_value(p, key)
     if key == "epoch":
         # Greatest epoch value
         return max(checkpoints, key=lambda p: int(key_fn(p)))
-    elif key in ("val_loss", "val_avg_eer"):
-        # Smallest validation loss value
-        return min(checkpoints, key=lambda p: float(key_fn(p)))
-    elif key in ("val_accuracy", "val_categorical_accuracy"):
-        # Greatest validation accuracy value
-        return max(checkpoints, key=lambda p: float(key_fn(p)))
+    else:
+        assert mode in ("min", "max")
+        if mode == "min":
+            return min(checkpoints, key=lambda p: float(key_fn(p)))
+        elif mode == "max":
+            return max(checkpoints, key=lambda p: float(key_fn(p)))
 
 def parse_metrics(metrics, target_names):
     keras_metrics = []
@@ -44,16 +46,12 @@ def parse_metrics(metrics, target_names):
             metric = getattr(tf.keras.metrics, m["cls"])(**kwargs)
         else:
             name = m["name"]
-            if name == "accuracy":
-                #FIXME why aren't Accuracy instances working?
-                # metric = tf.keras.metrics.Accuracy()
-                metric = name
-            elif name == "precision":
-                metric = tf.keras.metrics.Precision(**kwargs)
-            elif name == "recall":
-                metric = tf.keras.metrics.Recall(**kwargs)
-            elif name == "avg_equal_error_rate":
+            if name in ("avg_equal_error_rate", "avg_eer"):
                 metric = speechbox.metrics.AverageEqualErrorRate(target_names, **kwargs)
+            elif name == "avg_recall":
+                metric = speechbox.metrics.AverageRecall(target_names, **kwargs)
+            elif name == "avg_precision":
+                metric = speechbox.metrics.AveragePrecision(target_names, **kwargs)
             elif name == "C_avg":
                 metric = speechbox.metrics.AverageDetectionCost(target_names, **kwargs)
         assert metric is not None, "unknown metric: '{}'".format(m)
@@ -65,9 +63,24 @@ class EpochModelCheckpoint(tf.keras.callbacks.Callback):
         self.epoch_interval = epoch_interval
         self.checkpoint_path = filepath
 
-    def on_epoch_end(self, epoch, logs=None, **kwargs):
+    def on_epoch_end(self, epoch, *args):
         if epoch and epoch % self.epoch_interval == 0:
             self.model.save(self.checkpoint_path.format(epoch=epoch, **logs))
+
+
+class LearningRateDateLogger(tf.keras.callbacks.Callback):
+    def __init__(self, output_stream=sys.stdout, **kwargs):
+        self.output_stream = output_stream
+
+    def on_epoch_begin(self, epoch, *args):
+        tf.print(
+            str(datetime.datetime.now()),
+            "-",
+            self.model.optimizer.__class__.__name__,
+            "learning rate:",
+            self.model.optimizer._decayed_lr(tf.float32),
+            summarize=-1,
+            output_stream=self.output_stream)
 
 
 class KerasWrapper:
@@ -76,7 +89,7 @@ class KerasWrapper:
     def get_model_filepath(cls, basedir, model_id):
         return os.path.join(basedir, cls.__name__.lower() + '-' + model_id)
 
-    def __init__(self, model_id, model_definition, device_str=None, tensorboard=None, early_stopping=None, checkpoints=None):
+    def __init__(self, model_id, model_definition, device_str=None, tensorboard=None, early_stopping=None, checkpoints=None, other_callbacks=()):
         self.model_id = model_id
         self.device_str = device_str
         self.model = None
@@ -95,6 +108,10 @@ class KerasWrapper:
                 # This is for saving checkpoints at regular epoch intervals, regardless of the values that ModelCheckpoint is monitoring
                 self.callbacks.append(EpochModelCheckpoint(checkpoints.pop("epoch_interval"), checkpoints["filepath"]))
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
+        self.callbacks.append(LearningRateDateLogger())
+        for cb in other_callbacks:
+            self.callbacks.append(getattr(tf.keras.callbacks, cb["cls"])(**cb.get("kwargs", {})))
+
 
     @with_device
     def to_disk(self, basedir):
@@ -131,7 +148,7 @@ class KerasWrapper:
 
     @with_device
     def fit(self, training_set, validation_set, model_config):
-        self.model.fit(
+        return self.model.fit(
             without_metadata(training_set),
             callbacks=self.callbacks,
             class_weight=model_config.get("class_weight"),

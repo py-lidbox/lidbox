@@ -1,5 +1,7 @@
 import collections
+import hashlib
 import itertools
+import json
 import os
 import pprint
 import random
@@ -28,7 +30,6 @@ def parse_space_separated(path):
             if l:
                 yield l.split()
 
-# TODO move towards integer labels and sparse categorical cross entropy to drop all onehot labels
 def make_label2onehot(labels):
     labels_enum = tf.range(len(labels))
     # Label to int or one past last one if not found
@@ -43,6 +44,10 @@ def make_label2onehot(labels):
     OH = tf.one_hot(labels_enum, len(labels))
     return label2int, OH
 
+def dict_checksum(d):
+    json_bytes = json.dumps(d, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.md5(json_bytes).hexdigest()
+
 
 class E2EBase(StatefulCommand):
     requires_state = State.none
@@ -54,10 +59,6 @@ class E2EBase(StatefulCommand):
         optional.add_argument("--file-limit",
             type=int,
             help="Extract only up to this many files from the wavpath list (e.g. for debugging).")
-        optional.add_argument("--debug-dataset",
-            action="store_true",
-            default=False,
-            help="Gather statistics and shapes of elements in the datasets during feature extraction. This adds several linear passes over the datasets.")
         return parser
 
     def get_checkpoint_dir(self):
@@ -149,8 +150,6 @@ class E2EBase(StatefulCommand):
             print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
             if num_dropped:
                 print("Amount of files ignored since they had a label that was not in the labels list dataset.labels: {}".format(num_dropped.most_common(None)))
-            if args.debug_dataset:
-                print("--debug-dataset given, stats will be gathered from extracted features by doing several linear passes over the dataset before training starts. Features will not be cached.")
             if args.verbosity > 3:
                 print("Using paths:")
                 for path, (utt, label) in zip(paths, paths_meta):
@@ -169,18 +168,17 @@ class E2EBase(StatefulCommand):
                 print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
             feat, stats = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label), {}
         else:
-            feat, stats = tf_data.extract_features_from_paths(
+            feat = tf_data.extract_features_from_paths(
                 config,
                 self.experiment_config["dataset"],
                 paths,
                 paths_meta,
                 verbosity=args.verbosity,
-                debug=args.debug_dataset,
                 copy_original_audio=copy_original_audio,
                 trim_audio=trim_audio,
                 debug_squeeze_last_dim=debug_squeeze_last_dim,
             )
-        return feat, stats
+        return feat
 
 class Train(E2EBase):
 
@@ -241,26 +239,33 @@ class Train(E2EBase):
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
             debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
             datagroup_key = ds_config.pop("datagroup")
-            extractor_ds, stats = self.extract_features(
+            extractor_ds = self.extract_features(
                 feat_config,
                 datagroup_key,
                 summary_kwargs.get("copy_original_audio", False) or feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False),
                 summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim,
             )
-            if args.debug_dataset:
-                print("Global dataset stats:")
-                pprint.pprint(dict(stats))
-                for key in ("global_min", "global_max"):
-                    tf.debugging.assert_all_finite(stats["features"][key], "Some feature dimension is missing values")
+            if ds_config.get("cache_features_in_tmp", False):
+                features_cache_dir = "/tmp"
             else:
-                tmp_features_cache = os.path.join("/tmp", self.experiment_config["dataset"]["key"], ds, feat_config["type"])
-                if args.verbosity > 1:
-                    print("Caching feature extractor dataset to '{}'".format(tmp_features_cache))
-                self.make_named_dir(os.path.dirname(tmp_features_cache), "features cache")
-                if args.verbosity:
-                    print("Using cache for features: '{}'".format(tmp_features_cache))
-                extractor_ds = extractor_ds.cache(filename=tmp_features_cache)
+                features_cache_dir = os.path.join(self.cache_dir, "features")
+            features_cache_path = os.path.join(
+                features_cache_dir,
+                self.experiment_config["dataset"]["key"],
+                ds,
+                feat_config["type"],
+                dict_checksum({
+                    "features": self.experiment_config["features"],
+                    "dataset": self.experiment_config["dataset"]
+                }),
+            )
+            if args.verbosity > 1:
+                print("Caching feature extractor dataset to '{}'".format(features_cache_path))
+            self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
+            if args.verbosity:
+                print("Using cache for features: '{}'".format(features_cache_path))
+            extractor_ds = extractor_ds.cache(filename=features_cache_path)
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
@@ -319,16 +324,16 @@ class Train(E2EBase):
             return
         history = model.fit(dataset["train"], dataset["validation"], training_config)
         if args.verbosity:
-            print("\nTraining finished at epoch {}".format(history.epoch[-1]))
+            print("\nTraining finished after {} epochs at epoch {}".format(len(history.epoch), history.epoch[-1] + 1))
             print("metric:\tmin (epoch),\tmax (epoch):")
             for name, epoch_vals in history.history.items():
                 vals = np.array(epoch_vals)
                 print("{}:\t{:.6f} ({:d}),\t{:.6f} ({:d})".format(
                     name,
-                    val.min(),
-                    val.argmin(),
-                    val.max(),
-                    val.argmax()
+                    vals.min(),
+                    vals.argmin() + 1,
+                    vals.max(),
+                    vals.argmax() + 1
                 ))
 
     def run(self):
@@ -395,13 +400,13 @@ class Predict(E2EBase):
             if not checkpoints:
                 print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
                 return 1
-                if "checkpoints" in training_config:
-                    monitor_value = training_config["checkpoints"]["monitor"]
-                else:
-                    monitor_value = "epoch"
-                checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value))
-            latest_checkpoint = models.get_best_checkpoint(checkpoints, key=monitor_value)
-            checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
+            if "checkpoints" in training_config:
+                monitor_value = training_config["checkpoints"]["monitor"]
+                monitor_mode = training_config["checkpoints"].get("mode")
+            else:
+                monitor_value = "epoch"
+                monitor_mode = None
+            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value, mode=monitor_mode))
         if args.verbosity:
             print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
         model.load_weights(checkpoint_path)
@@ -464,11 +469,24 @@ class Predict(E2EBase):
         )
         # drop meta wavs required only for vad
         features = features.map(lambda feats, label, uttid, _: (feats, label, uttid))
-        tmp_features_cache = os.path.join("/tmp", self.experiment_config["dataset"]["key"], ds, feat_config["type"])
+        if ds_config.get("cache_features_in_tmp", False):
+            features_cache_dir = "/tmp"
+        else:
+            features_cache_dir = os.path.join(self.cache_dir, "features")
+        features_cache_path = os.path.join(
+            features_cache_dir,
+            self.experiment_config["dataset"]["key"],
+            ds,
+            feat_config["type"],
+            dict_checksum({
+                "features": self.experiment_config["features"],
+                "dataset": self.experiment_config["dataset"]
+            }),
+        )
         if args.verbosity > 1:
-            print("Caching feature extractor dataset to '{}'".format(tmp_features_cache))
-        self.make_named_dir(os.path.dirname(tmp_features_cache), "features cache")
-        features = features.cache(tmp_features_cache)
+            print("Caching feature extractor dataset to '{}'".format(features_cache_path))
+        self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
+        features = features.cache(features_cache_path)
         if args.verbosity:
             print("Starting feature extraction")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
@@ -547,7 +565,7 @@ class Evaluate(E2EBase):
         thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
         if args.verbosity > 2:
             print("Score thresholds for language detection decisions:")
-            tf.print(thresholds, output_stream=sys.stdout)
+            tf.print(thresholds, summarize=5, output_stream=sys.stdout)
         # First do C_avg to get the best threshold
         cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
         trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
