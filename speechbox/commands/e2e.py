@@ -1,6 +1,7 @@
 import collections
 import hashlib
 import itertools
+import importlib
 import json
 import os
 import random
@@ -237,6 +238,11 @@ class Train(E2EBase):
             print("Using feature extraction parameters:")
             yaml_pprint(feat_config)
             print()
+        if feat_config["type"] == "xvector-embedding":
+            xvec_config = system.load_yaml(feat_config["xvector_experiment_config"])
+            feat_config = xvec_config.pop("features")
+        else:
+            xvec_config = {}
         if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
             assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
             if "melspectrogram" not in feat_config:
@@ -270,6 +276,31 @@ class Train(E2EBase):
                 summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim,
             )
+            if xvec_config:
+                if args.verbosity:
+                    print("Features extracted, now feeding them to the xvector encoder")
+                xvec_model = models.KerasWrapper(
+                    xvec_config["experiment"]["name"],
+                    xvec_config["experiment"]["model_definition"],
+                )
+                xvec_model.prepare(
+                    xvec_config["dataset"]["labels"],
+                    xvec_config["experiment"],
+                )
+                xvec_weights = os.path.join(
+                    xvec_config["cache"],
+                    xvec_config["experiment"]["name"],
+                    "checkpoints",
+                    xvec_config["prediction"]["best_checkpoint"],
+                )
+                xvec_model.load_weights(xvec_weights)
+                xvector_extractor = tf.keras.Sequential(
+                    [xvec_model.model.get_layer(l) for l in importlib.import_module("speechbox.models.xvector").xvector_layer_names]
+                )
+                if args.verbosity > 1:
+                    print("Xvector extractor is:\n", xvector_extractor)
+                embed_xvec = lambda feats, *meta: (tf.expand_dims(xvector_extractor(feats), -2), *meta)
+                extractor_ds = extractor_ds.batch(1).map(embed_xvec).unbatch()
             if ds_config.get("cache_features_in_tmp", False):
                 features_cache_dir = "/tmp"
             else:
