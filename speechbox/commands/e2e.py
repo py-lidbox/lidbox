@@ -352,11 +352,13 @@ class Train(E2EBase):
         if checkpoints:
             if "checkpoints" in training_config:
                 monitor_value = training_config["checkpoints"]["monitor"]
+                monitor_mode = training_config["checkpoints"].get("mode")
             else:
                 monitor_value = "epoch"
-            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value))
+                monitor_mode = None
+            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value, mode=monitor_mode))
             if args.verbosity:
-                print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
+                print("Loading model weights from checkpoint file '{}' according to monitor value '{}'".format(checkpoint_path, monitor_value))
             model.load_weights(checkpoint_path)
         if args.verbosity:
             print("\nStarting training with:")
