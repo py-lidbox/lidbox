@@ -214,10 +214,9 @@ class Train(E2EBase):
         optional.add_argument("--skip-training",
             action="store_true",
             default=False)
-        optional.add_argument("--inspect-dataset",
+        optional.add_argument("--debug-dataset",
             action="store_true",
-            default=False,
-            help="Iterate once over the whole dataset before training, writing TensorBoard summaries of the data. This requires the dataset_logger key to be defined in the config file.")
+            default=False)
         optional.add_argument("--exhaust-dataset-iterator",
             action="store_true",
             default=False,
@@ -296,37 +295,55 @@ class Train(E2EBase):
                 if args.verbosity:
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
+                i = 0
                 for i, x in enumerate(extractor_ds):
                     if args.verbosity > 1 and i % 2000 == 0:
                         print(i, "samples done")
                         if args.verbosity > 3:
                             print("sample", i, "shape is", tf.shape(x))
+                if args.verbosity > 1:
+                    print("all", i, "samples done")
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
+            if "frames" in feat_config:
+                print("'frames' key in feat_config does nothing, put it into the datagroup config under 'experiment'")
             dataset[ds] = tf_data.prepare_dataset_for_training(
                 extractor_ds,
                 ds_config,
                 feat_config,
                 label2onehot,
             )
-            if args.inspect_dataset and summary_kwargs:
+            if summary_kwargs:
                 logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
-                if args.verbosity > 1:
-                    print("Datagroup '{}' has a dataset logger defined. We will iterate over the dataset once to create TensorBoard summaries of the input data into '{}'.".format(ds, logdir))
-                self.make_named_dir(logdir)
-                writer = tf.summary.create_file_writer(logdir)
-                summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
-                with writer.as_default():
-                    logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                if os.path.isdir(logdir):
                     if args.verbosity:
-                        print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
-                    i = 0
-                    for i, elem in enumerate(logged_dataset):
-                        if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
+                        print("summary_kwargs available, but '{}' already exists, not iterating over dataset again".format(logdir))
+                else:
+                    if args.verbosity:
+                        print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds, summary_kwargs.get("num_batches", "'all'"), logdir))
+                    self.make_named_dir(logdir)
+                    writer = tf.summary.create_file_writer(logdir)
+                    summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
+                    with writer.as_default():
+                        logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                        if args.verbosity:
+                            print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
+                        i = 0
+                        for i, elem in enumerate(logged_dataset):
+                            if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
+                                print(i, "batches done")
+                        if args.verbosity > 1:
                             print(i, "batches done")
-                    if args.verbosity > 1:
-                        print(i, "batches done")
-                    del logged_dataset
+                        del logged_dataset
+            if args.debug_dataset:
+                if args.verbosity:
+                    print("--debug-dataset given, iterating over the dataset to gather stats")
+                if args.verbosity > 1:
+                    print("Counting all unique batch sizes in dataset")
+                batch_size_counts = count_batch_sizes(dataset[ds])
+                if args.verbosity:
+                    print("Batch size counts:")
+                tf.print(res, summarize=-1, output_stream=sys.stdout)
         if args.verbosity > 1:
             print("Preparing model")
         model.prepare(labels, training_config)
