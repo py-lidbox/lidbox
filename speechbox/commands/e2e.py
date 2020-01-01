@@ -396,7 +396,8 @@ class Predict(E2EBase):
     def create_argparser(cls, parent_parser):
         parser = super().create_argparser(parent_parser)
         optional = parser.add_argument_group("predict options")
-        optional.add_argument("--score-precision", type=int, default=3)
+        optional.add_argument("--score-precision", type=int, default=6)
+        optional.add_argument("--score-separator", type=str, default=' ')
         optional.add_argument("--trials", type=str)
         optional.add_argument("--scores", type=str)
         optional.add_argument("--checkpoint",
@@ -408,10 +409,11 @@ class Predict(E2EBase):
         args = self.args
         if args.verbosity:
             print("Preparing model for prediction")
+        self.model_id = self.experiment_config["experiment"]["name"]
         if not args.trials:
-            args.trials = os.path.join(self.cache_dir, "predictions", "trials")
+            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
         if not args.scores:
-            args.scores = os.path.join(self.cache_dir, "predictions", "scores")
+            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
         self.make_named_dir(os.path.dirname(args.trials))
         self.make_named_dir(os.path.dirname(args.scores))
         training_config = self.experiment_config["experiment"]
@@ -498,12 +500,12 @@ class Predict(E2EBase):
             print("Extracting test set features for prediction")
 
         copy_original_audio = feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False)
-        features, _ = self.extract_features(
+        features = self.extract_features(
             feat_config,
             "test",
-            copy_original_audio,
-            False,
-            ds_config["input_shape"][-1] == 1,
+            copy_original_audio=copy_original_audio,
+            trim_audio=False,
+            debug_squeeze_last_dim=(ds_config["input_shape"][-1] == 1),
         )
         features = tf_data.prepare_dataset_for_training(
             features,
@@ -549,16 +551,14 @@ class Predict(E2EBase):
             print("Starting prediction")
         predictions = model.predict(features)
         if args.verbosity > 1:
-            print("Done predicting, model returned predictions of shape {}".format(predictions.shape))
+            print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
         num_predictions = 0
         with open(args.scores, "w") as scores_f:
             print(*int2label, file=scores_f)
-            with np.printoptions(precision=args.score_precision, suppress=True, floatmode='fixed'):
-                for utt, pred in zip(utterance_ids, predictions):
-                    # Numpy array as string without square brackets and comma delimiters
-                    scores_str = np.array_str(pred)[1:-1]
-                    print(utt, scores_str, file=scores_f)
-                    num_predictions += 1
+            for utt, pred in zip(utterance_ids, predictions):
+                pred_scores = [np.format_float_positional(x, precision=args.score_precision) for x in pred]
+                print(utt, *pred_scores, sep=args.score_separator, file=scores_f)
+                num_predictions += 1
         if args.verbosity:
             print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
 
@@ -577,15 +577,17 @@ class Evaluate(E2EBase):
         optional.add_argument("--trials", type=str)
         optional.add_argument("--scores", type=str)
         optional.add_argument("--threshold-bins", type=int, default=40)
-        optional.add_argument("--log-to-prob", action="store_true", default=False)
+        optional.add_argument("--convert-scores", choices=("softmax", "exp", "none"), default=None)
         return parser
 
+    #TODO tf is very slow in the for loop, maybe numpy would be sufficient
     def evaluate(self):
         args = self.args
+        self.model_id = self.experiment_config["experiment"]["name"]
         if not args.trials:
-            args.trials = os.path.join(self.cache_dir, "predictions", "trials")
+            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
         if not args.scores:
-            args.scores = os.path.join(self.cache_dir, "predictions", "scores")
+            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
         if args.verbosity > 1:
             print("Evaluating minimum average detection cost using trials '{}' and scores '{}'".format(args.trials, args.scores))
         score_lines = list(parse_space_separated(args.scores))
@@ -594,15 +596,27 @@ class Evaluate(E2EBase):
         utt2scores = {utt: tf.constant([float(s) for s in scores], dtype=tf.float32) for utt, *scores in score_lines[1:]}
         if args.verbosity > 1:
             print("Parsed scores for {} utterances".format(len(utt2scores)))
-        if args.log_to_prob:
-            print("Converting log likelihood scores into probabilities")
+        if args.convert_scores == "softmax":
+            print("Applying softmax on logit scores")
+            utt2scores = {utt: tf.keras.activations.softmax(tf.expand_dims(scores, 0))[0] for utt, scores in utt2scores.items()}
+        elif args.convert_scores == "exp":
+            print("Applying exp on log likelihood scores")
             utt2scores = {utt: tf.math.exp(scores) for utt, scores in utt2scores.items()}
+        if args.verbosity > 2:
+            print("Asserting all scores sum to 1")
+            tolerance = 1e-3
             for utt, scores in utt2scores.items():
                 one = tf.constant(1.0, dtype=tf.float32)
-                tf.debugging.assert_near(tf.reduce_sum(scores), one, message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1")
+                tf.debugging.assert_near(
+                    tf.reduce_sum(scores),
+                    one,
+                    rtol=tolerance,
+                    atol=tolerance,
+                    message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1".format(utt))
         if args.verbosity > 1:
             print("Generating {} threshold bins".format(args.threshold_bins))
         assert args.threshold_bins > 0
+        from_logits = False
         max_score = tf.constant(-float("inf"), dtype=tf.float32)
         min_score = tf.constant(float("inf"), dtype=tf.float32)
         for utt, scores in utt2scores.items():
@@ -616,6 +630,8 @@ class Evaluate(E2EBase):
             tf.print(thresholds, summarize=5, output_stream=sys.stdout)
         # First do C_avg to get the best threshold
         cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
+        if args.verbosity > 1:
+            print("Sorting trials")
         trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
         trials_by_utt = [
             (utt, tf.constant([float(t == "target") for _, _, t in sorted(group, key=lambda t: lang2int[t[0]])], dtype=tf.float32))
@@ -647,9 +663,8 @@ class Evaluate(E2EBase):
         print_metric(cavg)
         # Now we know the threshold that minimizes C_avg and use the same threshold to compute all other metrics
         metrics = [
-            AverageEqualErrorRate(langs, thresholds=min_threshold),
-            AveragePrecision(langs, thresholds=min_threshold),
-            AverageRecall(langs, thresholds=min_threshold),
+            M(langs, from_logits=from_logits, thresholds=min_threshold)
+            for M in (AverageEqualErrorRate, AveragePrecision, AverageRecall)
         ]
         if args.verbosity:
             print("Computing rest of the metrics using threshold {:.6f}".format(min_threshold))
@@ -671,7 +686,8 @@ class Evaluate(E2EBase):
         cm_labels = tf.cast(tf.stack(cm_labels), dtype=tf.int32)
         cm_predictions = tf.cast(tf.stack(cm_predictions), dtype=tf.int32)
         confusion_matrix = tf.math.confusion_matrix(cm_labels, cm_predictions, len(langs))
-        tf.print(confusion_matrix, summarize=-1, output_stream=sys.stdout)
+        print(langs)
+        print(np.array_str(confusion_matrix.numpy()))
 
     def run(self):
         super().run()
