@@ -321,16 +321,16 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
     if "wav_to_random_chunks" in wav_config:
         # TODO interleave or without generator might improve performance
         wavs = tf.data.Dataset.from_generator(
-            get_random_chunk_loader(paths[:], meta[:], dict(wav_config), verbosity),
+            get_random_chunk_loader(paths, meta, wav_config, verbosity),
             (tf.float32, tf.string),
             (tf.TensorShape([None]), tf.TensorShape([None]))
         )
     else:
-        tf_paths = tf.constant(paths, dtype=tf.string)
-        tf_meta = tf.constant(meta, dtype=tf.string)
-        wavs = (tf.data.Dataset.from_tensor_slices((tf_paths, tf_meta))
-                .map(lambda path, *_meta: (load_wav(path), *_meta),
-                     num_parallel_calls=tf.data.experimental.AUTOTUNE))
+        wav_paths = tf.data.Dataset.from_tensor_slices((
+            tf.constant(paths, dtype=tf.string),
+            tf.constant(meta, dtype=tf.string)))
+        load_wav_with_meta = lambda path, meta: (load_wav(path), meta)
+        wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     if "wav_to_frames" in wav_config:
         frame_len = wav_config["wav_to_frames"]["length"]
         frame_step = wav_config["wav_to_frames"]["step"]

@@ -4,7 +4,7 @@ Transformations on datasets.
 import collections
 
 import numpy as np
-import sklearn.model_selection
+# import sklearn.model_selection
 
 from speechbox import system
 import speechbox.preprocess.features as features

@@ -31,7 +31,7 @@ def get_best_checkpoint(checkpoints, key="epoch", mode=None):
         # Greatest epoch value
         return max(checkpoints, key=lambda p: int(key_fn(p)))
     else:
-        assert mode in ("min", "max")
+        assert mode in ("min", "max"), mode
         if mode == "min":
             return min(checkpoints, key=lambda p: float(key_fn(p)))
         elif mode == "max":
@@ -108,10 +108,8 @@ class KerasWrapper:
                 # This is for saving checkpoints at regular epoch intervals, regardless of the values that ModelCheckpoint is monitoring
                 self.callbacks.append(EpochModelCheckpoint(checkpoints.pop("epoch_interval"), checkpoints["filepath"]))
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
-        self.callbacks.append(LearningRateDateLogger())
         for cb in other_callbacks:
             self.callbacks.append(getattr(tf.keras.callbacks, cb["cls"])(**cb.get("kwargs", {})))
-
 
     @with_device
     def to_disk(self, basedir):

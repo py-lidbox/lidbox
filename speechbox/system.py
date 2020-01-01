@@ -7,12 +7,12 @@ import json
 import os
 import subprocess
 
-from audioread.exceptions import NoBackendError
+# from audioread.exceptions import NoBackendError
 from scipy.io import arff
-import librosa
+# import librosa
 import numpy as np
-import sox
-import webrtcvad
+# import sox
+# import webrtcvad
 import yaml
 
 import speechbox.preprocess.transformations as transformations

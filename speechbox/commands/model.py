@@ -5,7 +5,7 @@ import pprint
 import shutil
 import sys
 
-import sklearn.metrics
+# import sklearn.metrics
 
 from speechbox.commands.base import Command, State, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset

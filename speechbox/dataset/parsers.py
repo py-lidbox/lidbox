@@ -6,7 +6,7 @@ import csv
 import os
 import sys
 
-import sox
+# import sox
 
 
 class DatasetParser:

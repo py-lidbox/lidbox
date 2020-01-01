@@ -1,12 +1,12 @@
 import random
 
-import librosa.display
-import librosa.feature
+# import librosa.display
+# import librosa.feature
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
 import numpy as np
-import seaborn
+# import seaborn
 
 import speechbox.system as system
 

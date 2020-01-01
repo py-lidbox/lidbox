@@ -1,5 +1,6 @@
 """
-CNN followed by an LSTM, used in Bartz, C. et al. (2017) "Language identification using deep convolutional recurrent neural networks".
+2d CNN for spectrogram images, followed by an LSTM.
+Used by Bartz, C. et al. (2017) "Language identification using deep convolutional recurrent neural networks".
 See also
 https://github.com/HPI-DeepLearning/crnn-lid/blob/d78d5db14c4ee21b2cfcb09bf1d9187486371989/keras/models/crnn.py
 """
@@ -19,19 +20,19 @@ def loader(input_shape, num_outputs):
     assert input_shape[0] >= 32 and input_shape[1] >= 32, "too few rows and/or columns in input shape for CRNN: {}, this would lead to negative shapes after pooling".format(input_shape)
     crnn = Sequential([
         Conv2D(16, 7, input_shape=input_shape, activation="relu", padding="same", name="conv_1"),
-        BatchNormalization(name="bn_conv_1"),
+        BatchNormalization(name="conv_1_bn"),
         MaxPool2D(2, name="pool_conv_1"),
         Conv2D(32, 5, activation="relu", padding="same", name="conv_2"),
-        BatchNormalization(name="bn_conv_2"),
+        BatchNormalization(name="conv_2_bn"),
         MaxPool2D(2, name="pool_conv_2"),
         Conv2D(64, 3, activation="relu", padding="same", name="conv_3"),
-        BatchNormalization(name="bn_conv_3"),
+        BatchNormalization(name="conv_3_bn"),
         MaxPool2D(2, name="pool_conv_3"),
         Conv2D(128, 3, activation="relu", padding="same", name="conv_4"),
-        BatchNormalization(name="bn_conv_4"),
+        BatchNormalization(name="conv_4_bn"),
         MaxPool2D(2, name="pool_conv_4"),
         Conv2D(256, 3, activation="relu", padding="same", name="conv_5"),
-        BatchNormalization(name="bn_conv_5"),
+        BatchNormalization(name="conv_5_bn"),
         MaxPool2D(2, name="pool_conv_5"),
     ])
     crnn.add(Permute((2, 1, 3), name="timesteps_first"))
