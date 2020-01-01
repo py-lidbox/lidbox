@@ -1,11 +1,21 @@
+from tensorflow.keras.activations import softmax
+from tensorflow.keras.metrics import (
+    FalseNegatives,
+    FalsePositives,
+    Metric,
+    Precision,
+    Recall,
+    TrueNegatives,
+    TruePositives,
+)
 import tensorflow as tf
 
 
-class FalseNegativeRate(tf.keras.metrics.Metric):
+class FalseNegativeRate(Metric):
     def __init__(self, thresholds, name="fnr", **kwargs):
         super().__init__(name=name, **kwargs)
-        self.tp = tf.keras.metrics.TruePositives(thresholds=thresholds)
-        self.fn = tf.keras.metrics.FalseNegatives(thresholds=thresholds)
+        self.tp = TruePositives(thresholds=thresholds)
+        self.fn = FalseNegatives(thresholds=thresholds)
 
     def reset_states(self):
         self.tp.reset_states()
@@ -21,11 +31,11 @@ class FalseNegativeRate(tf.keras.metrics.Metric):
         return tf.math.divide_no_nan(fn, tp + fn)
 
 
-class FalsePositiveRate(tf.keras.metrics.Metric):
+class FalsePositiveRate(Metric):
     def __init__(self, thresholds, name="fpr", **kwargs):
         super().__init__(name=name, **kwargs)
-        self.tn = tf.keras.metrics.TrueNegatives(thresholds=thresholds)
-        self.fp = tf.keras.metrics.FalsePositives(thresholds=thresholds)
+        self.tn = TrueNegatives(thresholds=thresholds)
+        self.fp = FalsePositives(thresholds=thresholds)
 
     def reset_states(self):
         self.tn.reset_states()
@@ -41,16 +51,19 @@ class FalsePositiveRate(tf.keras.metrics.Metric):
         return tf.math.divide_no_nan(fp, tn + fp)
 
 
-class AveragePrecision(tf.keras.metrics.Metric):
-    def __init__(self, target_names, thresholds=None, name="avg_precision", **kwargs):
+class AveragePrecision(Metric):
+    def __init__(self, target_names, from_logits=False, thresholds=None, name="avg_precision", **kwargs):
         super().__init__(name=name, **kwargs)
-        self.precisions = [tf.keras.metrics.Precision(thresholds=thresholds, name="{}_precision".format(t)) for t in target_names]
+        self.precisions = [Precision(thresholds=thresholds, name="{}_precision".format(t)) for t in target_names]
+        self.softmax = softmax if from_logits else tf.identity
 
     def reset_states(self):
         for p in self.precisions:
             p.reset_states()
 
-    def update_state(self, y_true, y_pred, **kwargs):
+    def update_state(self, y_true_log, y_pred_log, **kwargs):
+        y_true = self.softmax(y_true_log)
+        y_pred = self.softmax(y_pred_log)
         for i, p in enumerate(self.precisions):
             p.update_state(y_true[:,i], y_pred[:,i], **kwargs)
 
@@ -62,16 +75,19 @@ class AveragePrecision(tf.keras.metrics.Metric):
             yield p
 
 
-class AverageRecall(tf.keras.metrics.Metric):
-    def __init__(self, target_names, thresholds=None, name="avg_recall", **kwargs):
+class AverageRecall(Metric):
+    def __init__(self, target_names, from_logits=False, thresholds=None, name="avg_recall", **kwargs):
         super().__init__(name=name, **kwargs)
-        self.recalls = [tf.keras.metrics.Recall(thresholds=thresholds, name="{}_recall".format(t)) for t in target_names]
+        self.recalls = [Recall(thresholds=thresholds, name="{}_recall".format(t)) for t in target_names]
+        self.softmax = softmax if from_logits else tf.identity
 
     def reset_states(self):
         for r in self.recalls:
             r.reset_states()
 
-    def update_state(self, y_true, y_pred, **kwargs):
+    def update_state(self, y_true_log, y_pred_log, **kwargs):
+        y_true = self.softmax(y_true_log)
+        y_pred = self.softmax(y_pred_log)
         for i, r in enumerate(self.recalls):
             r.update_state(y_true[:,i], y_pred[:,i], **kwargs)
 
@@ -83,19 +99,20 @@ class AverageRecall(tf.keras.metrics.Metric):
             yield r
 
 
-class AverageDetectionCost(tf.keras.metrics.Metric):
+class AverageDetectionCost(Metric):
     """
     TensorFlow implementation of C_avg equation 32 from
     Li, H., Ma, B. and Lee, K.A., 2013. Spoken language recognition: from fundamentals to practice. Proceedings of the IEEE, 101(5), pp.1136-1159.
     https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=6451097
     """
-    def __init__(self, target_names, theta_det=(0.5,), C_miss=1.0, C_fa=1.0, P_tar=0.5, name="C_avg", **kwargs):
+    def __init__(self, target_names, from_logits=False, theta_det=(0.5,), C_miss=1.0, C_fa=1.0, P_tar=0.5, name="C_avg", **kwargs):
         super().__init__(name=name, **kwargs)
         self.P_miss = [FalseNegativeRate(theta_det, name="{}_fnr".format(t)) for t in target_names]
         self.P_fa = [[FalsePositiveRate(theta_det, name="{}_as_{}_fpr".format(l, m)) for m in target_names if m != l] for l in target_names]
         self.C_miss = C_miss
         self.C_fa = C_fa
         self.P_tar = P_tar
+        self.softmax = softmax if from_logits else tf.identity
 
     def reset_states(self):
         for fnr in self.P_miss:
@@ -104,10 +121,12 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
             for fpr in p_fa:
                 fpr.reset_states()
 
-    def update_state(self, y_true, y_pred, **kwargs):
+    def update_state(self, y_true_log, y_pred_log, **kwargs):
         """
         Given a batch of true scores and predicted scores, update P_miss and P_fa for each score.
         """
+        y_true = self.softmax(y_true_log)
+        y_pred = self.softmax(y_pred_log)
         # Update false negatives for each target l
         for l, fnr in enumerate(self.P_miss):
             fnr.update_state(y_true[:,l], y_pred[:,l], **kwargs)
@@ -135,7 +154,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         return C_avgs[self.min_index]
 
 
-class EqualErrorRate(tf.keras.metrics.Metric):
+class EqualErrorRate(Metric):
     def __init__(self, thresholds=None, name="eer", **kwargs):
         super().__init__(name=name, **kwargs)
         self.fnr = FalseNegativeRate(thresholds)
@@ -159,17 +178,20 @@ class EqualErrorRate(tf.keras.metrics.Metric):
         return 0.5 * (fnr[self.min_index] + fpr[self.min_index])
 
 
-class AverageEqualErrorRate(tf.keras.metrics.Metric):
-    def __init__(self, target_names, thresholds=None, name="avg_eer", **kwargs):
+class AverageEqualErrorRate(Metric):
+    def __init__(self, target_names, thresholds=None, from_logits=False, name="avg_eer", **kwargs):
         super().__init__(name=name, **kwargs)
         # EERs for each target
         self.eers = [EqualErrorRate(thresholds=thresholds, name="{}_eer".format(t)) for t in target_names]
+        self.softmax = softmax if from_logits else tf.identity
 
     def reset_states(self):
         for eer in self.eers:
             eer.reset_states()
 
-    def update_state(self, y_true, y_pred, **kwargs):
+    def update_state(self, y_true_log, y_pred_log, **kwargs):
+        y_true = self.softmax(y_true_log)
+        y_pred = self.softmax(y_pred_log)
         for l, eer in enumerate(self.eers):
             eer.update_state(y_true[:,l], y_pred[:,l], **kwargs)
 
