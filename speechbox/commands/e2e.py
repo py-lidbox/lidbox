@@ -694,6 +694,35 @@ class Evaluate(E2EBase):
         return self.evaluate()
 
 
+class Util(E2EBase):
+    tasks = (
+        "get_cache_checksum",
+    )
+
+    @classmethod
+    def create_argparser(cls, subparsers):
+        parser = super().create_argparser(subparsers)
+        optional = parser.add_argument_group("util options")
+        optional.add_argument("--get-cache-checksum",
+            type=str,
+            metavar="datagroup",
+            help="For a given datagroup key, compute md5sum of config file in the same way as it would be computed when generating the filename for the features cache. E.g. for checking if the pipeline will be using the cache or start the feature extraction from scratch.")
+        return parser
+
+    def get_cache_checksum(self):
+        conf_json, conf_checksum = dict_checksum({
+            "features": self.experiment_config["features"],
+            "wav_config": get_wav_config(self.experiment_config, self.args.get_cache_checksum),
+        })
+        print(conf_checksum)
+        if self.args.verbosity:
+            print("Computed from json string '{}'".format(conf_json))
+
+    def run(self):
+        super().run()
+        return self.run_tasks()
+
+
 command_tree = [
-    (E2E, [Train, Predict, Evaluate]),
+    (E2E, [Train, Predict, Evaluate, Util]),
 ]
