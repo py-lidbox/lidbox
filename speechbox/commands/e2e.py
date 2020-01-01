@@ -44,9 +44,33 @@ def make_label2onehot(labels):
     OH = tf.one_hot(labels_enum, len(labels))
     return label2int, OH
 
+#TODO ensure input consistency, from config file, not some dynamically patched thing
 def dict_checksum(d):
-    json_bytes = json.dumps(d, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.md5(json_bytes).hexdigest()
+    json_str = json.dumps(d, ensure_ascii=False, sort_keys=True)
+    return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
+
+def get_wav_config(conf, datagroup_key):
+    return dict(conf["dataset"]["datagroups"][datagroup_key], sample_rate=conf["dataset"]["sample_rate"])
+
+def accumulate_batch_size_counts(counter, t):
+    return tf.tensor_scatter_nd_add(
+        counter,
+        tf.reshape(tf.shape(t[0])[0] - 1, (1, 1)),
+        tf.constant([1]))
+
+def count_batch_sizes(ds):
+    max_batch_size = dataset[ds].reduce(
+        tf.constant(-1, dtype=tf.int32),
+        lambda max, t: tf.math.maximum(max, tf.shape(t[0])[0]))
+    batch_size_counts = dataset[ds].reduce(
+        tf.zeros(max_batch_size, dtype=tf.int32),
+        accumulate_batch_size_counts)
+    sorted_batch_sizes = tf.argsort(batch_size_counts, direction="DESCENDING")
+    sorted_batch_size_counts = tf.gather(batch_size_counts, sorted_batch_sizes)
+    return tf.stack(
+        (tf.boolean_mask(sorted_batch_sizes, sorted_batch_size_counts > 0) + 1,
+         tf.boolean_mask(sorted_batch_size_counts, sorted_batch_size_counts > 0)),
+        axis=1)
 
 
 class E2EBase(StatefulCommand):
@@ -171,7 +195,7 @@ class E2EBase(StatefulCommand):
         else:
             feat = tf_data.extract_features_from_paths(
                 config,
-                self.experiment_config["dataset"],
+                get_wav_config(self.experiment_config, datagroup_key),
                 paths,
                 paths_meta,
                 verbosity=args.verbosity,
@@ -251,19 +275,20 @@ class Train(E2EBase):
                 features_cache_dir = "/tmp"
             else:
                 features_cache_dir = os.path.join(self.cache_dir, "features")
+            conf_json, conf_checksum = dict_checksum({
+                "features": self.experiment_config["features"],
+                "wav_config": get_wav_config(self.experiment_config, datagroup_key),
+            })
             features_cache_path = os.path.join(
                 features_cache_dir,
                 self.experiment_config["dataset"]["key"],
                 ds,
                 feat_config["type"],
-                dict_checksum({
-                    "features": self.experiment_config["features"],
-                    "dataset": self.experiment_config["dataset"]
-                }),
+                conf_checksum,
             )
-            if args.verbosity > 1:
-                print("Caching feature extractor dataset to '{}'".format(features_cache_path))
             self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
+            with open(features_cache_path + ".md5sum-input", "w") as f:
+                print(conf_json, file=f, end='')
             if args.verbosity:
                 print("Using cache for features: '{}'".format(features_cache_path))
             extractor_ds = extractor_ds.cache(filename=features_cache_path)
@@ -378,14 +403,13 @@ class Predict(E2EBase):
             print()
         if args.verbosity > 1:
             print("Using feature extraction parameters:")
-            pprint.pprint(feat_config)
+            yaml_pprint(feat_config)
             print()
         if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
             assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
             if "melspectrogram" not in feat_config:
                 feat_config["melspectrogram"] = {}
             feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
-        self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), skip_training=True)
         if args.verbosity > 1:
             print("Preparing model")
@@ -423,7 +447,8 @@ class Predict(E2EBase):
         del ds_config["train"], ds_config["validation"]
         if args.verbosity and "dataset_logger" in ds_config:
             print("Warning: dataset_logger in the test datagroup has no effect.")
-        datagroup = self.experiment_config["dataset"]["datagroups"][ds_config.pop("datagroup")]
+        datagroup_key = ds_config.pop("datagroup")
+        datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
         utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
         utt2path = collections.OrderedDict(
@@ -469,25 +494,28 @@ class Predict(E2EBase):
             copy_original_audio,
         )
         # drop meta wavs required only for vad
-        features = features.map(lambda feats, label, uttid, _: (feats, label, uttid))
+        features = features.map(lambda *t: t[:3])
         if ds_config.get("cache_features_in_tmp", False):
             features_cache_dir = "/tmp"
         else:
             features_cache_dir = os.path.join(self.cache_dir, "features")
+        conf_json, conf_checksum = dict_checksum({
+            "features": self.experiment_config["features"],
+            "wav_config": get_wav_config(self.experiment_config, datagroup_key),
+        })
         features_cache_path = os.path.join(
             features_cache_dir,
             self.experiment_config["dataset"]["key"],
             ds,
             feat_config["type"],
-            dict_checksum({
-                "features": self.experiment_config["features"],
-                "dataset": self.experiment_config["dataset"]
-            }),
+            conf_checksum,
         )
         if args.verbosity > 1:
             print("Caching feature extractor dataset to '{}'".format(features_cache_path))
         self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
-        features = features.cache(features_cache_path)
+        with open(features_cache_path + ".md5sum-input", "w") as f:
+            print(conf_json, file=f, end='')
+        features = features.cache(filename=features_cache_path)
         if args.verbosity:
             print("Starting feature extraction")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
