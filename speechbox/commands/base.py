@@ -1,10 +1,10 @@
 import argparse
 import itertools
 import os
-import pprint
 import sys
 
 import speechbox.system as system
+from speechbox import yaml_pprint
 
 
 class ExpandAbspath(argparse.Action):
@@ -163,14 +163,14 @@ class StatefulCommand(Command):
         args = self.args
         if args.verbosity > 1:
             print("Running subcommand '{}' with arguments:".format(self.__class__.__name__.lower()))
-            pprint.pprint(vars(args))
+            yaml_pprint(vars(args))
             print()
         if args.verbosity:
             print("Loading experiment config from '{}'".format(args.experiment_config))
         self.experiment_config = system.load_yaml(args.experiment_config)
         if args.verbosity > 1:
             print("Experiment config is:")
-            pprint.pprint(self.experiment_config)
+            yaml_pprint(self.experiment_config)
             print()
         self.cache_dir = os.path.abspath(self.experiment_config["cache"])
         if args.verbosity > 1:
@@ -180,7 +180,7 @@ class StatefulCommand(Command):
             self.load_state()
         if args.verbosity > 1:
             print("Running with initial state:")
-            pprint.pprint(self.state, depth=None if args.debug else 3)
+            yaml_pprint(self.state)
             print()
 
     def exit(self):

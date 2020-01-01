@@ -1,7 +1,6 @@
 import itertools
 import multiprocessing
 import os
-import pprint
 import shutil
 import sys
 
@@ -10,6 +9,7 @@ import speechbox.preprocess.opensmile as opensmile
 import speechbox.preprocess.spherediar as spherediar
 import speechbox.preprocess.transformations as transformations
 import speechbox.system as system
+from speechbox import yaml_pprint
 
 #TODO reduce repetition
 
@@ -101,7 +101,7 @@ def check_datagroup(datagroup, datagroup_name):
             print(feature)
         else:
             for f in datagroup["features"]:
-                pprint.pprint(f)
+                yaml_pprint(f)
 
 
 class Features(Command):
@@ -132,7 +132,7 @@ class Extract(StatefulCommand):
         config = self.experiment_config["features"]
         if args.verbosity > 1:
             print("Using feature extraction parameters:")
-            pprint.pprint(config)
+            yaml_pprint(config)
             print()
         for datagroup_name in config["datagroups"]:
             datagroup = self.state["data"][datagroup_name]

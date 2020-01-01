@@ -2,15 +2,14 @@ import collections
 import itertools
 import multiprocessing
 import os
-import pprint
 import sys
 
 import kaldiio
-import librosa
+# import librosa
 import numpy as np
 import scipy
 
-from speechbox import system
+from speechbox import system, yaml_pprint
 from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
 import speechbox.dataset as dataset
 import speechbox.preprocess.transformations as transformations
@@ -687,13 +686,13 @@ class Augment(StatefulCommand):
             augment_params = list(itertools.product(*flattened_kwargs))
         if args.verbosity > 1:
             print("Full config for augmentation:")
-            pprint.pprint(augment_params)
+            yaml_pprint(augment_params)
             print()
         print_progress = self.experiment_config.get("print_progress", 0)
         augment_datagroups = augment_config.get("datagroups", list(data.keys()))
         if args.verbosity > 1:
             print("Datagroups that will be augmented:")
-            pprint.pprint(augment_datagroups)
+            yaml_pprint(augment_datagroups)
             print()
         # Collect paths of augmented files by datagroup,
         # each set of augmented paths grouped by the source path it was augmented from
@@ -883,7 +882,7 @@ class Ingest(StatefulCommand):
         extractor_ds, stats = tf_data.extract_features(config, paths, paths_meta)
         if args.verbosity:
             print("Global dataset stats:")
-            pprint.pprint(stats)
+            yaml_pprint(stats)
         tf_data.write_features(extractor_ds, tfrecords_path)
         return 0
 
@@ -904,7 +903,7 @@ class Ingest(StatefulCommand):
         config = self.experiment_config["input"]
         if args.verbosity > 1:
             print("Feature config is:")
-            pprint.pprint(config)
+            yaml_pprint(config)
         if config["type"] == "mfcc":
             config["feature_dim"] = config["mfcc"]["num_coefs"]
         elif config["type"] == "melspectrogram":

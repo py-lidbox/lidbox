@@ -1,8 +1,8 @@
 import collections
-import pprint
 import sys
 
 from . import audio_feat
+from speechbox import yaml_pprint
 import kaldiio
 import matplotlib.cm
 import numpy as np
@@ -378,7 +378,7 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
         )
         if verbosity:
             print("Applying voice activity detection with kwargs:")
-            pprint.pprint(vad_config)
+            yaml_pprint(vad_config)
         features = features.map(_do_vad)
     min_seq_len = feat_config.get("min_sequence_length")
     if min_seq_len:

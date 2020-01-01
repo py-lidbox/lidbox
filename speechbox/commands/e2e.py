@@ -3,7 +3,6 @@ import hashlib
 import itertools
 import json
 import os
-import pprint
 import random
 import sys
 import time
@@ -11,6 +10,7 @@ import time
 import tensorflow as tf
 import numpy as np
 
+from speechbox import yaml_pprint
 from speechbox.commands.base import Command, State, StatefulCommand
 from speechbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
 import speechbox.models as models
@@ -95,7 +95,7 @@ class E2EBase(StatefulCommand):
             self.make_named_dir(checkpoint_dir, "checkpoints")
         if self.args.verbosity > 1:
             print("KerasWrapper callback parameters will be set to:")
-            pprint.pprint(callbacks_kwargs)
+            yaml_pprint(callbacks_kwargs)
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
@@ -104,7 +104,7 @@ class E2EBase(StatefulCommand):
         datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         if args.verbosity > 2:
             print("Extracting features from datagroup '{}' with config".format(datagroup_key))
-            pprint.pprint(config)
+            yaml_pprint(config)
         utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
         utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
         if args.verbosity:
@@ -135,7 +135,7 @@ class E2EBase(StatefulCommand):
             keys = keys[:args.file_limit]
             if args.verbosity > 3:
                 print("Using utterance ids:")
-                pprint.pprint(keys)
+                yaml_pprint(keys)
         labels_set = set(self.experiment_config["dataset"]["labels"])
         num_dropped = collections.Counter()
         paths = []
@@ -208,11 +208,11 @@ class Train(E2EBase):
         feat_config = self.experiment_config["features"]
         if args.verbosity > 1:
             print("Using model parameters:")
-            pprint.pprint(training_config)
+            yaml_pprint(training_config)
             print()
         if args.verbosity > 1:
             print("Using feature extraction parameters:")
-            pprint.pprint(feat_config)
+            yaml_pprint(feat_config)
             print()
         if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
             assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
@@ -234,7 +234,7 @@ class Train(E2EBase):
         for ds in ("train", "validation"):
             if args.verbosity > 2:
                 print("Dataset config for '{}'".format(ds))
-                pprint.pprint(training_config[ds])
+                yaml_pprint(training_config[ds])
             ds_config = dict(training_config, **training_config[ds])
             del ds_config["train"], ds_config["validation"]
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
@@ -374,7 +374,7 @@ class Predict(E2EBase):
         feat_config = self.experiment_config["features"]
         if args.verbosity > 1:
             print("Using model parameters:")
-            pprint.pprint(training_config)
+            yaml_pprint(training_config)
             print()
         if args.verbosity > 1:
             print("Using feature extraction parameters:")
@@ -418,7 +418,7 @@ class Predict(E2EBase):
         ds = "test"
         if args.verbosity > 2:
             print("Dataset config for '{}'".format(ds))
-            pprint.pprint(training_config[ds])
+            yaml_pprint(training_config[ds])
         ds_config = dict(training_config, **training_config[ds])
         del ds_config["train"], ds_config["validation"]
         if args.verbosity and "dataset_logger" in ds_config:
@@ -437,7 +437,7 @@ class Predict(E2EBase):
             keys = keys[:args.file_limit]
             if args.verbosity > 3:
                 print("Using utterance ids:")
-                pprint.pprint(keys)
+                yaml_pprint(keys)
         int2label = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(int2label)
         label2onehot = lambda label: OH[label2int.lookup(label)]

@@ -2,6 +2,7 @@
 Toolbox containing various speech data analysis tools.
 """
 import os
+import yaml
 
 def get_package_root():
     from speechbox import __path__
@@ -21,3 +22,6 @@ def _get_random_wav():
     wavpaths = [f.path for f in os.scandir(os.path.join(label_dir.path, "wav")) if f.is_file() and get_audio_type(f.path) == "wav"]
     wavpath = choice(wavpaths)
     return label_dir.name, wavpath, read_wavfile(wavpath)
+
+def yaml_pprint(d, **kwargs):
+    print(yaml.dump(d, indent=4), **kwargs)
