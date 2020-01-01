@@ -8,6 +8,7 @@ from tensorflow.keras.layers import (
     GRU,
 )
 from tensorflow.keras import Sequential
+import numpy as np
 
 def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024):
     return Sequential([
@@ -18,5 +19,4 @@ def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024):
     ])
 
 def predict(model, utterances):
-    for frames in utterances.unbatch():
-        yield model.predict(frames).mean(axis=0)
+    return np.stack([model.predict(frames).mean(axis=0) for frames in utterances.unbatch()])

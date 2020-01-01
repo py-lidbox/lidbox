@@ -11,16 +11,16 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras import Sequential
 
-def loader(input_shape, num_outputs):
+def loader(input_shape, num_outputs, output_activation="softmax", padding="same"):
     return Sequential([
-        Conv1D(500, 5, 1, padding="same", activation="relu", name="conv_1", input_shape=input_shape),
-        Conv1D(500, 7, 2, padding="same", activation="relu", name="conv_2"),
-        Conv1D(500, 1, 1, padding="same", activation="relu", name="conv_3"),
-        Conv1D(3000, 1, 1, padding="same", activation="relu", name="conv_4"),
+        Conv1D(500, 5, 1, padding=padding, activation="relu", name="conv_1", input_shape=input_shape),
+        Conv1D(500, 7, 2, padding=padding, activation="relu", name="conv_2"),
+        Conv1D(500, 1, 1, padding=padding, activation="relu", name="conv_3"),
+        Conv1D(3000, 1, 1, padding=padding, activation="relu", name="conv_4"),
         GlobalAveragePooling1D(name="avg_pooling"),
         Dense(1500, activation="relu", name="fc_1"),
         Dense(600, activation="relu", name="fc_2"),
-        Dense(num_outputs, activation="softmax", name="output"),
+        Dense(num_outputs, activation=output_activation, name="output"),
     ])
 
 def predict(model, samples):
