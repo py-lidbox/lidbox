@@ -349,6 +349,7 @@ class Train(E2EBase):
                 ds_config,
                 feat_config,
                 label2onehot,
+                conf_checksum=conf_checksum,
             )
             if args.debug_dataset:
                 if args.verbosity:

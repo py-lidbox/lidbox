@@ -1,5 +1,7 @@
 import collections
+import os
 import sys
+import time
 
 from . import audio_feat
 from speechbox import yaml_pprint
@@ -153,20 +155,21 @@ def get_random_frame_chunker(len_config):
         float(len_config["max"]),
         int(len_config["num_bins"]))
     lengths = tf.unique(tf.cast(float_lengths, tf.int32))[0]
-    index_logprob = tf.fill([1, tf.size(lengths)], tf.math.log(0.5))
     min_chunk_length = lengths[0]
     tf.debugging.assert_greater(min_chunk_length, 1, message="Too short minimum chunk length")
+    min_overlap = tf.constant(float(len_config.get("min_overlap", 0)), tf.float32)
+    tf.debugging.assert_less(min_overlap, 1.0, message="min_overlap cannot be greater than 1 (would lead to negative offsets)")
     @tf.function
     def random_chunk_frames(features):
         num_total_frames = tf.shape(features)[0]
-        num_overlapping_chunks = (num_total_frames - min_chunk_length) / (min_chunk_length // 2)
-        max_num_chunks = 1 + tf.math.maximum(0, tf.cast(tf.math.ceil(num_overlapping_chunks), tf.int32))
-        rand_chunk_lengths = tf.gather(
-            lengths,
-            tf.random.categorical(index_logprob, max_num_chunks)[0])
-        offsets = tf.math.cumsum(rand_chunk_lengths // 2)
-        tf.debugging.assert_greater(offsets, 0, message="some rand frame chunk offset was unexpectedly zero")
-        begin = tf.concat(([0], offsets[:-1]), axis=0)
+        num_overlapping_chunks = num_total_frames - min_chunk_length
+        max_num_chunks = 1 + tf.math.maximum(0, tf.cast(num_overlapping_chunks, tf.int32))
+        rand_length_indexes = tf.random.uniform([max_num_chunks], 0, tf.size(lengths), dtype=tf.int32)
+        rand_chunk_lengths = tf.gather(lengths, rand_length_indexes)
+        rand_offset_ratios = tf.random.uniform([tf.size(rand_chunk_lengths)], 0.0, 1.0 - min_overlap, dtype=tf.float32)
+        offsets = tf.cast(rand_offset_ratios * tf.cast(rand_chunk_lengths, tf.float32), tf.int32)
+        offsets = tf.math.maximum(1, offsets)
+        begin = tf.math.cumsum(offsets)
         within_bounds = begin < num_total_frames
         begin = tf.boolean_mask(begin, within_bounds)
         end = begin + tf.boolean_mask(rand_chunk_lengths, within_bounds)
@@ -174,7 +177,7 @@ def get_random_frame_chunker(len_config):
         return tf.gather(features, tf.ragged.range(begin, end))
     return random_chunk_frames
 
-def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_original_audio=False):
+def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_original_audio=False, conf_checksum=''):
     image_resize_kwargs = dict(config.get("convert_to_images", {}))
     if image_resize_kwargs:
         size = image_resize_kwargs.pop("size")
@@ -201,12 +204,21 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
         ds = ds.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     if "frames" in config:
         frame_axis = 1 if "convert_to_images" in config else 0
+        if frame_axis == 1:
+            ds = ds.map(lambda f, *meta: (tf.transpose(f, perm=(1, 0, 2, 3)), *meta))
         if config["frames"].get("random", False):
             assert isinstance(config["frames"]["length"], dict), "key 'frames.length' must map to a dict type when doing random chunking of frames"
-            if frame_axis == 1:
-                ds = ds.map(lambda f, *meta: (tf.transpose(f, perm=(1, 0, 2, 3)), *meta))
             random_chunk_frames = get_random_frame_chunker(config["frames"]["length"])
             ds = ds.map(lambda f, *meta: (random_chunk_frames(f), *meta))
+            if config["frames"].get("flatten", True):
+                def _unbatch_ragged_frames(frames, *meta):
+                    frames_ds = tf.data.Dataset.from_tensor_slices(frames)
+                    inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
+                    return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
+                ds = ds.flat_map(_unbatch_ragged_frames)
+                if config["frames"].get("drop_too_short", True):
+                    min_len = tf.constant(config["frames"]["length"]["min"], dtype=tf.int32)
+                    ds = ds.filter(lambda f, *m: tf.shape(f)[0] >= min_len)
         else:
             # Extract frames from all features, using the same metadata for each frame of one sample of features
             seq_len = config["frames"]["length"]
@@ -216,12 +228,12 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
                 tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=frame_axis),
                 *meta)
             ds = ds.map(to_frames)
-        if config["frames"].get("flatten", True):
-            def _unbatch_frames(frames, *meta):
-                frames_ds = tf.data.Dataset.from_tensor_slices(frames if frame_axis == 0 else tf.transpose(frames, perm=(1, 0, 2, 3)))
-                inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
-                return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
-            ds = ds.flat_map(_unbatch_frames)
+            if config["frames"].get("flatten", True):
+                def _unbatch_frames(frames, *meta):
+                    frames_ds = tf.data.Dataset.from_tensor_slices(frames if frame_axis == 0 else tf.transpose(frames, perm=(1, 0, 2, 3)))
+                    inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
+                    return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
+                ds = ds.flat_map(_unbatch_frames)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
     def to_model_input(feats, *meta):
         model_input = (
@@ -236,6 +248,9 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
             # original waveform, reshaping the array here to add a mono channel
             return model_input + (tf.expand_dims(meta[1], -1), *meta[2:])
     ds = ds.map(to_model_input)
+    if "min_shape" in config:
+        min_shape = tf.constant(config["min_shape"], dtype=tf.int32)
+        ds = ds.filter(lambda feats, *meta: tf.math.reduce_all(tf.shape(feats) >= min_shape))
     shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
     if shuffle_buffer_size:
         ds = ds.shuffle(shuffle_buffer_size)
@@ -246,11 +261,6 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
         ds = without_metadata(ds).padded_batch(**pad_kwargs)
     elif "batch_size" in config:
         ds = ds.batch(config["batch_size"])
-    # assume autotuned prefetch (turned off when config["prefetch"] is None)
-    if "prefetch" not in config:
-        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
-    elif config["prefetch"] is not None:
-        ds = ds.prefetch(config["prefetch"])
     if "bucket_by_sequence_length" in config:
         seq_len_fn = lambda feats, *meta: tf.shape(feats)[0]
         bucket_conf = config["bucket_by_sequence_length"]
@@ -266,18 +276,24 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
             bucket_batch_sizes,
             **bucket_conf.get("kwargs", {}))
         ds = ds.apply(bucketing_fn)
-        bucket_shuffle_size = shuffle_buffer_size // bucket_conf["batch_size"]
-        if bucket_shuffle_size > 1:
-            ds = ds.shuffle(bucket_shuffle_size)
     elif "group_by_sequence_length" in config:
-        batch_size = config["group_by_sequence_length"]["window_size"]
-        key_fn_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
-        reduce_fn_to_batch = lambda key, group: group.batch(batch_size)
-        ds = ds.apply(tf.data.experimental.group_by_window(key_fn_seq_len, reduce_fn_to_batch, batch_size))
+        max_batch_size = config["group_by_sequence_length"]["max_batch_size"]
+        get_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
+        group_to_batch = lambda key, group: group.batch(max_batch_size)
+        ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, max_batch_size))
+    os.makedirs("/tmp/tensorflow-cache", exist_ok=True)
+    ds = ds.cache("/tmp/tensorflow-cache/{}_{}".format(int(time.time()), conf_checksum))
+    if shuffle_buffer_size:
+        ds = ds.shuffle(shuffle_buffer_size)
+    # assume autotuned prefetch (turned off when config["prefetch"] is None)
+    if "prefetch" not in config:
+        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+    elif config["prefetch"] is not None:
+        ds = ds.prefetch(config["prefetch"])
     return ds
 
 #TODO histogram support (uses significantly less space than images+audio)
-def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="gray", copy_original_audio=False, debug_squeeze_last_dim=False, num_batches=-1):
+def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="viridis", copy_original_audio=False, debug_squeeze_last_dim=False, num_batches=-1):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -308,6 +324,7 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
             image = tf.image.resize(image, new_size, **image_resize_kwargs)
         else:
             image = tf.image.flip_up_down(image)
+        tf.debugging.assert_all_finite(image, message="non-finite values in image when trying to create dataset logger for tensorboard")
         tf.summary.image(features_name, image, step=batch_idx, max_outputs=max_outputs)
         if copy_original_audio:
             tf.summary.audio("original_audio", batch[3], 16000, step=batch_idx, max_outputs=max_outputs)
@@ -315,8 +332,7 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
         return batch
     return (ds.take(num_batches)
               .enumerate()
-              .map(inspect_batches,
-                   num_parallel_calls=tf.data.experimental.AUTOTUNE))
+              .map(inspect_batches))
 
 def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
