@@ -53,25 +53,31 @@ def dict_checksum(d):
 def get_wav_config(conf, datagroup_key):
     return dict(conf["dataset"]["datagroups"][datagroup_key], sample_rate=conf["dataset"]["sample_rate"])
 
-def accumulate_batch_size_counts(counter, t):
-    return tf.tensor_scatter_nd_add(
-        counter,
-        tf.reshape(tf.shape(t[0])[0] - 1, (1, 1)),
-        tf.constant([1]))
-
-def count_batch_sizes(ds):
-    max_batch_size = dataset[ds].reduce(
-        tf.constant(-1, dtype=tf.int32),
-        lambda max, t: tf.math.maximum(max, tf.shape(t[0])[0]))
-    batch_size_counts = dataset[ds].reduce(
-        tf.zeros(max_batch_size, dtype=tf.int32),
-        accumulate_batch_size_counts)
-    sorted_batch_sizes = tf.argsort(batch_size_counts, direction="DESCENDING")
-    sorted_batch_size_counts = tf.gather(batch_size_counts, sorted_batch_sizes)
-    return tf.stack(
-        (tf.boolean_mask(sorted_batch_sizes, sorted_batch_size_counts > 0) + 1,
-         tf.boolean_mask(sorted_batch_size_counts, sorted_batch_size_counts > 0)),
-        axis=1)
+def count_dim_sizes(ds, ds_element_index, ndims):
+    shapes_ds = ds.map(lambda *t: tf.shape(t[ds_element_index])).cache()
+    #TODO infer ndims from shapes_ds
+    #ndims = shapes_ds.reduce(tf.constant(0, dtype=tf.int32), lambda a, shape: tf.math.maximum(a, len(shape)))
+    #tf.debugging.assert_greater(ndims, 0)
+    ones = tf.ones(ndims, dtype=tf.int32)
+    shape_indices = tf.range(ndims, dtype=tf.int32)
+    @tf.function
+    def accumulate_dim_size_counts(counter, shape):
+        enumerated_shape = tf.stack((shape_indices, shape), axis=1)
+        return tf.tensor_scatter_nd_add(counter, enumerated_shape, ones)
+    max_sizes = shapes_ds.reduce(
+        tf.zeros(ndims, dtype=tf.int32),
+        lambda acc, shape: tf.math.maximum(acc, shape))
+    max_max_size = tf.reduce_max(max_sizes)
+    size_counts = shapes_ds.reduce(
+        tf.zeros((ndims, max_max_size + 1), dtype=tf.int32),
+        accumulate_dim_size_counts)
+    sorted_size_indices = tf.argsort(size_counts, direction="DESCENDING")
+    sorted_size_counts = tf.gather(size_counts, sorted_size_indices, batch_dims=1)
+    is_nonzero = sorted_size_counts > 0
+    return tf.ragged.stack(
+        (tf.ragged.boolean_mask(sorted_size_counts, is_nonzero),
+         tf.ragged.boolean_mask(sorted_size_indices, is_nonzero)),
+        axis=2)
 
 
 class E2EBase(StatefulCommand):
@@ -344,6 +350,14 @@ class Train(E2EBase):
                 feat_config,
                 label2onehot,
             )
+            if args.debug_dataset:
+                if args.verbosity:
+                    print("--debug-dataset given, iterating over the dataset to gather stats")
+                if args.verbosity > 1:
+                    print("Counting all unique dim sizes of elements at index 0 in dataset")
+                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
+                    print("axis {}\n[count size]:".format(axis))
+                    tf.print(size_counts, summarize=-1, output_stream=sys.stdout)
             if summary_kwargs:
                 logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
                 if os.path.isdir(logdir):
@@ -366,15 +380,6 @@ class Train(E2EBase):
                         if args.verbosity > 1:
                             print(i, "batches done")
                         del logged_dataset
-            if args.debug_dataset:
-                if args.verbosity:
-                    print("--debug-dataset given, iterating over the dataset to gather stats")
-                if args.verbosity > 1:
-                    print("Counting all unique batch sizes in dataset")
-                batch_size_counts = count_batch_sizes(dataset[ds])
-                if args.verbosity:
-                    print("Batch size counts:")
-                tf.print(res, summarize=-1, output_stream=sys.stdout)
         if args.verbosity > 1:
             print("Preparing model")
         model.prepare(labels, training_config)
