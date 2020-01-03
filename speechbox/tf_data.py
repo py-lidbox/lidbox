@@ -402,14 +402,26 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
             tf.constant(meta, dtype=tf.string)))
         load_wav_with_meta = lambda path, *meta: (load_wav(path), *meta)
         wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        if "ensure_sample_rate" in wav_config:
-            expected_sample_rate = tf.constant(wav_config["ensure_sample_rate"], int32)
-            if verbosity:
-                tf_print("Filtering wavs by expected sample rate", expected_sample_rate)
-                tf_print("Wavs before filtering", count_dataset(wavs))
-            wavs = wavs.filter(lambda wav, *meta: wav.sample_rate == expected_sample_rate)
-            if verbosity:
-                tf_print("Wavs after filtering", count_dataset(wavs))
+    if "filter_sample_rate" in wav_config:
+        expected_sample_rate = tf.constant(wav_config["filter_sample_rate"], tf.int32)
+        if verbosity:
+            tf_print("Filtering wavs by expected sample rate", expected_sample_rate)
+        def check_sample_rate_with_warnings(wav, meta, *rest):
+            batch_ok = tf.math.reduce_all(wav.sample_rate == expected_sample_rate)
+            if verbosity > 0 and not batch_ok:
+                tf_print("warning: dropping utterances with wrong sample rate", meta[0], wav.sample_rate)
+            return batch_ok
+        wavs = wavs.filter(check_sample_rate_with_warnings)
+    if "filter_min_length" in wav_config:
+        min_len = tf.constant(wav_config["filter_min_length"], tf.int32)
+        if verbosity:
+            tf_print("Filtering wavs by min length", min_len)
+        def check_len_with_warnings(wav, meta, *rest):
+            batch_ok = tf.math.reduce_all(tf.size(wav.audio) >= min_len)
+            if verbosity > 0 and not batch_ok:
+                tf_print("warning: dropping too short utterances", meta[0], tf.size(wav.audio))
+            return batch_ok
+        wavs = wavs.filter(check_len_with_warnings)
     vad_config = wav_config.get("webrtcvad_config")
     if vad_config:
         if verbosity:
