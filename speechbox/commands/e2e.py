@@ -315,10 +315,14 @@ class Train(E2EBase):
                 conf_checksum,
             )
             self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
-            with open(features_cache_path + ".md5sum-input", "w") as f:
-                print(conf_json, file=f, end='')
-            if args.verbosity:
-                print("Using cache for features: '{}'".format(features_cache_path))
+            if not os.path.exists(features_cache_path + ".md5sum-input"):
+                with open(features_cache_path + ".md5sum-input", "w") as f:
+                    print(conf_json, file=f, end='')
+                if args.verbosity:
+                    print("Writing features into new cache: '{}'".format(features_cache_path))
+            else:
+                if args.verbosity:
+                    print("Loading features from existing cache: '{}'".format(features_cache_path))
             extractor_ds = extractor_ds.cache(filename=features_cache_path)
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
