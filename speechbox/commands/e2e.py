@@ -50,9 +50,6 @@ def dict_checksum(d):
     json_str = json.dumps(d, ensure_ascii=False, sort_keys=True)
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
-def get_wav_config(conf, datagroup_key):
-    return dict(conf["dataset"]["datagroups"][datagroup_key], sample_rate=conf["dataset"]["sample_rate"])
-
 def count_dim_sizes(ds, ds_element_index, ndims):
     shapes_ds = ds.map(lambda *t: tf.shape(t[ds_element_index])).cache()
     #TODO infer ndims from shapes_ds
@@ -202,7 +199,7 @@ class E2EBase(StatefulCommand):
         else:
             feat = tf_data.extract_features_from_paths(
                 config,
-                get_wav_config(self.experiment_config, datagroup_key),
+                conf["dataset"]["datagroups"][datagroup_key],
                 paths,
                 paths_meta,
                 verbosity=args.verbosity,
@@ -249,11 +246,6 @@ class Train(E2EBase):
             feat_config = xvec_config.pop("features")
         else:
             xvec_config = {}
-        if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
-            assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
-            if "melspectrogram" not in feat_config:
-                feat_config["melspectrogram"] = {}
-            feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
         labels = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(labels)
         label2onehot = lambda label: OH[label2int.lookup(label)]
@@ -313,7 +305,7 @@ class Train(E2EBase):
                 features_cache_dir = os.path.join(self.cache_dir, "features")
             conf_json, conf_checksum = dict_checksum({
                 "features": self.experiment_config["features"],
-                "wav_config": get_wav_config(self.experiment_config, datagroup_key),
+                "wav_config": conf["dataset"]["datagroups"][datagroup_key],
             })
             features_cache_path = os.path.join(
                 features_cache_dir,
@@ -463,11 +455,6 @@ class Predict(E2EBase):
             print("Using feature extraction parameters:")
             yaml_pprint(feat_config)
             print()
-        if feat_config["type"] in ("melspectrogram", "logmelspectrogram", "mfcc"):
-            assert "sample_rate" in self.experiment_config["dataset"], "dataset.sample_rate must be defined in the config file when feature type is '{}'".format(feat_config["type"])
-            if "melspectrogram" not in feat_config:
-                feat_config["melspectrogram"] = {}
-            feat_config["melspectrogram"]["sample_rate"] = self.experiment_config["dataset"]["sample_rate"]
         model = self.create_model(dict(training_config), skip_training=True)
         if args.verbosity > 1:
             print("Preparing model")
@@ -559,7 +546,7 @@ class Predict(E2EBase):
             features_cache_dir = os.path.join(self.cache_dir, "features")
         conf_json, conf_checksum = dict_checksum({
             "features": self.experiment_config["features"],
-            "wav_config": get_wav_config(self.experiment_config, datagroup_key),
+            "wav_config": conf["dataset"]["datagroups"][datagroup_key],
         })
         features_cache_path = os.path.join(
             features_cache_dir,
@@ -749,7 +736,7 @@ class Util(E2EBase):
     def get_cache_checksum(self):
         conf_json, conf_checksum = dict_checksum({
             "features": self.experiment_config["features"],
-            "wav_config": get_wav_config(self.experiment_config, self.args.get_cache_checksum),
+            "wav_config": conf["dataset"]["datagroups"][datagroup_key],
         })
         print(conf_checksum)
         if self.args.verbosity:
