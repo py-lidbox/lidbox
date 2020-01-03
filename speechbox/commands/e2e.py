@@ -45,9 +45,12 @@ def make_label2onehot(labels):
     OH = tf.one_hot(labels_enum, len(labels))
     return label2int, OH
 
-#TODO ensure input consistency, from config file, not some dynamically patched thing
-def dict_checksum(d):
-    json_str = json.dumps(d, ensure_ascii=False, sort_keys=True)
+def config_checksum(config, datagroup_key):
+    md5input = {
+        "features": config["features"],
+        "wav_config": config["dataset"]["datagroups"][datagroup_key],
+    }
+    json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 def count_dim_sizes(ds, ds_element_index, ndims):
@@ -199,7 +202,7 @@ class E2EBase(StatefulCommand):
         else:
             feat = tf_data.extract_features_from_paths(
                 config,
-                conf["dataset"]["datagroups"][datagroup_key],
+                self.experiment_config["dataset"]["datagroups"][datagroup_key],
                 paths,
                 paths_meta,
                 verbosity=args.verbosity,
@@ -303,10 +306,7 @@ class Train(E2EBase):
                 features_cache_dir = "/tmp"
             else:
                 features_cache_dir = os.path.join(self.cache_dir, "features")
-            conf_json, conf_checksum = dict_checksum({
-                "features": self.experiment_config["features"],
-                "wav_config": conf["dataset"]["datagroups"][datagroup_key],
-            })
+            conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
             features_cache_path = os.path.join(
                 features_cache_dir,
                 self.experiment_config["dataset"]["key"],
@@ -548,10 +548,7 @@ class Predict(E2EBase):
             features_cache_dir = "/tmp"
         else:
             features_cache_dir = os.path.join(self.cache_dir, "features")
-        conf_json, conf_checksum = dict_checksum({
-            "features": self.experiment_config["features"],
-            "wav_config": conf["dataset"]["datagroups"][datagroup_key],
-        })
+        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
         features_cache_path = os.path.join(
             features_cache_dir,
             self.experiment_config["dataset"]["key"],
@@ -733,18 +730,19 @@ class Util(E2EBase):
         optional = parser.add_argument_group("util options")
         optional.add_argument("--get-cache-checksum",
             type=str,
-            metavar="datagroup",
+            metavar="datagroup_key",
             help="For a given datagroup key, compute md5sum of config file in the same way as it would be computed when generating the filename for the features cache. E.g. for checking if the pipeline will be using the cache or start the feature extraction from scratch.")
         return parser
 
     def get_cache_checksum(self):
-        conf_json, conf_checksum = dict_checksum({
-            "features": self.experiment_config["features"],
-            "wav_config": conf["dataset"]["datagroups"][datagroup_key],
-        })
-        print(conf_checksum)
+        datagroup_key = self.args.get_cache_checksum
+        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
         if self.args.verbosity:
-            print("Computed from json string '{}'".format(conf_json))
+            print(10*'-' + " md5sum input begin " + 10*'-')
+            print(conf_json, end='')
+            print(10*'-' + "  md5sum input end  " + 10*'-')
+        print("cache md5 checksum for datagroup key '{}' is:".format(datagroup_key))
+        print(conf_checksum)
 
     def run(self):
         super().run()
