@@ -24,4 +24,4 @@ def _get_random_wav():
     return label_dir.name, wavpath, read_wavfile(wavpath)
 
 def yaml_pprint(d, **kwargs):
-    print(yaml.dump(d, indent=4), **kwargs)
+    print(yaml.dump(d, indent=2), **kwargs)

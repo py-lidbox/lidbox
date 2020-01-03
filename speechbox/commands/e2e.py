@@ -333,7 +333,7 @@ class Train(E2EBase):
                     if args.verbosity > 1 and i % 2000 == 0:
                         print(i, "samples done")
                         if args.verbosity > 3:
-                            print("sample", i, "shape is", tf.shape(x))
+                            tf.print("sample", i, "shape is", tf.shape(x))
                 if args.verbosity > 1:
                     print("all", i, "samples done")
             if args.verbosity > 2:

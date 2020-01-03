@@ -105,7 +105,7 @@ def write_wav(path, wav):
     return tf.io.write_file(path, tf.audio.encode_wav(wav.audio, wav.sample_rate))
 
 def count_dataset(ds):
-    return tf.reduce(tf.constant(0, tf.int64), lambda c, elem: c + 1)
+    return ds.reduce(tf.constant(0, tf.int64), lambda c, elem: c + 1)
 
 def filter_with_min_shape(ds, min_shape, ds_index=0):
     min_shape = tf.constant(min_shape, dtype=tf.int32)
@@ -121,6 +121,8 @@ def wav_to_byte_frames(wav, frame_length=160):
     # expecting one wav pcm header and sample width of 2
     tf.debugging.assert_equal(tf.strings.length(wav_bytes) - 44, 2 * wav_length, message="wav encoding failed")
     frame_begin_pos = tf.range(44, 2 * wav_length, 2 * frame_length)
+    # drop last frame if it overshoots the signal length
+    frame_begin_pos = frame_begin_pos[:tf.cast(wav_length / frame_length, tf.int32)]
     frame_lengths = tf.tile([2 * frame_length], [tf.size(frame_begin_pos)])
     wav_byte_frames = tf.strings.substr(wav_bytes, frame_begin_pos, frame_lengths)
     return wav_byte_frames
@@ -128,7 +130,7 @@ def wav_to_byte_frames(wav, frame_length=160):
 @tf.function
 def filter_by_webrtcvad_decisions(wav, vad_decisions, vad_frame_length):
     tf.debugging.assert_greater(vad_frame_length, 0, message="invalid vad frame length")
-    max_num_frames = tf.cast(tf.math.ceil(tf.size(wav.audio) / vad_frame_length), tf.int32)
+    max_num_frames = tf.cast(tf.size(wav.audio) / vad_frame_length, tf.int32)
     vad_decisions = tf.reshape(vad_decisions, [max_num_frames])
     signal_index_frames = tf.signal.frame(tf.range(0, tf.size(wav.audio)), vad_frame_length, vad_frame_length)
     voiced_indexes = tf.reshape(tf.boolean_mask(signal_index_frames, vad_decisions[:tf.size(signal_index_frames)]), [-1])
@@ -361,9 +363,9 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     def random_chunk_loader():
         for p, *m in zip(paths, meta):
             wav = load_wav(tf.constant(p, tf.string))
-            if "ensure_sample_rate" in wav_config and wav.sample_rate != wav_config["ensure_sample_rate"]:
+            if "filter_sample_rate" in wav_config and wav.sample_rate != wav_config["filter_sample_rate"]:
                 if verbosity:
-                    print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'ensure_sample_rate'", wav_config["ensure_sample_rate"])
+                    print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"])
                 continue
             begin = 0
             rand_index = tf.random.categorical(logits_all_half, 1)[0]
@@ -412,9 +414,9 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
     if vad_config:
         if verbosity:
             print("Removing unvoiced frames from signals using webrtcvad")
-            if verbosity > 1:
-                print("VAD config is:")
-                yaml_pprint(vad_config)
+        if verbosity > 1:
+            print("VAD config is:")
+            yaml_pprint(vad_config)
         wavs = filter_with_webrtcvad(wavs, vad_config)
     if "wav_to_frames" in wav_config:
         raise NotImplementedError("todo")
