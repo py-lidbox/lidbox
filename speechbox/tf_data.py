@@ -10,6 +10,13 @@ import matplotlib.cm
 import numpy as np
 import tensorflow as tf
 
+debug = False
+if debug:
+    TF_AUTOTUNE = None
+    tf.autograph.set_verbosity(10, alsologtostdout=True)
+else:
+    TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
+
 
 def tf_print(*args, **kwargs):
     if "summarize" not in kwargs:
@@ -141,21 +148,23 @@ def filter_with_webrtcvad(ds, config):
     assert 0 <= config["aggressiveness"] <= 3, "webrtcvad aggressiveness values must be in range [0, 3]"
     aggressiveness = tf.constant(config["aggressiveness"], tf.int32)
     vad_frame_length = tf.constant(config["vad_frame_length"], tf.int32)
-    ds = ds.map(lambda wav, *rest: (wav, wav_to_byte_frames(wav, vad_frame_length), *rest))
-    # todo assert webrtcvad frame length in (10, 20, 30) ms
-    ds = ds.map(lambda wav, wav_byte_frames, *rest: (
-        wav,
-        tf.numpy_function(
+    def encode_signals_to_wav(wav, *rest):
+        # TODO assert encoded frame lengths are in {10, 20, 30} ms since webrtcvad supports only those
+        return (wav, wav_to_byte_frames(wav, vad_frame_length), *rest)
+    def get_framewise_vad_decisions(wav, wav_byte_frames, *rest):
+        vad_decisions = tf.numpy_function(
             audio_feat.get_webrtcvad_decisions,
             [wav_byte_frames, wav.sample_rate, aggressiveness],
-            tf.bool),
-        *rest))
-    ds = ds.map(lambda wav, vad_decisions, *rest: (
-        filter_by_webrtcvad_decisions(wav, vad_decisions, vad_frame_length),
-        *rest))
+            tf.bool)
+        return (wav, vad_decisions, *rest)
+    def filter_signals(wav, vad_decisions, *rest):
+        return (filter_by_webrtcvad_decisions(wav, vad_decisions, vad_frame_length), *rest)
+    ds = (ds.map(encode_signals_to_wav)
+            .map(get_framewise_vad_decisions)
+            .map(filter_signals))
     return ds
 
-def get_random_frame_chunker(len_config):
+def make_random_frame_chunker_fn(len_config):
     float_lengths = tf.linspace(
         float(len_config["min"]),
         float(len_config["max"]),
@@ -183,10 +192,12 @@ def get_random_frame_chunker(len_config):
         return tf.gather(features, chunk_indices)
     return chunk_timedim_randomly
 
-def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_original_audio=False, conf_checksum=''):
+def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_checksum='', verbosity=0):
     image_resize_kwargs = dict(config.get("convert_to_images", {}))
     if image_resize_kwargs:
         size = image_resize_kwargs.pop("size")
+        if verbosity:
+            print("Resizing features to size", size)
         new_height = tf.constant(size.get("height", 0), dtype=tf.int32)
         new_width = tf.constant(size.get("width", 0), dtype=tf.int32)
         @tf.function
@@ -207,15 +218,21 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
                 new_size = [new_height, new_width]
             imgs = tf.image.resize(imgs, new_size, **image_resize_kwargs)
             return (imgs, *meta)
-        ds = ds.map(convert_to_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        ds = ds.map(convert_to_images, num_parallel_calls=TF_AUTOTUNE)
     if "frames" in config:
-        frame_axis = 1 if "convert_to_images" in config else 0
-        if frame_axis == 1:
-            ds = ds.map(lambda f, *meta: (tf.transpose(f, perm=(1, 0, 2, 3)), *meta))
+        if verbosity:
+            print("Dividing features time dimension into frames")
+        assert "convert_to_images" not in config, "todo, time dim random chunks for image data"
+        # frame_axis = 1 if "convert_to_images" in config else 0
+        # if frame_axis == 1:
+            # ds = ds.map(lambda f, *meta: (tf.transpose(f, perm=(1, 0, 2, 3)), *meta))
         if config["frames"].get("random", False):
+            if verbosity:
+                print("Dividing features time dimension randomly")
             assert isinstance(config["frames"]["length"], dict), "key 'frames.length' must map to a dict type when doing random chunking of frames"
-            random_chunk_frames = get_random_frame_chunker(config["frames"]["length"])
-            ds = ds.map(lambda f, *meta: (random_chunk_frames(f), *meta))
+            frame_chunker_fn = make_random_frame_chunker_fn(config["frames"]["length"])
+            chunk_timedim_randomly = lambda f, *meta: (frame_chunker_fn(f), *meta)
+            ds = ds.map(chunk_timedim_randomly, num_parallel_calls=TF_AUTOTUNE)
             if config["frames"].get("flatten", True):
                 def _unbatch_ragged_frames(frames, *meta):
                     frames_ds = tf.data.Dataset.from_tensor_slices(frames)
@@ -223,17 +240,20 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
                     return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
                 ds = ds.flat_map(_unbatch_ragged_frames)
         else:
+            if verbosity:
+                print("Dividing features time dimension into fixed length chunks")
             # Extract frames from all features, using the same metadata for each frame of one sample of features
             seq_len = config["frames"]["length"]
             seq_step = config["frames"]["step"]
             pad_zeros = config["frames"].get("pad_zeros", False)
             to_frames = lambda feats, *meta: (
-                tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=frame_axis),
+                tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=0),
                 *meta)
             ds = ds.map(to_frames)
             if config["frames"].get("flatten", True):
                 def _unbatch_frames(frames, *meta):
-                    frames_ds = tf.data.Dataset.from_tensor_slices(frames if frame_axis == 0 else tf.transpose(frames, perm=(1, 0, 2, 3)))
+                    # frames_ds = tf.data.Dataset.from_tensor_slices(frames if frame_axis == 0 else tf.transpose(frames, perm=(1, 0, 2, 3)))
+                    frames_ds = tf.data.Dataset.from_tensor_slices(frames)
                     inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
                     return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
                 ds = ds.flat_map(_unbatch_frames)
@@ -241,18 +261,29 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
     to_model_input = lambda feats, meta, *rest: (feats, label2onehot(meta[1]), meta[0], *rest)
     ds = ds.map(to_model_input)
     if "min_shape" in config:
+        if verbosity:
+            print("Filtering features by minimum shape", config["min_shape"])
         ds = filter_with_min_shape(ds, config["min_shape"])
     shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
     if shuffle_buffer_size:
+        if verbosity:
+            print("Shuffling features with shuffle buffer size", shuffle_buffer_size)
         ds = ds.shuffle(shuffle_buffer_size)
     if "padded_batch" in config:
         pad_kwargs = config["padded_batch"]["kwargs"]
+        if verbosity:
+            print("Batching features with padded batch kwargs:")
+            yaml_pprint(pad_kwargs)
         pad_kwargs["padded_shapes"] = tuple(pad_kwargs["padded_shapes"])
         pad_kwargs["padding_values"] = tuple(tf.constant(float(val), dtype=tf.float32) for val in pad_kwargs["padding_values"])
         ds = without_metadata(ds).padded_batch(**pad_kwargs)
     elif "batch_size" in config:
+        if verbosity:
+            print("Batching features with batch size", config["batch_size"])
         ds = ds.batch(config["batch_size"])
     if "bucket_by_sequence_length" in config:
+        if verbosity:
+            print("Batching features by bucketing samples into fixed length, padded sequence length buckets")
         seq_len_fn = lambda feats, *meta: tf.shape(feats)[0]
         bucket_conf = config["bucket_by_sequence_length"]
         bucket_boundaries = np.linspace(
@@ -268,21 +299,32 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
             **bucket_conf.get("kwargs", {}))
         ds = ds.apply(bucketing_fn)
     elif "group_by_sequence_length" in config:
-        max_batch_size = config["group_by_sequence_length"]["max_batch_size"]
+        if verbosity:
+            print("Batching features by grouping samples by sequence length")
+        max_batch_size = tf.constant(config["group_by_sequence_length"]["max_batch_size"], tf.int64)
         get_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
         group_to_batch = lambda key, group: group.batch(max_batch_size)
         ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, max_batch_size))
-        min_batch_size = config["group_by_sequence_length"].get("min_batch_size", 1)
-        if min_batch_size > 1:
-            ds = ds.filter(lambda batch, *meta: (tf.shape(batch)[0] > tf.constant(min_batch_size, tf.int32)))
-    os.makedirs("/tmp/tensorflow-cache", exist_ok=True)
-    ds = ds.cache("/tmp/tensorflow-cache/{}_{}".format(int(time.time()), conf_checksum))
-    if shuffle_buffer_size:
-        ds = ds.shuffle(shuffle_buffer_size)
+        if "min_batch_size" in config["group_by_sequence_length"]:
+            min_batch_size = config["group_by_sequence_length"]["min_batch_size"]
+            if verbosity:
+                print("Dropping batches smaller than min_batch_size", min_batch_size)
+            min_batch_size = tf.constant(min_batch_size, tf.int32)
+            ds = ds.filter(lambda batch, *meta: (tf.shape(batch)[0] >= min_batch_size))
+    if config.get("copy_cache_to_tmp", False):
+        tmp_cache_path = "/tmp/tensorflow-cache/{}_{}".format(int(time.time()), conf_checksum)
+        if verbosity:
+            print("Caching prepared dataset iterator to '{}'".format(tmp_cache_path))
+        os.makedirs(os.path.dirname(tmp_cache_path), exist_ok=True)
+        ds = ds.cache(filename=tmp_cache_path)
     # assume autotuned prefetch (turned off when config["prefetch"] is None)
     if "prefetch" not in config:
-        ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+        if verbosity:
+            print("Using autotune value", TF_AUTOTUNE, "for prefetching batches")
+        ds = ds.prefetch(TF_AUTOTUNE)
     elif config["prefetch"] is not None:
+        if verbosity:
+            print("Using fixed size prefetch value", config["prefetch"])
         ds = ds.prefetch(config["prefetch"])
     return ds
 
@@ -388,7 +430,7 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
             tf.constant(paths, dtype=tf.string),
             tf.constant(meta, dtype=tf.string)))
         load_wav_with_meta = lambda path, *meta: (load_wav(path), *meta)
-        wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
     if "filter_sample_rate" in wav_config:
         expected_sample_rate = tf.constant(wav_config["filter_sample_rate"], tf.int32)
         if verbosity:
