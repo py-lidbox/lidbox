@@ -164,24 +164,24 @@ def get_random_frame_chunker(len_config):
     min_chunk_length = lengths[0]
     tf.debugging.assert_greater(min_chunk_length, 1, message="Too short minimum chunk length")
     min_overlap = tf.constant(float(len_config.get("min_overlap", 0)), tf.float32)
-    tf.debugging.assert_less(min_overlap, 1.0, message="min_overlap cannot be greater than 1 (would lead to negative offsets)")
+    tf.debugging.assert_less(min_overlap, 1.0, message="Minimum overlap ratio of two adjacent random chunks must be less than 1.0")
     @tf.function
-    def random_chunk_frames(features):
+    def chunk_timedim_randomly(features):
         num_total_frames = tf.shape(features)[0]
-        num_overlapping_chunks = num_total_frames - min_chunk_length
-        max_num_chunks = 1 + tf.math.maximum(0, tf.cast(num_overlapping_chunks, tf.int32))
+        max_num_chunks = 1 + tf.math.maximum(0, num_total_frames - min_chunk_length)
         rand_length_indexes = tf.random.uniform([max_num_chunks], 0, tf.size(lengths), dtype=tf.int32)
         rand_chunk_lengths = tf.gather(lengths, rand_length_indexes)
         rand_offset_ratios = tf.random.uniform([tf.size(rand_chunk_lengths)], 0.0, 1.0 - min_overlap, dtype=tf.float32)
         offsets = tf.cast(rand_offset_ratios * tf.cast(rand_chunk_lengths, tf.float32), tf.int32)
-        offsets = tf.concat(([0], tf.math.maximum(1, offsets)), axis=0)
+        offsets = tf.concat(([0], tf.math.maximum(1, offsets[:-1])), axis=0)
         begin = tf.math.cumsum(offsets)
-        within_bounds = begin < num_total_frames
-        begin = tf.boolean_mask(begin, within_bounds)
-        end = begin + tf.boolean_mask(rand_chunk_lengths, within_bounds)
+        begin = tf.boolean_mask(begin, begin < num_total_frames)
+        rand_chunk_lengths = tf.boolean_mask(rand_chunk_lengths, begin < num_total_frames)
+        end = begin + rand_chunk_lengths
         end = tf.math.minimum(num_total_frames, end)
-        return tf.gather(features, tf.ragged.range(begin, end))
-    return random_chunk_frames
+        chunk_indices = tf.ragged.range(begin, end)
+        return tf.gather(features, chunk_indices)
+    return chunk_timedim_randomly
 
 def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_original_audio=False, conf_checksum=''):
     image_resize_kwargs = dict(config.get("convert_to_images", {}))
@@ -222,9 +222,6 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
                     inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
                     return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
                 ds = ds.flat_map(_unbatch_ragged_frames)
-                if config["frames"].get("drop_too_short", True):
-                    min_len = tf.constant(config["frames"]["length"]["min"], dtype=tf.int32)
-                    ds = ds.filter(lambda f, *m: tf.shape(f)[0] >= min_len)
         else:
             # Extract frames from all features, using the same metadata for each frame of one sample of features
             seq_len = config["frames"]["length"]
@@ -241,18 +238,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
                     return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
                 ds = ds.flat_map(_unbatch_frames)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
-    def to_model_input(feats, *meta):
-        model_input = (
-            feats,
-            label2onehot(meta[0][1]),
-            # utterance id
-            meta[0][0],
-        )
-        if not copy_original_audio:
-            return model_input
-        else:
-            # original waveform, reshaping the array here to add a mono channel
-            return model_input + (tf.expand_dims(meta[1], -1), *meta[2:])
+    to_model_input = lambda feats, meta, *rest: (feats, label2onehot(meta[1]), meta[0], *rest)
     ds = ds.map(to_model_input)
     if "min_shape" in config:
         ds = filter_with_min_shape(ds, config["min_shape"])
@@ -301,7 +287,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, copy_ori
     return ds
 
 #TODO histogram support (uses significantly less space than images+audio)
-def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="viridis", copy_original_audio=False, debug_squeeze_last_dim=False, num_batches=-1):
+def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="viridis", debug_squeeze_last_dim=False, num_batches=-1):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -334,8 +320,9 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
             image = tf.image.flip_up_down(image)
         tf.debugging.assert_all_finite(image, message="non-finite values in image when trying to create dataset logger for tensorboard")
         tf.summary.image(features_name, image, step=batch_idx, max_outputs=max_outputs)
-        if copy_original_audio:
-            tf.summary.audio("original_audio", batch[3], 16000, step=batch_idx, max_outputs=max_outputs)
+        # if copy_original_audio:
+            # wav = batch[3]
+            # tf.summary.audio("original_audio", wav.audio, wav.sample_rate, step=batch_idx, max_outputs=max_outputs)
         tf.summary.text("utterance_ids", uttid[:max_outputs], step=batch_idx)
         return batch
     return (ds.take(num_batches)
@@ -386,7 +373,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_original_audio=False, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
+def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
     paths, meta = list(paths), list(meta)
     assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
     if "wav_to_random_chunks" in wav_config:
@@ -444,18 +431,8 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
     extract_feats = lambda wavs, *meta: (
         extract_features(wavs, *feat_extract_args),
         *meta,
-        wavs,
+        # wavs,
     )
-    if trim_audio:
-        # Ensure all wav files in the metadata contains precisely 'trim_audio' amount of frames
-        def pad_or_slice_metawavs(wav, meta, metawav):
-            padding = [[0, tf.maximum(0, trim_audio - tf.size(metawav.audio))]]
-            trimmed = tf.pad(metawav.audio[:trim_audio], padding)
-            return wav, meta, Wav(trimmed.audio, wav.sample_rate)
-        if verbosity:
-            print("Trimming metawavs")
-        wavs = wavs.map(pad_or_slice_metawavs)
-        yaml_pprint(feat_extract_args)
     if "batch_wavs_by_length" in feat_config:
         window_size = feat_config["batch_wavs_by_length"]["max_batch_size"]
         if verbosity:
@@ -465,30 +442,15 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, copy_origi
         group_by_wav_length = tf.data.experimental.group_by_window(key_fn, reduce_fn, window_size)
         wavs_batched = wavs.apply(group_by_wav_length)
     else:
-        wavs_batched = wavs.batch(feat_config.get("batch_size", 1))
+        batch_size = feat_config.get("batch_size", 1)
+        if verbosity:
+            print("Batching wavs with batch size", batch_size)
+        wavs_batched = wavs.batch(batch_size)
     if verbosity:
-        print("Extracting features with args")
+        print("Applying feature extractor to batched wavs")
     features = (wavs_batched
-                    .map(extract_feats, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+                    .map(extract_feats, num_parallel_calls=TF_AUTOTUNE)
                     .unbatch())
-    old_vad_config = dict(feat_config.get("voice_activity_detection", {}))
-    if old_vad_config and old_vad_config.pop("match_feature_frames", False):
-        _do_vad = lambda feats, meta, wav: (
-            tf.boolean_mask(feats, tf.squeeze(audio_feat.framewise_energy_vad_decisions(tf.expand_dims(wav.audio, 0), **old_vad_config), 0)),
-            meta,
-            wav,
-        )
-        if verbosity:
-            print("Applying voice activity detection with kwargs:")
-            yaml_pprint(old_vad_config)
-        features = features.map(_do_vad)
-    min_seq_len = feat_config.get("min_sequence_length")
-    if min_seq_len:
-        def not_too_short(feats, *rest):
-            return tf.math.greater_equal(tf.shape(feats)[0], min_seq_len)
-        if verbosity:
-            print("Dropping features with axis 0 shape shorter than {}".format(min_seq_len))
-        features = features.filter(not_too_short)
     return features
 
 def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):

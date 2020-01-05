@@ -33,13 +33,14 @@ def spectrograms(signals, sample_rate, frame_length=400, frame_step=160, power=2
     # Drop all fft bins that are outside the given [fmin, fmax] band
     fft_freqs = fft_frequencies(sample_rate=sample_rate, n_fft=frame_length)
     # With default [fmin, fmax] of [0, 8000] this will contain only 'True's
-    bins_in_band = tf.math.logical_and(fmin <= fft_freqs, fft_freqs <= fmax)
+    bins_in_band = tf.math.logical_and(
+        tf.math.less_equal(fmin, fft_freqs),
+        tf.math.less_equal(fft_freqs, fmax))
     return tf.boolean_mask(S, bins_in_band, axis=2)
 
 @tf.function
 def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     tf.debugging.assert_rank(S, 3, "Input to melspectrograms must be a batch of 2-dimensional spectrograms with shape (batch, frames, freq_bins)")
-    tf.debugging.assert_greater(tf.shape(S), 0, "Empty spectrogram")
     mel_weights = tf.signal.linear_to_mel_weight_matrix(
         num_mel_bins=num_mel_bins,
         num_spectrogram_bins=tf.shape(S)[2],

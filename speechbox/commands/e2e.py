@@ -54,20 +54,18 @@ def config_checksum(config, datagroup_key):
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 def count_dim_sizes(ds, ds_element_index, ndims):
+    tf.debugging.assert_greater(ndims, 0)
     shapes_ds = ds.map(lambda *t: tf.shape(t[ds_element_index])).cache()
-    #TODO infer ndims from shapes_ds
-    #ndims = shapes_ds.reduce(tf.constant(0, dtype=tf.int32), lambda a, shape: tf.math.maximum(a, len(shape)))
-    #tf.debugging.assert_greater(ndims, 0)
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)
-    @tf.function
-    def accumulate_dim_size_counts(counter, shape):
-        enumerated_shape = tf.stack((shape_indices, shape), axis=1)
-        return tf.tensor_scatter_nd_add(counter, enumerated_shape, ones)
     max_sizes = shapes_ds.reduce(
         tf.zeros(ndims, dtype=tf.int32),
         lambda acc, shape: tf.math.maximum(acc, shape))
     max_max_size = tf.reduce_max(max_sizes)
+    @tf.function
+    def accumulate_dim_size_counts(counter, shape):
+        enumerated_shape = tf.stack((shape_indices, shape), axis=1)
+        return tf.tensor_scatter_nd_add(counter, enumerated_shape, ones)
     size_counts = shapes_ds.reduce(
         tf.zeros((ndims, max_max_size + 1), dtype=tf.int32),
         accumulate_dim_size_counts)
@@ -130,7 +128,7 @@ class E2EBase(StatefulCommand):
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
-    def extract_features(self, config, datagroup_key, copy_original_audio, trim_audio, debug_squeeze_last_dim):
+    def extract_features(self, config, datagroup_key, trim_audio, debug_squeeze_last_dim):
         args = self.args
         datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
         if args.verbosity > 2:
@@ -206,7 +204,6 @@ class E2EBase(StatefulCommand):
                 paths,
                 paths_meta,
                 verbosity=args.verbosity,
-                copy_original_audio=copy_original_audio,
                 trim_audio=trim_audio,
                 debug_squeeze_last_dim=debug_squeeze_last_dim,
             )
@@ -257,7 +254,7 @@ class Train(E2EBase):
             print("Generated onehot encoding as tensors:")
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
-                tf.print(l, "\t", label2onehot(l), summarize=-1, output_stream=sys.stdout)
+                tf_data.tf_print(l, "\t", label2onehot(l))
         self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), args.skip_training)
         dataset = {}
@@ -273,7 +270,6 @@ class Train(E2EBase):
             extractor_ds = self.extract_features(
                 feat_config,
                 datagroup_key,
-                summary_kwargs.get("copy_original_audio", False) or feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False),
                 summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim,
             )
@@ -329,23 +325,22 @@ class Train(E2EBase):
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 i = 0
-                for i, x in enumerate(extractor_ds):
+                for i, (feats, meta, *rest) in enumerate(extractor_ds):
                     if args.verbosity > 1 and i % 2000 == 0:
                         print(i, "samples done")
-                        if args.verbosity > 3:
-                            tf.print("sample", i, "shape is", tf.shape(x))
+                    if args.verbosity > 3:
+                        tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", meta)
                 if args.verbosity > 1:
                     print("all", i, "samples done")
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
-            if "frames" in feat_config:
-                print("'frames' key in feat_config does nothing, put it into the datagroup config under 'experiment'")
             dataset[ds] = tf_data.prepare_dataset_for_training(
                 extractor_ds,
                 ds_config,
                 feat_config,
                 label2onehot,
                 conf_checksum=conf_checksum,
+                verbosity=args.verbosity,
             )
             if args.debug_dataset:
                 if args.verbosity:
@@ -354,7 +349,7 @@ class Train(E2EBase):
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
                 for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
-                    tf.print(size_counts, summarize=-1, output_stream=sys.stdout)
+                    tf_data.tf_print(size_counts)
             if summary_kwargs:
                 logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
                 if os.path.isdir(logdir):
@@ -526,12 +521,9 @@ class Predict(E2EBase):
             paths_meta.append((utt, label))
         if args.verbosity:
             print("Extracting test set features for prediction")
-
-        copy_original_audio = feat_config.get("voice_activity_detection", {}).get("match_feature_frames", False)
         features = self.extract_features(
             feat_config,
             "test",
-            copy_original_audio=copy_original_audio,
             trim_audio=False,
             debug_squeeze_last_dim=(ds_config["input_shape"][-1] == 1),
         )
@@ -540,7 +532,7 @@ class Predict(E2EBase):
             ds_config,
             feat_config,
             label2onehot,
-            copy_original_audio,
+            verbosity=args.verbosity,
         )
         # drop meta wavs required only for vad
         features = features.map(lambda *t: t[:3])
@@ -648,11 +640,11 @@ class Evaluate(E2EBase):
             max_score = tf.math.maximum(max_score, tf.math.reduce_max(scores))
             min_score = tf.math.minimum(min_score, tf.math.reduce_min(scores))
         if args.verbosity > 2:
-            tf.print("Max score", max_score, "min score", min_score, output_stream=sys.stdout, summarize=-1)
+            tf_data.tf_print("Max score", max_score, "min score", min_score)
         thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
         if args.verbosity > 2:
             print("Score thresholds for language detection decisions:")
-            tf.print(thresholds, summarize=5, output_stream=sys.stdout)
+            tf_data.tf_print(thresholds, summarize=5)
         # First do C_avg to get the best threshold
         cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
         if args.verbosity > 1:
