@@ -1,4 +1,3 @@
-import collections
 import os
 import sys
 import time
@@ -33,15 +32,16 @@ def feature_scaling(X, min, max, axis):
     return min + (max - min) * tf.math.divide_no_nan(X - X_min, X_max - X_min)
 
 @tf.function
-def cmvn_slide(X, window_len=300):
-    """Apply CMVN on batches of cepstral coef matrices X with a given cmvn window length."""
-    tf.debugging.assert_rank_at_least(X, 3, message="Input to cmvn_slide should be batches of cepstral coef matrices (or tensors) with shape (Batch, Timedim, Coefs, ...)")
-    if tf.shape(X)[1] < window_len:
+def cmvn_slide(X, window_len=300, normalize_variance=True):
+    """Apply cepstral mean and variance normalization on batches of features matrices X with a given cmvn window length."""
+    tf.debugging.assert_rank(X, 3, message="Input to cmvn_slide should be of shape (Batch, Timedim, Coefs)")
+    if tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding cmvn
-        return tf.math.divide_no_nan(
-            X - tf.math.reduce_mean(X, axis=2, keepdims=True),
-            tf.math.reduce_std(X, axis=2, keepdims=True)
-        )
+        centered = X - tf.math.reduce_mean(X, axis=2, keepdims=True)
+        if normalize_variance:
+            return tf.math.divide_no_nan(centered, tf.math.reduce_std(X, axis=2, keepdims=True))
+        else:
+            return centered
     else:
         # Pad beginning and end with zeros to fit window
         padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
@@ -49,11 +49,28 @@ def cmvn_slide(X, window_len=300):
         X_padded = tf.pad(X, padding, mode="REFLECT")
         cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
         tf.debugging.assert_equal(tf.shape(cmvn_windows)[1], tf.shape(X)[1], message="Mismatching amount of CMVN output windows and time steps in the input")
-        # Standardize within each window and return result of same shape as X
-        return tf.math.divide_no_nan(
-            X - tf.math.reduce_mean(cmvn_windows, axis=2),
-            tf.math.reduce_std(cmvn_windows, axis=2)
-        )
+        centered = X - tf.math.reduce_mean(cmvn_windows, axis=2)
+        if normalize_variance:
+            return tf.math.divide_no_nan(centered, tf.math.reduce_std(cmvn_windows, axis=2))
+        else:
+            return centered
+
+# NOTE tensorflow does not yet support non-zero axes in tf.gather when indices are ragged
+# @tf.function
+# def cmvn_gather(X, window_len=300):
+#     """Same as cmvn_slide but without padding."""
+#     tf.debugging.assert_rank_at_least(X, 3)
+#     num_total_frames = tf.shape(X)[1]
+#     begin = tf.range(0, num_total_frames) - window_len // 2 + 1
+#     end = begin + window_len
+#     begin = tf.clip_by_value(begin, 0, num_total_frames)
+#     end = tf.clip_by_value(end, 0, num_total_frames)
+#     window_indices = tf.ragged.range(begin, end)
+#     windows = tf.gather(X, window_indices, axis=1)
+#     return tf.math.divide_no_nan(
+#         X - tf.math.reduce_mean(windows, axis=2),
+#         tf.math.reduce_std(windows, axis=2)
+#     )
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, cmvn_kwargs):
