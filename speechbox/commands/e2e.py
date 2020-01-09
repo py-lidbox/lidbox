@@ -8,8 +8,9 @@ import random
 import sys
 import time
 
-import tensorflow as tf
+import kaldiio
 import numpy as np
+import tensorflow as tf
 
 from speechbox import yaml_pprint
 from speechbox.commands.base import Command, State, StatefulCommand
@@ -150,26 +151,26 @@ class E2EBase(StatefulCommand):
             print("Non-empty lines read from utt2path {}, and utt2label {}".format(len(utt2path), len(utt2label)))
         # All utterance ids must be present in both files
         assert set(utt2path) == set(utt2label), "utt2path and utt2label must have exactly matching sets of utterance ids"
-        keys = list(utt2path.keys())
+        utterance_list = list(utt2path.keys())
         if datagroup.get("shuffle_utt2path", False):
             if args.verbosity > 1:
                 print("Shuffling utterance ids, all wavpaths in the utt2path list will be processed in random order.")
-            random.shuffle(keys)
+            random.shuffle(utterance_list)
         else:
             if args.verbosity > 1:
                 print("Not shuffling utterance ids, all wavs will be processed in order of the utt2path list.")
         if args.file_limit:
             if args.verbosity > 1:
                 print("--file-limit set at {0}, using at most {0} utterances from the utterance id list, starting at the beginning of utt2path".format(args.file_limit))
-            keys = keys[:args.file_limit]
+            utterance_list = utterance_list[:args.file_limit]
             if args.verbosity > 3:
                 print("Using utterance ids:")
-                yaml_pprint(keys)
+                yaml_pprint(utterance_list)
         labels_set = set(self.experiment_config["dataset"]["labels"])
         num_dropped = collections.Counter()
         paths = []
         paths_meta = []
-        for utt in keys:
+        for utt in utterance_list:
             label = utt2label[utt]
             if label not in labels_set:
                 num_dropped[label] += 1
@@ -196,7 +197,13 @@ class E2EBase(StatefulCommand):
             feat_path = config["sparsespeech_paths"]["input"][datagroup_key]
             if args.verbosity:
                 print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
-            feat, stats = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label), {}
+            feat = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label)
+        elif config["type"] == "kaldi":
+            kaldi_feats_scp = config["datagroups"][datagroup_key]["features_path"]
+            expected_shape = config["datagroups"][datagroup_key]["shape"]
+            if args.verbosity:
+                print("Parsing Kaldi features from '{}' with expected shape {}".format(kaldi_feats_scp, expected_shape))
+            feat = tf_data.parse_kaldi_features(utterance_list, kaldi_feats_scp, utt2label, expected_shape)
         else:
             feat = tf_data.extract_features_from_paths(
                 config,
@@ -349,29 +356,29 @@ class Train(E2EBase):
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
                 for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
-                    tf_data.tf_print(size_counts)
-            if summary_kwargs:
-                logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
-                if os.path.isdir(logdir):
-                    if args.verbosity:
-                        print("summary_kwargs available, but '{}' already exists, not iterating over dataset again".format(logdir))
-                else:
-                    if args.verbosity:
-                        print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds, summary_kwargs.get("num_batches", "'all'"), logdir))
-                    self.make_named_dir(logdir)
-                    writer = tf.summary.create_file_writer(logdir)
-                    summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
-                    with writer.as_default():
-                        logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                    tf_data.tf_print(size_counts, summarize=10)
+                if summary_kwargs:
+                    logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
+                    if os.path.isdir(logdir):
                         if args.verbosity:
-                            print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
-                        i = 0
-                        for i, elem in enumerate(logged_dataset):
-                            if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
+                            print("summary_kwargs available, but '{}' already exists, not iterating over dataset again".format(logdir))
+                    else:
+                        if args.verbosity:
+                            print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds, summary_kwargs.get("num_batches", "'all'"), logdir))
+                        self.make_named_dir(logdir)
+                        writer = tf.summary.create_file_writer(logdir)
+                        summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
+                        with writer.as_default():
+                            logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                            if args.verbosity:
+                                print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
+                            i = 0
+                            for i, elem in enumerate(logged_dataset):
+                                if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
+                                    print(i, "batches done")
+                            if args.verbosity > 1:
                                 print(i, "batches done")
-                        if args.verbosity > 1:
-                            print(i, "batches done")
-                        del logged_dataset
+                            del logged_dataset
         if args.verbosity > 1:
             print("Preparing model")
         model.prepare(labels, training_config)
@@ -501,19 +508,19 @@ class Predict(E2EBase):
         utt2label = collections.OrderedDict(
             row[:2] for row in parse_space_separated(utt2label_path)
         )
-        keys = list(utt2path.keys())
+        utterance_list = list(utt2path.keys())
         if args.file_limit:
-            keys = keys[:args.file_limit]
+            utterance_list = utterance_list[:args.file_limit]
             if args.verbosity > 3:
                 print("Using utterance ids:")
-                yaml_pprint(keys)
+                yaml_pprint(utterance_list)
         int2label = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(int2label)
         label2onehot = lambda label: OH[label2int.lookup(label)]
         labels_set = set(int2label)
         paths = []
         paths_meta = []
-        for utt in keys:
+        for utt in utterance_list:
             label = utt2label[utt]
             if label not in labels_set:
                 continue
@@ -527,12 +534,14 @@ class Predict(E2EBase):
             trim_audio=False,
             debug_squeeze_last_dim=(ds_config["input_shape"][-1] == 1),
         )
+        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
         features = tf_data.prepare_dataset_for_training(
             features,
             ds_config,
             feat_config,
             label2onehot,
             verbosity=args.verbosity,
+            conf_checksum=conf_checksum,
         )
         # drop meta wavs required only for vad
         features = features.map(lambda *t: t[:3])
@@ -540,7 +549,6 @@ class Predict(E2EBase):
             features_cache_dir = "/tmp"
         else:
             features_cache_dir = os.path.join(self.cache_dir, "features")
-        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
         features_cache_path = os.path.join(
             features_cache_dir,
             self.experiment_config["dataset"]["key"],
