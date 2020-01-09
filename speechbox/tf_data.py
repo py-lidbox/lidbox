@@ -547,6 +547,20 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
         (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])),
     )
 
+def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape):
+    utt2feats = kaldiio.load_scp(features_path)
+    def datagen():
+        for utt in utterance_list:
+            if utt not in utt2feats:
+                print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
+                continue
+            yield utt2feats[utt], (utt, utt2label[utt])
+    return tf.data.Dataset.from_generator(
+        datagen,
+        (tf.float32, tf.string),
+        (tf.TensorShape(expected_shape), tf.TensorShape([2])),
+    )
+
 # TF serialization functions, not really needed if features are cached using tf.data.Dataset.cache
 
 TFRECORD_COMPRESSION = "GZIP"
