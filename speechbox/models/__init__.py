@@ -109,7 +109,11 @@ class KerasWrapper:
                 self.callbacks.append(EpochModelCheckpoint(checkpoints.pop("epoch_interval"), checkpoints["filepath"]))
             self.callbacks.append(tf.keras.callbacks.ModelCheckpoint(**checkpoints))
         for cb in other_callbacks:
-            self.callbacks.append(getattr(tf.keras.callbacks, cb["cls"])(**cb.get("kwargs", {})))
+            if hasattr(sys.modules[__name__], cb["cls"]):
+                cb_class = getattr(sys.modules[__name__], cb["cls"])
+            else:
+                cb_class = getattr(tf.keras.callbacks, cb["cls"])
+            self.callbacks.append(cb_class(**cb.get("kwargs", {})))
 
     @with_device
     def to_disk(self, basedir):
