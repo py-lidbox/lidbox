@@ -43,9 +43,8 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
         else:
             return centered
     else:
-        # Pad beginning and end with zeros to fit window
-        padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
         # Padding by reflecting the coefs along the time dimension should not dilute the means and stddevs as much as zeros would
+        padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
         X_padded = tf.pad(X, padding, mode="REFLECT")
         cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
         tf.debugging.assert_equal(tf.shape(cmvn_windows)[1], tf.shape(X)[1], message="Mismatching amount of CMVN output windows and time steps in the input")

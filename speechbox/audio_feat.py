@@ -38,9 +38,7 @@ def spectrograms(signals, frame_length=400, frame_step=160, power=2.0, fmin=0.0,
     # Drop all fft bins that are outside the given [fmin, fmax] band
     fft_freqs = fft_frequencies(sample_rate=signals.sample_rate[0], n_fft=frame_length)
     # With default [fmin, fmax] of [0, 8000] this will contain only 'True's
-    bins_in_band = tf.math.logical_and(
-        tf.math.less_equal(fmin, fft_freqs),
-        tf.math.less_equal(fft_freqs, fmax))
+    bins_in_band = tf.math.logical_and(fmin <= fft_freqs, fft_freqs <= fmax)
     return tf.boolean_mask(S, bins_in_band, axis=2)
 
 @tf.function
@@ -78,7 +76,6 @@ def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy
     S = tf.math.log(S + 1e-6)
     tf.debugging.assert_all_finite(S, "logmelspectrogram extraction failed, cannot compute mfcc energy vad")
     mfcc = tf.signal.mfccs_from_log_mel_spectrograms(S)
-    tf.print(tf.shape(mfcc))
     log_energy = tf.squeeze(tf.signal.mfccs_from_log_mel_spectrograms(S)[..., 0])
     tf.debugging.assert_rank(log_energy, 1, message="Failed to extract 0th MFCC coef")
     mean_log_energy = tf.math.reduce_mean(log_energy)
