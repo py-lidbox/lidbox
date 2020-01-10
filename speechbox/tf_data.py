@@ -515,9 +515,10 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
             voiced_frames = tf.boolean_mask(features, vad_decisions)
             if verbosity > 3:
                 tf_print("before vad", tf.shape(features), "after vad", tf.shape(voiced_frames))
-            # return voiced_frames, meta, wavs
-            return voiced_frames, meta
+            return voiced_frames, meta, wavs
         features = features.map(select_voiced_frames)
+    # drop wavs for now
+    features = features.map(lambda feats, meta, wavs: (feats, meta))
     return features
 
 def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):

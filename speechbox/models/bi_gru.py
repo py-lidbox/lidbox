@@ -15,7 +15,7 @@ import numpy as np
 def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024, batch_normalize=False):
     inputs = Input(shape=input_shape, name="input")
     bigru1 = Bidirectional(GRU(num_gru_units, return_sequences=True), merge_mode=merge_mode, name="biGRU_1")(inputs)
-    bigru2 = Bidirectional(GRU(num_gru_units), merge_mode=merge_mode, name="biGRU_2")(bigru2)
+    bigru2 = Bidirectional(GRU(num_gru_units), merge_mode=merge_mode, name="biGRU_2")(bigru1)
     if batch_normalize:
         bigru2 = BatchNormalization(name="biGRU_2_bn")(bigru2)
     fc_relu1 = Dense(1024, activation="relu", name="fc_relu")(bigru2)
