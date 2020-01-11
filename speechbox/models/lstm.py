@@ -1,32 +1,21 @@
+from tensorflow.keras.layers import (
+    Activation,
+    Dense,
+    Input,
+    LSTM,
+)
+from tensorflow.keras.models import Model
 import tensorflow as tf
 
 
-def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, batch_normalize=False):
-    lstm_layers = []
-    lstm_1 = tf.keras.layers.LSTM(
-        num_units,
-        name="LSTM_1",
-        input_shape=input_shape,
-        return_sequences=num_layers > 1
-    )
-    lstm_layers.append(lstm_1)
-    for i in range(2, num_layers + 1):
-        if narrowing:
-            num_units //= 2
-        lstm_i = tf.keras.layers.LSTM(
-            num_units,
-            name="LSTM_{}".format(i),
-            return_sequences=i < num_layers
-        )
-        lstm_layers.append(lstm_i)
-    if batch_normalize:
-        layers = []
-        for i, lstm in enumerate(lstm_layers, start=1):
-            bn = tf.keras.layers.BatchNormalization(name="batchnorm_{}".format(i))
-            layers.extend([lstm, bn])
-        lstm_layers = layers
-    output = tf.keras.layers.Dense(output_shape, activation="softmax", name="output")
-    return tf.keras.models.Sequential(lstm_layers + [output])
+def loader(input_shape, num_outputs, output_activation="softmax", num_units=128):
+    output_activation_fn = getattr(tf.nn, output_activation) if output_activation is not None else None
+    inputs = Input(shape=input_shape, name="input")
+    lstm = LSTM(num_units, name="lstm")(inputs)
+    outputs = Dense(num_outputs, name="output", activation=None)(lstm)
+    outputs = Activation(output_activation_fn, name=str(output_activation))(outputs)
+    return Model(inputs=inputs, outputs=outputs)
 
-def predict(model, utterance_frames):
-    return model.predict(utterance_frames).mean(axis=0)
+
+def predict(model, inputs):
+    return model.predict(inputs)
