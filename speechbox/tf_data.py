@@ -316,11 +316,15 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
             min_batch_size = tf.constant(min_batch_size, tf.int32)
             ds = ds.filter(lambda batch, *meta: (tf.shape(batch)[0] >= min_batch_size))
     if config.get("copy_cache_to_tmp", False):
-        tmp_cache_path = "/tmp/tensorflow-cache/{}_{}".format(int(time.time()), conf_checksum)
+        tmp_cache_path = "/tmp/tensorflow-cache/training-prepared_{}_{}".format(int(time.time()), conf_checksum)
         if verbosity:
             print("Caching prepared dataset iterator to '{}'".format(tmp_cache_path))
         os.makedirs(os.path.dirname(tmp_cache_path), exist_ok=True)
         ds = ds.cache(filename=tmp_cache_path)
+        if shuffle_buffer_size:
+            if verbosity:
+                print("Also shuffling cached features with shuffle buffer size", shuffle_buffer_size)
+            ds = ds.shuffle(shuffle_buffer_size)
     # assume autotuned prefetch (turned off when config["prefetch"] is None)
     if "prefetch" not in config:
         if verbosity:

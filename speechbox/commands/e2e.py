@@ -305,10 +305,10 @@ class Train(E2EBase):
                     print("Xvector extractor is:\n", xvector_extractor)
                 embed_xvec = lambda feats, *meta: (tf.expand_dims(xvector_extractor(feats), -2), *meta)
                 extractor_ds = extractor_ds.batch(1).map(embed_xvec).unbatch()
-            if ds_config.get("cache_features_in_tmp", False):
-                features_cache_dir = "/tmp"
-            else:
+            if ds_config.get("persistent_features_cache", True):
                 features_cache_dir = os.path.join(self.cache_dir, "features")
+            else:
+                features_cache_dir = "/tmp/tensorflow-cache"
             conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
             features_cache_path = os.path.join(
                 features_cache_dir,
@@ -545,10 +545,10 @@ class Predict(E2EBase):
         )
         # drop meta wavs required only for vad
         features = features.map(lambda *t: t[:3])
-        if ds_config.get("cache_features_in_tmp", False):
-            features_cache_dir = "/tmp"
-        else:
+        if ds_config.get("persistent_features_cache", True):
             features_cache_dir = os.path.join(self.cache_dir, "features")
+        else:
+            features_cache_dir = "/tmp/tensorflow-cache"
         features_cache_path = os.path.join(
             features_cache_dir,
             self.experiment_config["dataset"]["key"],
