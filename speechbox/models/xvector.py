@@ -29,7 +29,7 @@ class GlobalMeanStddevPooling1D(Layer):
 
 
 class FrameLayer(Layer):
-    def __init__(self, filters, kernel_size, stride, name="resnet", activation="relu", padding="causal", dropout_rate=None):
+    def __init__(self, filters, kernel_size, stride, name="frame", activation="relu", padding="causal", dropout_rate=None):
         super().__init__(name=name)
         self.conv = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding=padding)
         self.batch_norm = BatchNormalization(name="{}_bn".format(name))
@@ -94,7 +94,6 @@ class SegmentLayer(Layer):
 
 
 def loader(input_shape, num_outputs, output_activation="softmax"):
-    output_activation_fn = getattr(tf.nn, output_activation) if output_activation is not None else None
     inputs = Input(shape=input_shape, name="input")
     frame1 = FrameLayer(512, 5, 1, name="frame1")(inputs)
     frame2 = FrameLayer(512, 3, 2, name="frame2")(frame1)
@@ -105,7 +104,8 @@ def loader(input_shape, num_outputs, output_activation="softmax"):
     segment1 = SegmentLayer(512, name="segment1")(stats_pooling)
     segment2 = SegmentLayer(512, name="segment2")(segment1)
     outputs = Dense(num_outputs, name="output", activation=None)(segment2)
-    outputs = Activation(output_activation_fn, name=str(output_activation))(outputs)
+    if output_activation:
+        outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs)
 
 
