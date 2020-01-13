@@ -37,9 +37,9 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
     tf.debugging.assert_rank(X, 3, message="Input to cmvn_slide should be of shape (Batch, Timedim, Coefs)")
     if tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding cmvn
-        centered = X - tf.math.reduce_mean(X, axis=2, keepdims=True)
+        centered = X - tf.math.reduce_mean(X, axis=1, keepdims=True)
         if normalize_variance:
-            return tf.math.divide_no_nan(centered, tf.math.reduce_std(X, axis=2, keepdims=True))
+            return tf.math.divide_no_nan(centered, tf.math.reduce_std(X, axis=1, keepdims=True))
         else:
             return centered
     else:
