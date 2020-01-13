@@ -25,7 +25,7 @@ def tf_print(*args, **kwargs):
     return tf.print(*args, **kwargs)
 
 @tf.function
-def feature_scaling(X, min, max, axis):
+def feature_scaling(X, min, max, axis=None):
     """Apply feature scaling on X over given axis such that all values are between [min, max]"""
     X_min = tf.math.reduce_min(X, axis=axis, keepdims=True)
     X_max = tf.math.reduce_max(X, axis=axis, keepdims=True)
@@ -361,8 +361,8 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
         image, onehot, uttid = batch[:3]
         if debug_squeeze_last_dim:
             image = tf.squeeze(image, -1)
-        # Scale grayscale channel between 0 and 1 separately for each feature dim
-        image = feature_scaling(image, tf.constant(0.0), tf.constant(1.0), tf.constant(2, dtype=tf.int32))
+        # Scale grayscale channel between 0 and 1 over whole image
+        image = feature_scaling(image, tf.constant(0.0), tf.constant(1.0))
         # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
         indices = tf.dtypes.cast(tf.math.round(image * num_colors), tf.int32)
         image = tf.gather(colors, indices)
