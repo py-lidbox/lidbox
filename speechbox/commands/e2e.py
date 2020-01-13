@@ -54,9 +54,11 @@ def config_checksum(config, datagroup_key):
     json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
-def count_dim_sizes(ds, ds_element_index, ndims):
+def count_dim_sizes(ds, ds_element_index, ndims, shapes_cache_dir):
     tf.debugging.assert_greater(ndims, 0)
-    shapes_ds = ds.map(lambda *t: tf.shape(t[ds_element_index])).cache()
+    get_shape_at_index = lambda *t: tf.shape(t[ds_element_index])
+    shapes_ds = (ds.map(get_shape_at_index)
+                   .cache(filename=os.path.join(shapes_cache_dir, "shapes_iterator")))
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)
     max_sizes = shapes_ds.reduce(
@@ -354,7 +356,9 @@ class Train(E2EBase):
                     print("--debug-dataset given, iterating over the dataset to gather stats")
                 if args.verbosity > 1:
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
-                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
+                shapes_cache = "/tmp/tensorflow-cache/debug-dataset"
+                self.make_named_dir(shapes_cache)
+                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1, shapes_cache)):
                     print("axis {}\n[count size]:".format(axis))
                     tf_data.tf_print(size_counts, summarize=10)
                 if summary_kwargs:
