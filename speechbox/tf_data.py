@@ -43,7 +43,7 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
         else:
             return centered
     else:
-        # Padding by reflecting the coefs along the time dimension should not dilute the means and stddevs as much as zeros would
+        # Padding by reflecting the coefs along the time dimension should not dilute the means and variances as much as zeros would
         padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
         X_padded = tf.pad(X, padding, mode="REFLECT")
         cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
@@ -70,6 +70,26 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
 #         X - tf.math.reduce_mean(windows, axis=2),
 #         tf.math.reduce_std(windows, axis=2)
 #     )
+
+def cmvn_nopad_slide_numpy(X, window_len, normalize_variance):
+    num_total_frames = X.shape[1]
+    if num_total_frames <= window_len:
+        centered = X - np.mean(X, axis=1, keepdims=True)
+        if normalize_variance:
+            centered /= np.std(X, axis=1, keepdims=True)
+        return centered
+    begin = np.arange(0, num_total_frames) - window_len // 2
+    end = begin + window_len
+    begin = np.clip(begin, 0, num_total_frames)
+    end = np.clip(end, 0, num_total_frames)
+    result = np.zeros_like(X)
+    for i, (b, e) in enumerate(zip(begin, end)):
+        window = X[:,b:e]
+        centered = X[:,i] - np.mean(window, axis=1)
+        if normalize_variance:
+            centered /= np.std(window, axis=1)
+        result[:,i] = centered
+    return result
 
 @tf.function
 def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, cmvn_kwargs):
@@ -310,9 +330,9 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
             **bucket_conf.get("kwargs", {}))
         ds = ds.apply(bucketing_fn)
     elif "group_by_sequence_length" in config:
-        if verbosity:
-            print("Batching features by grouping samples by sequence length")
         max_batch_size = tf.constant(config["group_by_sequence_length"]["max_batch_size"], tf.int64)
+        if verbosity:
+            print("Grouping samples by sequence length into batches of max size {}".format(max_batch_size))
         get_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
         group_to_batch = lambda key, group: group.batch(max_batch_size)
         ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, max_batch_size))
@@ -492,13 +512,6 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
             wavs = append_mfcc_energy_vad_decisions(wavs, vad_kwargs)
         else:
             raise NotImplementedError("unknown VAD type '{}'".format(vad_config["type"]))
-    # This function expects batches of wavs
-    feat_extract_args = feat_extraction_args_as_list(feat_config)
-    extract_feats = lambda wavs, *meta: (
-        extract_features(wavs, *feat_extract_args),
-        *meta,
-        wavs,
-    )
     if "batch_wavs_by_length" in feat_config:
         window_size = feat_config["batch_wavs_by_length"]["max_batch_size"]
         if verbosity:
@@ -514,9 +527,28 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
         wavs_batched = wavs.batch(batch_size)
     if verbosity:
         print("Applying feature extractor to batched wavs")
-    features = (wavs_batched
-                    .map(extract_feats, num_parallel_calls=TF_AUTOTUNE)
-                    .unbatch())
+    feat_extract_args = feat_extraction_args_as_list(feat_config)
+    # This function expects batches of wavs
+    extract_feats = lambda wavs, *meta: (
+        extract_features(wavs, *feat_extract_args),
+        *meta,
+        wavs,
+    )
+    features = wavs_batched.map(extract_feats, num_parallel_calls=TF_AUTOTUNE)
+    if "cmvn_numpy" in feat_config:
+        window_len = tf.constant(feat_config["cmvn_numpy"]["window_len"], tf.int32)
+        normalize_variance = tf.constant(feat_config["cmvn_numpy"].get("normalize_variance", True), tf.bool)
+        if verbosity:
+            tf_print("Using numpy to apply cmvn sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
+        def apply_cmvn_numpy(feats, *rest):
+            normalized = tf.numpy_function(
+                cmvn_nopad_slide_numpy,
+                [feats, window_len, normalize_variance],
+                feats.dtype)
+            normalized.set_shape(feats.shape.as_list())
+            return (normalized, *rest)
+        features = features.map(apply_cmvn_numpy, num_parallel_calls=TF_AUTOTUNE)
+    features = features.unbatch()
     if vad_config:
         if verbosity:
             print("Selecting voiced frames from extracted features")
