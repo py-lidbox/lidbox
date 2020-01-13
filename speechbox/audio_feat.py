@@ -19,14 +19,14 @@ def fft_frequencies(sample_rate=16000, n_fft=400):
     step = 1 + n_fft // 2
     return tf.linspace(begin, end, step)
 
-# All functions (except energy_vad) operate on batches, input must always have ndim of 2.
-# E.g. if the input is a single signal of length N, use a singleton batch of shape [1, N].
+@tf.function
+def log10(x):
+    return tf.math.divide_no_nan(tf.math.log(x), tf.math.log(10.0))
 
 @tf.function
 def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
-    e = tf.math.exp(1.0)
-    log_spec = e * (tf.math.log(tf.math.maximum(amin, S)) - tf.math.log(tf.math.maximum(amin, ref(S))))
-    return tf.math.maximum(log_spec, tf.math.reduce_max(log_spec) - top_db)
+    db_spectrogram = 10.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, ref(S))))
+    return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
 
 @tf.function
 def spectrograms(signals, frame_length=400, frame_step=160, power=2.0, fmin=0.0, fmax=8000.0):
