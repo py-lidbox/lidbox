@@ -261,6 +261,13 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
                     inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
                     return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
                 ds = ds.flat_map(_unbatch_frames)
+        if "normalize" in config["frames"]:
+            axis = config["frames"]["normalize"]["axis"]
+            if verbosity:
+                print("Normalizing means frame-wise over axis {}".format(axis))
+            def normalize_frames(frames, *meta):
+                return (frames - tf.math.reduce_mean(frames, axis=axis, keepdims=True), *meta)
+            ds = ds.map(normalize_frames)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
     to_model_input = lambda feats, meta, *rest: (feats, label2onehot(meta[1]), meta[0], *rest)
     ds = ds.map(to_model_input)
@@ -560,14 +567,22 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
         (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])),
     )
 
-def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape):
+def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape, feat_conf):
     utt2feats = kaldiio.load_scp(features_path)
+    normalize_mean = feat_conf.pop("normalize_mean", False)
+    normalize_stddev = feat_conf.pop("normalize_stddev", False)
+    assert not feat_conf, "feat_conf contains unrecognized keys: {}".format(','.join(str(k) for k in feat_conf))
     def datagen():
         for utt in utterance_list:
             if utt not in utt2feats:
                 print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
                 continue
-            yield utt2feats[utt], (utt, utt2label[utt])
+            feats = utt2feats[utt]
+            if normalize_mean:
+                feats -= tf.math.reduce_mean(feats, axis=1, keepdims=True)
+            if normalize_stddev:
+                feats = tf.math.divide_no_nan(feats, tf.math.reduce_std(feats, axis=1, keepdims=True))
+            yield feats, (utt, utt2label[utt])
     return tf.data.Dataset.from_generator(
         datagen,
         (tf.float32, tf.string),
