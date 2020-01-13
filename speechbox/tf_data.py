@@ -470,22 +470,33 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
         expected_sample_rate = tf.constant(wav_config["filter_sample_rate"], tf.int32)
         if verbosity:
             tf_print("Filtering wavs by expected sample rate", expected_sample_rate)
-        def check_sample_rate_with_warnings(wav, meta, *rest):
+        def has_expected_sample_rate(wav, meta, *rest):
             batch_ok = tf.math.reduce_all(wav.sample_rate == expected_sample_rate)
-            if verbosity > 0 and not batch_ok:
-                tf_print("warning: dropping utterances with wrong sample rate", meta[0], wav.sample_rate)
+            if verbosity > 3 and not batch_ok:
+                tf_print("dropping", meta[0], "which has sample rate", wav.sample_rate)
             return batch_ok
-        wavs = wavs.filter(check_sample_rate_with_warnings)
+        wavs = wavs.filter(has_expected_sample_rate)
     if "filter_min_length" in wav_config:
         min_len = tf.constant(wav_config["filter_min_length"], tf.int32)
         if verbosity:
             tf_print("Filtering wavs by min length", min_len)
-        def check_len_with_warnings(wav, meta, *rest):
+        def has_min_len(wav, meta, *rest):
             batch_ok = tf.math.reduce_all(tf.size(wav.audio) >= min_len)
-            if verbosity > 0 and not batch_ok:
-                tf_print("warning: dropping too short utterances", meta[0], tf.size(wav.audio))
+            if verbosity > 3 and not batch_ok:
+                tf_print("dropping", meta[0], "which has too short length", tf.size(wav.audio))
             return batch_ok
-        wavs = wavs.filter(check_len_with_warnings)
+        wavs = wavs.filter(has_min_len)
+    if "trim_or_pad_to_length" in wav_config:
+        target_len = tf.constant(wav_config["trim_or_pad_to_length"], tf.int32)
+        if verbosity:
+            tf_print("Ensuring all wavs are of length", target_len, "(too long files are trimmed, too short are padded)")
+        def pad_or_slice_wavs(wav, *rest):
+            padding = [[0, tf.maximum(0, target_len - tf.size(wav.audio))]]
+            trimmed = tf.pad(wav.audio[:target_len], padding)
+            if verbosity > 3:
+                tf_print("pad_or_slice_wavs: before", tf.size(wav.audio), "after", tf.size(trimmed))
+            return (audio_feat.Wav(trimmed, wav.sample_rate), *rest)
+        wavs = wavs.map(pad_or_slice_wavs, num_parallel_calls=TF_AUTOTUNE)
     vad_config = feat_config.get("voice_activity_detection")
     if vad_config:
         if verbosity > 1:
