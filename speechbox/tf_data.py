@@ -424,8 +424,6 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     )
     def get_random_length():
         rand_index = tf.random.uniform([], 0, tf.size(lengths), dtype=tf.int32)
-        tf.debugging.assert_non_negative(rand_index)
-        tf.debugging.assert_less(rand_index, tf.cast(tf.size(lengths), tf.int64))
         rand_len = tf.gather(lengths, rand_index)
         return rand_len
     overlap_ratio = float(chunk_config["length"]["overlap_ratio"])
