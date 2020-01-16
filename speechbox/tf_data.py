@@ -429,6 +429,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     overlap_ratio = float(chunk_config["length"]["overlap_ratio"])
     assert overlap_ratio < 1.0
     min_chunk_length = int(sample_rate * chunk_config["min_chunk_length"])
+    assert min_chunk_length > 0, "invalid min chunk length"
     def random_chunk_loader():
         for p, *m in zip(paths, meta):
             wav = load_wav(tf.constant(p, tf.string))
