@@ -615,20 +615,28 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
 
 def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape, feat_conf):
     utt2feats = kaldiio.load_scp(features_path)
-    normalize_mean = feat_conf.pop("normalize_mean", False)
-    normalize_stddev = feat_conf.pop("normalize_stddev", False)
+    normalize_mean_axis = feat_conf.pop("normalize_mean_axis", None)
+    normalize_stddev_axis = feat_conf.pop("normalize_stddev_axis", None)
     assert not feat_conf, "feat_conf contains unrecognized keys: {}".format(','.join(str(k) for k in feat_conf))
+    def assert_shape(shape):
+        shape_str = "{} vs {}".format(shape, expected_shape)
+        assert len(shape) == len(expected_shape), shape_str
+        assert all(x == y for x, y in zip(shape, expected_shape) if y is not None), shape_str
     def datagen():
         for utt in utterance_list:
             if utt not in utt2feats:
                 print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
                 continue
             feats = utt2feats[utt]
-            if normalize_mean:
-                feats -= tf.math.reduce_mean(feats, axis=1, keepdims=True)
-            if normalize_stddev:
-                feats = tf.math.divide_no_nan(feats, tf.math.reduce_std(feats, axis=1, keepdims=True))
-            yield feats, (utt, utt2label[utt])
+            assert_shape(feats.shape)
+            normalized = np.array(feats)
+            if normalize_mean_axis is not None:
+                mean = tf.math.reduce_mean(feats, axis=normalize_mean_axis, keepdims=True)
+                normalized = feats - mean
+            if normalize_stddev_axis is not None:
+                stddev = tf.math.reduce_std(feats, axis=normalize_stddev_axis, keepdims=True)
+                normalized = tf.math.divide_no_nan(normalized, stddev)
+            yield normalized, (utt, utt2label[utt])
     return tf.data.Dataset.from_generator(
         datagen,
         (tf.float32, tf.string),
