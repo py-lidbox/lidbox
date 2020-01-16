@@ -1,5 +1,5 @@
 """
-bi-GRU RNN used by
+Batch-normalized version of the bi-GRU RNN used by
 Mateju, Lukas et al. (2018). "Using Deep Neural Networks for Identification of Slavic Languages from Acoustic Signal". In: Proc. Interspeech 2018, pp. 1803–1807. DOI: 10.21437/Interspeech.2018-1165. URL: http://dx.doi.org/10.21437/Interspeech.2018-1165.
 """
 from tensorflow.keras.layers import (

@@ -1,45 +1,26 @@
+from tensorflow.keras.layers import (
+    Activation,
+    BatchNormalization,
+    Bidirectional,
+    Dense,
+    Input,
+    LSTM,
+)
+from tensorflow.keras.models import Model
 import tensorflow as tf
-import keras_self_attention
+import numpy as np
 
-def loader(input_shape, output_shape, num_units, num_layers=1, narrowing=False, merge_mode='sum', batch_normalize=False, dropout_rate=0, output_attention=False, average_pooling=True):
-    blstm_layers = []
-    lstm_1 = tf.keras.layers.LSTM(
-        num_units,
-        return_sequences=num_layers > 1 or output_attention or average_pooling
-    )
-    blstm_1 = tf.keras.layers.Bidirectional(
-        lstm_1,
-        input_shape=input_shape,
-        name="BLSTM_1",
-        merge_mode=merge_mode,
-    )
-    blstm_layers.append(blstm_1)
-    for i in range(2, num_layers + 1):
-        if narrowing:
-            num_units //= 2
-        lstm_i = tf.keras.layers.LSTM(
-            num_units,
-            return_sequences=i < num_layers or output_attention or average_pooling
-        )
-        blstm_i = tf.keras.layers.Bidirectional(
-            lstm_i,
-            merge_mode=merge_mode,
-            name="BLSTM_{}".format(i)
-        )
-        blstm_layers.append(blstm_i)
-    layers = []
-    for i, blstm in enumerate(blstm_layers, start=1):
-        layers.append(blstm)
-        if batch_normalize:
-            layers.append(tf.keras.layers.BatchNormalization(name="batchnorm_{}".format(i)))
-        if dropout_rate > 0:
-            layers.append(tf.keras.layers.Dropout(dropout_rate, name="dropout_{}".format(i)))
-    blstm_layers = layers
-    if average_pooling:
-        blstm_layers.append(tf.keras.layers.GlobalAveragePooling1D())
-    output = []
-    if output_attention:
-        output.append(keras_self_attention.SeqSelfAttention(name="self-attention"))
-        output.append(keras_self_attention.SeqWeightedAttention(name="weighted-attention"))
-    output.append(tf.keras.layers.Dense(output_shape, activation='softmax'))
-    return tf.keras.models.Sequential(blstm_layers + output)
+def loader(input_shape, num_outputs, output_activation="softmax", num_units=512):
+    inputs = Input(shape=input_shape, name="input")
+    x = Bidirectional(LSTM(num_units, name="blstm"))(inputs)
+    x = Dense(2 * num_units, name="fc_relu_1", activation="relu")(x)
+    x = BatchNormalization(name="fc_relu_bn_1")(x)
+    x = Dense(num_units, name="fc_relu_2", activation="relu")(x)
+    x = BatchNormalization(name="fc_relu_bn_2")(x)
+    x = Dense(num_outputs, name="output", activation=None)(x)
+    if output_activation:
+        x = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(x)
+    return Model(inputs=inputs, outputs=x)
+
+def predict(model, utterances):
+    return np.stack([model.predict(frames).mean(axis=0) for frames in utterances.unbatch()])
