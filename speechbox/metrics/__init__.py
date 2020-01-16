@@ -10,6 +10,8 @@ from tensorflow.keras.metrics import (
 )
 import tensorflow as tf
 
+# these are highly inefficient metrics (slows down training)
+#TODO maybe replace all for loops and metric instance lists with tensor arithmetic?
 
 class FalseNegativeRate(Metric):
     def __init__(self, thresholds, name="fnr", **kwargs):
