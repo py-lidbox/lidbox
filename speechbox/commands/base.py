@@ -64,7 +64,7 @@ class Command:
                     print("Creating {} directory '{}'".format(name, path))
                 else:
                     print("Creating directory '{}'".format(path))
-            os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
     def run_tasks(self):
         given_tasks = [

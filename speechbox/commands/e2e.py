@@ -54,11 +54,10 @@ def config_checksum(config, datagroup_key):
     json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
-def count_dim_sizes(ds, ds_element_index, ndims, shapes_cache_dir):
+def count_dim_sizes(ds, ds_element_index, ndims):
     tf.debugging.assert_greater(ndims, 0)
     get_shape_at_index = lambda *t: tf.shape(t[ds_element_index])
-    shapes_ds = (ds.map(get_shape_at_index)
-                   .cache(filename=os.path.join(shapes_cache_dir, "shapes_iterator")))
+    shapes_ds = ds.map(get_shape_at_index).cache()
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)
     max_sizes = shapes_ds.reduce(
@@ -357,9 +356,7 @@ class Train(E2EBase):
                     print("--debug-dataset given, iterating over the dataset to gather stats")
                 if args.verbosity > 1:
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
-                shapes_cache = "/tmp/tensorflow-cache/debug-dataset"
-                self.make_named_dir(shapes_cache)
-                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1, shapes_cache)):
+                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
                     tf_data.tf_print(size_counts, summarize=10)
                 if summary_kwargs:
@@ -420,6 +417,16 @@ class Train(E2EBase):
                     vals.max(),
                     vals.argmax() + 1
                 ))
+        history_cache_dir = os.path.join(self.cache_dir, self.model_id, "history")
+        now_str = str(int(time.time()))
+        for name, epoch_vals in history.history.items():
+            history_file = os.path.join(history_cache_dir, now_str, name)
+            self.make_named_dir(os.path.dirname(history_file), "training history")
+            with open(history_file, "w") as f:
+                for epoch, val in enumerate(epoch_vals, start=1):
+                    print(epoch, val, file=f)
+            if args.verbosity > 1:
+                print("wrote history file '{}'".format(history_file))
 
     def run(self):
         super().run()
@@ -561,11 +568,15 @@ class Predict(E2EBase):
             feat_config["type"],
             conf_checksum,
         )
-        if args.verbosity > 1:
-            print("Caching feature extractor dataset to '{}'".format(features_cache_path))
         self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
-        with open(features_cache_path + ".md5sum-input", "w") as f:
-            print(conf_json, file=f, end='')
+        if not os.path.exists(features_cache_path + ".md5sum-input"):
+            with open(features_cache_path + ".md5sum-input", "w") as f:
+                print(conf_json, file=f, end='')
+            if args.verbosity:
+                print("Writing features into new cache: '{}'".format(features_cache_path))
+        else:
+            if args.verbosity:
+                print("Loading features from existing cache: '{}'".format(features_cache_path))
         features = features.cache(filename=features_cache_path)
         if args.verbosity:
             print("Starting feature extraction")
