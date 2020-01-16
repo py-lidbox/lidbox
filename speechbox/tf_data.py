@@ -413,7 +413,7 @@ def without_metadata(dataset):
 
 def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     chunk_config = wav_config["wav_to_random_chunks"]
-    sample_rate = wav_config["sample_rate"]
+    sample_rate = wav_config["filter_sample_rate"]
     lengths = tf.cast(
         tf.linspace(
             float(sample_rate * chunk_config["length"]["min"]),
@@ -422,9 +422,14 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
         ),
         tf.int32
     )
+    def get_random_length():
+        rand_index = tf.random.uniform([], 0, tf.size(lengths), dtype=tf.int32)
+        tf.debugging.assert_non_negative(rand_index)
+        tf.debugging.assert_less(rand_index, tf.cast(tf.size(lengths), tf.int64))
+        rand_len = tf.gather(lengths, rand_index)
+        return rand_len
     overlap_ratio = float(chunk_config["length"]["overlap_ratio"])
     assert overlap_ratio < 1.0
-    logits_all_half = tf.fill([1, tf.size(lengths)], tf.math.log(0.5))
     min_chunk_length = int(sample_rate * chunk_config["min_chunk_length"])
     def random_chunk_loader():
         for p, *m in zip(paths, meta):
@@ -434,17 +439,12 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
                     print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"])
                 continue
             begin = 0
-            rand_index = tf.random.categorical(logits_all_half, 1)[0]
-            rand_len = tf.gather(lengths, rand_index)[0]
+            rand_len = get_random_length()
             chunk = wav.audio[begin:begin+rand_len]
             while len(chunk) >= min_chunk_length:
                 yield (audio_feat.Wav(chunk, wav.sample_rate), *m)
                 begin += round((1.0 - overlap_ratio) * float(rand_len))
-                #TODO with tf.random.uniform
-                rand_index = tf.random.categorical(logits_all_half, 1)[0]
-                rand_len = tf.gather(lengths, rand_index)[0]
-                tf.debugging.assert_non_negative(rand_index)
-                tf.debugging.assert_less(rand_index, tf.cast(tf.size(lengths), tf.int64))
+                rand_len = get_random_length()
                 chunk = wav.audio[begin:begin+rand_len]
     if verbosity:
         tf_print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length")
@@ -459,9 +459,10 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
         # TODO interleave or without generator might improve performance
         wavs = tf.data.Dataset.from_generator(
             get_random_chunk_loader(paths, meta, wav_config, verbosity),
-            (tf.float32, tf.string),
-            (tf.TensorShape([None]), tf.TensorShape([None]))
+            ((tf.float32, tf.int32), tf.string),
+            ((tf.TensorShape([None]), tf.TensorShape([])), tf.TensorShape([None]))
         )
+        wavs = wavs.map(lambda wav, meta: (audio_feat.Wav(wav[0], wav[1]), meta))
     else:
         wav_paths = tf.data.Dataset.from_tensor_slices((
             tf.constant(paths, dtype=tf.string),
