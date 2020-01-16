@@ -332,10 +332,10 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
     elif "group_by_sequence_length" in config:
         max_batch_size = tf.constant(config["group_by_sequence_length"]["max_batch_size"], tf.int64)
         if verbosity:
-            print("Grouping samples by sequence length into batches of max size {}".format(max_batch_size))
+            tf_print("Grouping samples by sequence length into batches of max size", max_batch_size)
         get_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
         group_to_batch = lambda key, group: group.batch(max_batch_size)
-        ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, max_batch_size))
+        ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, window_size=max_batch_size))
         if "min_batch_size" in config["group_by_sequence_length"]:
             min_batch_size = config["group_by_sequence_length"]["min_batch_size"]
             if verbosity:
