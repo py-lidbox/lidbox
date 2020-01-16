@@ -349,8 +349,10 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
         os.makedirs(os.path.dirname(tmp_cache_path), exist_ok=True)
         ds = ds.cache(filename=tmp_cache_path)
         if shuffle_buffer_size:
+            #TODO
+            shuffle_buffer_size = min(100, shuffle_buffer_size)
             if verbosity:
-                print("Also shuffling cached features with shuffle buffer size", shuffle_buffer_size)
+                print("Also shuffling cached features with (capped) shuffle buffer size", shuffle_buffer_size)
             ds = ds.shuffle(shuffle_buffer_size)
     # assume autotuned prefetch (turned off when config["prefetch"] is None)
     if "prefetch" not in config:
