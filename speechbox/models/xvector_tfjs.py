@@ -14,13 +14,13 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 import tensorflow as tf
 
-# This is a simple, stateless layer that can easily be implemented in tfjs
+# We'll implement this separately in tfjs
 from .xvector import GlobalMeanStddevPooling1D
 
 
-def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", padding="causal", dropout_rate=None):
+def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", dropout_rate=None):
     """Batch normalized temporal convolution"""
-    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding=padding)(inputs)
+    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="same")(inputs)
     x = BatchNormalization(name="{}_bn".format(name))(x)
     x = Activation(activation, name="{}_{}".format(name, str(activation)))(x)
     if dropout_rate:
