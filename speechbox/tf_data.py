@@ -389,14 +389,12 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
         indices = tf.dtypes.cast(tf.math.round(image * num_colors), tf.int32)
         image = tf.gather(colors, indices)
         # Prepare for tensorboard
+        image = tf.image.transpose(image)
+        image = tf.image.flip_up_down(image)
         if img_size_multiplier > 0:
-            image = tf.image.transpose(image)
-            image = tf.image.flip_up_down(image)
             old_size = tf.cast(tf.shape(image)[1:3], tf.float32)
             new_size = tf.cast(img_size_multiplier * old_size, tf.int32)
             image = tf.image.resize(image, new_size, **image_resize_kwargs)
-        else:
-            image = tf.image.flip_up_down(image)
         tf.debugging.assert_all_finite(image, message="non-finite values in image when trying to create dataset logger for tensorboard")
         tf.summary.image(features_name, image, step=batch_idx, max_outputs=max_outputs)
         # if copy_original_audio:
