@@ -589,8 +589,8 @@ class Predict(E2EBase):
                 for lang in int2label:
                     print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
         if args.verbosity:
-            print("Starting prediction")
-        predictions = model.predict(features)
+            print("Dropping all metadata except features and starting prediction on features")
+        predictions = model.predict(features.map(lambda *t: t[0]))
         if args.verbosity > 1:
             print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
         num_predictions = 0
