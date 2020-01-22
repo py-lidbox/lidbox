@@ -93,11 +93,11 @@ class SegmentLayer(Layer):
         return cls(**config)
 
 
-def loader(input_shape, num_outputs, output_activation="softmax"):
+def loader(input_shape, num_outputs, output_activation="softmax", dropout_rate=None):
     inputs = Input(shape=input_shape, name="input")
-    frame1 = FrameLayer(512, 5, 1, name="frame1")(inputs)
-    frame2 = FrameLayer(512, 3, 2, name="frame2")(frame1)
-    frame3 = FrameLayer(512, 3, 3, name="frame3")(frame2)
+    frame1 = FrameLayer(512, 5, 1, name="frame1", dropout_rate=dropout_rate)(inputs)
+    frame2 = FrameLayer(512, 3, 2, name="frame2", dropout_rate=dropout_rate)(frame1)
+    frame3 = FrameLayer(512, 3, 3, name="frame3", dropout_rate=dropout_rate)(frame2)
     frame4 = FrameLayer(512, 1, 1, name="frame4")(frame3)
     frame5 = FrameLayer(1500, 1, 1, name="frame5")(frame4)
     stats_pooling = GlobalMeanStddevPooling1D(name="stats_pooling")(frame5)
