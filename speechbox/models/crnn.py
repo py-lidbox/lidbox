@@ -30,18 +30,18 @@ def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0
     # CNN
     filter_def = (16, 32, 64, 128, 256)
     kernel_def = (7, 5, 3, 3, 3)
-    conv = images
+    x = images
     for i, (f, k) in enumerate(zip(filter_def, kernel_def), start=1):
-        conv = Conv2D(f, k,
-            activation="relu",
-            kernel_regularizer=l2(weight_decay),
-            padding="same",
-            name="conv_{}".format(i))(conv)
-        conv = BatchNormalization(name="conv_{}_bn".format(i))(conv)
-        conv = MaxPool2D(2, name="conv_{}_pool".format(i))(conv)
+        x = Conv2D(f, k,
+                activation="relu",
+                kernel_regularizer=l2(weight_decay),
+                padding="same",
+                name="conv_{}".format(i))(x)
+        x = BatchNormalization(name="conv_{}_bn".format(i))(x)
+        x = MaxPool2D(2, name="conv_{}_pool".format(i))(x)
 
     # BLSTM
-    timesteps_first = Permute((2, 1, 3), name="timesteps_first")(conv)
+    timesteps_first = Permute((2, 1, 3), name="timesteps_first")(x)
     cols, rows, channels = timesteps_first.shape[1:]
     flatten_channels = Reshape((cols, rows * channels), name="flatten_channels")(timesteps_first)
     blstm = Bidirectional(LSTM(256), merge_mode="concat", name="blstm")(flatten_channels)
