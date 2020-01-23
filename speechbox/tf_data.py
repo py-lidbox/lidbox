@@ -257,12 +257,6 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
             frame_chunker_fn = make_random_frame_chunker_fn(config["frames"]["length"])
             chunk_timedim_randomly = lambda f, *meta: (frame_chunker_fn(f), *meta)
             ds = ds.map(chunk_timedim_randomly, num_parallel_calls=TF_AUTOTUNE)
-            if config["frames"].get("flatten", True):
-                def _unbatch_ragged_frames(frames, *meta):
-                    frames_ds = tf.data.Dataset.from_tensor_slices(frames)
-                    inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
-                    return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
-                ds = ds.flat_map(_unbatch_ragged_frames)
         else:
             if verbosity:
                 print("Dividing features time dimension into fixed length chunks")
@@ -274,13 +268,13 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
                 tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=0),
                 *meta)
             ds = ds.map(to_frames)
-            if config["frames"].get("flatten", True):
-                def _unbatch_frames(frames, *meta):
-                    # frames_ds = tf.data.Dataset.from_tensor_slices(frames if frame_axis == 0 else tf.transpose(frames, perm=(1, 0, 2, 3)))
-                    frames_ds = tf.data.Dataset.from_tensor_slices(frames)
-                    inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
-                    return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
-                ds = ds.flat_map(_unbatch_frames)
+        if config["frames"].get("flatten", True):
+            def _unbatch_ragged_frames(frames, *meta):
+                frames_ds = tf.data.Dataset.from_tensor_slices(frames)
+                inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
+                return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
+            ds = ds.flat_map(_unbatch_ragged_frames)
+        ds = ds.filter(lambda frames, *meta: tf.shape(frames)[0] > 0)
         if "normalize" in config["frames"]:
             axis = config["frames"]["normalize"]["axis"]
             if verbosity:
