@@ -79,6 +79,9 @@ def count_dim_sizes(ds, ds_element_index, ndims):
          tf.ragged.boolean_mask(sorted_size_indices, is_nonzero)),
         axis=2)
 
+def now_str():
+    return str(int(time.time()))
+
 
 class E2EBase(StatefulCommand):
     requires_state = State.none
@@ -99,8 +102,7 @@ class E2EBase(StatefulCommand):
     def create_model(self, config, skip_training=False):
         model_cache_dir = os.path.join(self.cache_dir, self.model_id)
         tensorboard_log_dir = os.path.join(model_cache_dir, "tensorboard", "logs")
-        now_str = str(int(time.time()))
-        tensorboard_dir = os.path.join(tensorboard_log_dir, now_str)
+        tensorboard_dir = os.path.join(tensorboard_log_dir, now_str())
         default_tensorboard_config = {
             "log_dir": tensorboard_dir,
             "profile_batch": 0,
@@ -336,11 +338,11 @@ class Train(E2EBase):
                 i = 0
                 for i, (feats, meta, *rest) in enumerate(extractor_ds):
                     if args.verbosity > 1 and i % 2000 == 0:
-                        print(i, "samples done")
+                        print(now_str(), "-", i, "samples done")
                     if args.verbosity > 3:
                         tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", meta)
                 if args.verbosity > 1:
-                    print("all", i, "samples done")
+                    print(now_str(), "- all samples done")
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(
@@ -418,9 +420,9 @@ class Train(E2EBase):
                     vals.argmax() + 1
                 ))
         history_cache_dir = os.path.join(self.cache_dir, self.model_id, "history")
-        now_str = str(int(time.time()))
+        now_s = now_str()
         for name, epoch_vals in history.history.items():
-            history_file = os.path.join(history_cache_dir, now_str, name)
+            history_file = os.path.join(history_cache_dir, now_s, name)
             self.make_named_dir(os.path.dirname(history_file), "training history")
             with open(history_file, "w") as f:
                 for epoch, val in enumerate(epoch_vals, start=1):
