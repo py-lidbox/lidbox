@@ -38,20 +38,16 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", L=2, use_a
     frame5 = FrameLayer(1500, 1, 1, name="frame5")(frame4)
     stats_pooling = GlobalMeanStddevPooling1D(name="stats_pooling")(frame5)
     x = SegmentLayer(512, name="segment1")(stats_pooling)
-    if use_attention:
-        attention_outputs = []
-        for level in range(1, L + 1):
-            att_name = "attention{}".format(level)
-            x = SegmentLayer(512, name=att_name + "_segment")(x)
-            att_input = SegmentLayer(num_outputs, name=att_name + "_input")(x)
-            att_output = SimpleAttention(name=att_name)(att_input)
-            attention_outputs.append(att_output)
-        concat = Concatenate(name="attention_concat")(attention_outputs)
-        outputs = Dense(num_outputs, name="outputs")(concat)
-    else:
-        for level in range(2, L + 2):
-            x = SegmentLayer(512, name="segment{}".format(level))(x)
-        outputs = Dense(num_outputs, name="outputs")(x)
+    attention_outputs = []
+    for level in range(1, L + 1):
+        att_name = "attention{}".format(level)
+        x = SegmentLayer(512, name=att_name + "_segment")(x)
+        att = SegmentLayer(num_outputs, name=att_name + "_input")(x)
+        if use_attention:
+            att = SimpleAttention(name=att_name)(att)
+        attention_outputs.append(att)
+    concat = Concatenate(name="attention_concat")(attention_outputs)
+    outputs = Dense(num_outputs, name="outputs")(concat)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs)

@@ -15,11 +15,10 @@ import tensorflow as tf
 
 from .xvector import FrameLayer, SegmentLayer
 
-
 class Attention(Layer):
     def __init__(self, num_units, name="attention"):
         super().__init__(name=name)
-        self.fc = TimeDistributed(Dense(num_units), name=name + "_input")
+        self.fc = Dense(num_units, name=name + "_input")
 
     def call(self, inputs):
         x = self.fc(inputs)
@@ -50,7 +49,7 @@ def loader(input_shape, num_outputs, output_activation="softmax", L=2, dropout_r
     for level in range(1, L + 1):
         att_name = "attention{}".format(level)
         # This corresponds to the "embedded mapping" in Yu et al. (2018)
-        x = TimeDistributed(SegmentLayer(512), name="segment{}".format(level))(x)
+        x = SegmentLayer(512, name="segment{}".format(level))(x)
         # Insert attention module for this level
         att_output = Attention(num_outputs, name=att_name)(x)
         attention_outputs.append(att_output)
