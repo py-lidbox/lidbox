@@ -350,6 +350,7 @@ class Train(E2EBase):
                 ds_config,
                 feat_config,
                 label2onehot,
+                self.model_id,
                 conf_checksum=conf_checksum,
                 verbosity=args.verbosity,
             )
@@ -554,6 +555,7 @@ class Predict(E2EBase):
             ds_config,
             feat_config,
             label2onehot,
+            self.model_id,
             verbosity=args.verbosity,
             conf_checksum=conf_checksum,
         )

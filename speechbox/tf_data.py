@@ -216,7 +216,7 @@ def make_random_frame_chunker_fn(len_config):
         return tf.gather(features, chunk_indices)
     return chunk_timedim_randomly
 
-def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_checksum='', verbosity=0):
+def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id, conf_checksum='', verbosity=0):
     image_resize_kwargs = dict(config.get("convert_to_images", {}))
     if image_resize_kwargs:
         size = image_resize_kwargs.pop("size")
@@ -337,7 +337,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, conf_che
             min_batch_size = tf.constant(min_batch_size, tf.int32)
             ds = ds.filter(lambda batch, *meta: (tf.shape(batch)[0] >= min_batch_size))
     if config.get("copy_cache_to_tmp", False):
-        tmp_cache_path = "/tmp/tensorflow-cache/training-prepared_{}_{}".format(int(time.time()), conf_checksum)
+        tmp_cache_path = "/tmp/tensorflow-cache/{}/training-prepared_{}_{}".format(model_id, int(time.time()), conf_checksum)
         if verbosity:
             print("Caching prepared dataset iterator to '{}'".format(tmp_cache_path))
         os.makedirs(os.path.dirname(tmp_cache_path), exist_ok=True)
