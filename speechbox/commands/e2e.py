@@ -57,7 +57,7 @@ def config_checksum(config, datagroup_key):
 def count_dim_sizes(ds, ds_element_index, ndims):
     tf.debugging.assert_greater(ndims, 0)
     get_shape_at_index = lambda *t: tf.shape(t[ds_element_index])
-    shapes_ds = ds.map(get_shape_at_index).cache()
+    shapes_ds = ds.map(get_shape_at_index)
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)
     max_sizes = shapes_ds.reduce(
