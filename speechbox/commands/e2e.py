@@ -1,7 +1,8 @@
 import collections
+import datetime
 import hashlib
-import itertools
 import importlib
+import itertools
 import json
 import os
 import random
@@ -79,8 +80,8 @@ def count_dim_sizes(ds, ds_element_index, ndims):
          tf.ragged.boolean_mask(sorted_size_indices, is_nonzero)),
         axis=2)
 
-def now_str():
-    return str(int(time.time()))
+def now_str(date=False):
+    return str(datetime.datetime.now() if date else int(time.time()))
 
 
 class E2EBase(StatefulCommand):
@@ -337,12 +338,12 @@ class Train(E2EBase):
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 i = 0
                 for i, (feats, meta, *rest) in enumerate(extractor_ds):
-                    if args.verbosity > 1 and i % 2000 == 0:
-                        print(now_str(), "-", i, "samples done")
+                    if args.verbosity > 1 and i % 10000 == 0:
+                        print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
                         tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", meta)
                 if args.verbosity > 1:
-                    print(now_str(), "- all samples done")
+                    print(now_str(date=True), "-", i, "samples done")
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(

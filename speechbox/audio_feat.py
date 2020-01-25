@@ -21,7 +21,7 @@ def fft_frequencies(sample_rate=16000, n_fft=400):
 
 @tf.function
 def log10(x):
-    return tf.math.divide_no_nan(tf.math.log(x), tf.math.log(10.0))
+    return tf.math.log(x) / tf.math.log(10.0)
 
 @tf.function
 def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
@@ -105,5 +105,5 @@ def framewise_webrtcvad_decisions(wav_length, wav_bytes, sample_rate, vad_frame_
         vad_begin = 2 * np.arange(0, feat_frame_length - vad_frame_step, vad_frame_step)
         for j in vad_begin:
             vad_frame = feat_frame_bytes[j:j + 2 * vad_frame_length]
-            vad_decisions[i] |= vad.is_speech(vad_frame, sample_rate)
+            vad_decisions[i] |= (len(vad_frame) < 2 * vad_frame_length or vad.is_speech(vad_frame, sample_rate))
     return vad_decisions
