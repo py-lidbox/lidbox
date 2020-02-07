@@ -5,26 +5,20 @@ import argparse
 import itertools
 import os
 
-import speechbox
-from . import dataset
-from . import features
+import lidbox
 from . import util
-from . import model
 from . import e2e
 
 
 def create_argparser():
-    """Root argparser for all speechbox commands"""
+    """Root argparser for all lidbox commands"""
     root_parser = argparse.ArgumentParser(
-        prog=speechbox.__name__,
-        description=speechbox.__doc__,
+        prog=lidbox.__name__,
+        description=lidbox.__doc__,
     )
     subparsers = root_parser.add_subparsers(title="subcommands")
     command_tree = itertools.chain(
         util.command_tree,
-        dataset.command_tree,
-        features.command_tree,
-        model.command_tree,
         e2e.command_tree,
     )
     # Create command line options for all valid commands

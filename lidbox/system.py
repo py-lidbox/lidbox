@@ -15,7 +15,7 @@ import numpy as np
 # import webrtcvad
 import yaml
 
-import speechbox.preprocess.transformations as transformations
+import lidbox.preprocess.transformations as transformations
 
 
 TFRECORD_COMPRESSION = "GZIP"

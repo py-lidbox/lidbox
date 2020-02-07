@@ -4,9 +4,9 @@ with open("README.md") as f:
     readmefile_contents = f.read()
 
 setuptools.setup(
-    name="speechbox",
-    version="0.2.0",
-    description="Command line toolbox for managing speech classification experiment state.",
+    name="lidbox",
+    version="0.3.0",
+    description="Command line toolbox for spoken language classification experiments.",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
     author="Matias Lindgren",
@@ -18,17 +18,16 @@ setuptools.setup(
         "kaldiio ~= 2.13",
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
+        "sox ~= 1.3.7",
     ],
     packages=[
-        "speechbox",
-        "speechbox.commands",
-        "speechbox.dataset",
-        "speechbox.models",
-        "speechbox.preprocess",
+        "lidbox",
+        "lidbox.commands",
+        "lidbox.models",
     ],
     entry_points={
         "console_scripts": [
-            "speechbox = speechbox.__main__:main",
+            "lidbox = lidbox.__main__:main",
         ],
     },
 )

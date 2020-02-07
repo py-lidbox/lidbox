@@ -33,6 +33,7 @@ def spectrograms(signals, frame_length=400, frame_step=160, power=2.0, fmin=0.0,
     tf.debugging.assert_rank(signals.audio, 2, "Expected input signals from which to compute spectrograms to be of shape (batch_size, signal_frames)")
     # This should be more or less the same as:
     # S = np.power(np.abs(librosa.core.stft(y, n_fft=400, hop_length=160, center=False)), 2)
+    # S = tf.signal.stft(signals.audio, frame_length, frame_step, fft_length=frame_length)
     S = tf.signal.stft(signals.audio, frame_length, frame_step, fft_length=frame_length)
     S = tf.math.pow(tf.math.abs(S), power)
     # Drop all fft bins that are outside the given [fmin, fmax] band

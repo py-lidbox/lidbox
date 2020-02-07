@@ -3,8 +3,8 @@ import itertools
 import os
 import sys
 
-import speechbox.system as system
-from speechbox import yaml_pprint
+import lidbox.system as system
+from lidbox import yaml_pprint
 
 
 class ExpandAbspath(argparse.Action):
@@ -13,15 +13,7 @@ class ExpandAbspath(argparse.Action):
         setattr(namespace, self.dest, os.path.abspath(path))
 
 
-class State:
-    none = "no-state"
-    has_paths = "has-paths"
-    has_features = "has-features"
-    has_model = "has-model"
-
-
-class Command:
-    """Stateless command base class."""
+class BaseCommand:
 
     tasks = tuple()
 
@@ -91,31 +83,19 @@ class Command:
             print("\n\nWarning: running in debug mode\n\n")
             self.args.verbosity = 4
 
-    def exit(self):
-        pass
 
-
-class StatefulCommand(Command):
-    """Base command with state that can be loaded and saved between runs."""
+class Command(BaseCommand):
 
     tasks = tuple()
-    requires_state = State.none
 
     @classmethod
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
-        required_args = parser.add_argument_group("state definition", description="Required arguments for defining state updates.")
+        required_args = parser.add_argument_group("required", description="Required arguments")
         required_args.add_argument("experiment_config",
             type=str,
             action=ExpandAbspath,
             help="Path to a yaml-file containing the experiment configuration, e.g. path to the cache directory, feature extractors, model hyperparameters etc.")
-        suboptions = parser.add_argument_group("(deprecated) state interaction")
-        suboptions.add_argument("--load-state",
-            action="store_true",
-            help="(deprecated) Load state from cache regardless of command. Only required if a command has required_state != State.none.")
-        suboptions.add_argument("--save-state",
-            action="store_true",
-            help="(deprecated) Save command state to the cache directory.")
         return parser
 
     def __init__(self, args):
@@ -123,40 +103,6 @@ class StatefulCommand(Command):
         self.dataset_id = None
         self.cache_dir = None
         self.experiment_config = {}
-        self.state = {}
-
-    def state_data_ok(self):
-        ok = True
-        if "data" not in self.state:
-            error_msg = (
-                "Error: self.state does not have a 'data' key containing filepaths and labels."
-                "\nSee e.g. 'speechbox dataset --help'."
-            )
-            print(error_msg, file=sys.stderr)
-            ok = False
-        return ok
-
-    def state_ok(self):
-        ok = True
-        if self.state["state"] != self.requires_state:
-            print("Error: command '{}' has incorrect state '{}' when '{}' was required".format(self, self.state["state"], self.requires_state), file=sys.stderr)
-            ok = False
-        return ok
-
-    def load_state(self):
-        args = self.args
-        state_path = os.path.join(self.cache_dir, "speechbox_state.json.gz")
-        if args.verbosity:
-            print("Loading state from '{}'".format(state_path))
-        self.state = system.load_gzip_json(state_path)
-
-    def save_state(self):
-        args = self.args
-        self.make_named_dir(self.cache_dir, "cache")
-        state_path = os.path.join(self.cache_dir, "speechbox_state.json.gz")
-        if args.verbosity:
-            print("Saving state to '{}'".format(state_path))
-        system.dump_gzip_json(self.state, state_path)
 
     def run(self):
         super().run()
@@ -176,14 +122,3 @@ class StatefulCommand(Command):
         if args.verbosity > 1:
             print("Cache dir is '{}'".format(self.cache_dir))
         self.dataset_id = self.experiment_config["dataset"]["key"]
-        if args.load_state or self.requires_state != State.none:
-            self.load_state()
-        if args.verbosity > 1:
-            print("Running with initial state:")
-            yaml_pprint(self.state)
-            print()
-
-    def exit(self):
-        if self.args.save_state:
-            self.save_state()
-        super().exit()

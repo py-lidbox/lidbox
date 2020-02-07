@@ -5,8 +5,8 @@ import os
 import sys
 import time
 
-import speechbox
-from speechbox.commands import create_argparser
+import lidbox
+from lidbox.commands import create_argparser
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
         profile.enable()
     parser = create_argparser()
     if len(sys.argv) < 2:
-        parser.error("Too few arguments, run '{} --help' for more information.".format(speechbox.__name__))
+        parser.error("Too few arguments, run '{} --help' for more information.".format(lidbox.__name__))
     # TODO when a subcommand is used incorrectly, get usage strings for its subparser  instead of the root parser
     args = parser.parse_args()
     tf_profiler = None

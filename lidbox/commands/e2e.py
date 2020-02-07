@@ -13,15 +13,15 @@ import kaldiio
 import numpy as np
 import tensorflow as tf
 
-from speechbox import yaml_pprint
-from speechbox.commands.base import Command, State, StatefulCommand
-from speechbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
-import speechbox.models as models
-import speechbox.tf_data as tf_data
-import speechbox.system as system
+from lidbox import yaml_pprint
+from lidbox.commands.base import BaseCommand, Command
+# from lidbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
+import lidbox.models as models
+import lidbox.tf_data as tf_data
+import lidbox.system as system
 
 
-class E2E(Command):
+class E2E(BaseCommand):
     """TensorFlow pipeline for wavfile preprocessing, feature extraction and sound classification model training"""
     pass
 
@@ -84,8 +84,7 @@ def now_str(date=False):
     return str(datetime.datetime.now() if date else int(time.time()))
 
 
-class E2EBase(StatefulCommand):
-    requires_state = State.none
+class E2EBase(Command):
 
     @classmethod
     def create_argparser(cls, parent_parser):
@@ -260,7 +259,14 @@ class Train(E2EBase):
             xvec_config = {}
         labels = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(labels)
-        label2onehot = lambda label: OH[label2int.lookup(label)]
+        onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
+        if onehot_dims:
+            def label2onehot(label):
+                o = OH[label2int.lookup(label)]
+                return tf.concat((o, tf.zeros(onehot_dims - tf.size(o))))
+        else:
+            def label2onehot(label):
+                return OH[label2int.lookup(label)]
         if args.verbosity > 2:
             print("Generating onehot encoding from labels:", ', '.join(labels))
             print("Generated onehot encoding as tensors:")
@@ -269,6 +275,11 @@ class Train(E2EBase):
                 tf_data.tf_print(l, "\t", label2onehot(l))
         self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), args.skip_training)
+        if args.verbosity > 1:
+            print("Preparing model")
+        model.prepare(labels, training_config)
+        if args.verbosity:
+            print("Using model:\n{}".format(str(model)))
         dataset = {}
         for ds in ("train", "validation"):
             if args.verbosity > 2:
@@ -304,7 +315,7 @@ class Train(E2EBase):
                 )
                 xvec_model.load_weights(xvec_weights)
                 xvector_extractor = tf.keras.Sequential(
-                    [xvec_model.model.get_layer(l) for l in importlib.import_module("speechbox.models.xvector").xvector_layer_names]
+                    [xvec_model.model.get_layer(l) for l in importlib.import_module("lidbox.models.xvector").xvector_layer_names]
                 )
                 if args.verbosity > 1:
                     print("Xvector extractor is:\n", xvector_extractor)
@@ -337,13 +348,15 @@ class Train(E2EBase):
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
                 # This forces the extractor_ds pipeline to be evaluated, and the features being serialized into the cache
                 i = 0
-                for i, (feats, meta, *rest) in enumerate(extractor_ds):
+                if args.verbosity > 1:
+                    print(now_str(date=True), "- 0 samples done")
+                for i, (feats, meta, *rest) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
                     if args.verbosity > 1 and i % 10000 == 0:
                         print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
                         tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", meta)
                 if args.verbosity > 1:
-                    print(now_str(date=True), "-", i, "samples done")
+                    print(now_str(date=True), "- all", i, "samples done")
             if args.verbosity > 2:
                 print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(
@@ -379,15 +392,12 @@ class Train(E2EBase):
                             if args.verbosity:
                                 print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                             i = 0
-                            for i, elem in enumerate(logged_dataset):
+                            for i, elem in enumerate(logged_dataset.as_numpy_iterator()):
                                 if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                                     print(i, "batches done")
                             if args.verbosity > 1:
                                 print(i, "batches done")
                             del logged_dataset
-        if args.verbosity > 1:
-            print("Preparing model")
-        model.prepare(labels, training_config)
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
         if checkpoints:
@@ -402,9 +412,7 @@ class Train(E2EBase):
                 print("Loading model weights from checkpoint file '{}' according to monitor value '{}'".format(checkpoint_path, monitor_value))
             model.load_weights(checkpoint_path)
         if args.verbosity:
-            print("\nStarting training with:")
-            print(str(model))
-            print()
+            print("\nStarting training")
         if args.skip_training:
             print("--skip-training given, will not call model.fit")
             return
@@ -532,7 +540,14 @@ class Predict(E2EBase):
                 yaml_pprint(utterance_list)
         int2label = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(int2label)
-        label2onehot = lambda label: OH[label2int.lookup(label)]
+        onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
+        if onehot_dims:
+            def label2onehot(label):
+                o = OH[label2int.lookup(label)]
+                return tf.concat((o, tf.zeros(onehot_dims - tf.size(o))))
+        else:
+            def label2onehot(label):
+                return OH[label2int.lookup(label)]
         labels_set = set(int2label)
         paths = []
         paths_meta = []
@@ -584,9 +599,20 @@ class Predict(E2EBase):
                 print("Loading features from existing cache: '{}'".format(features_cache_path))
         features = features.cache(filename=features_cache_path)
         if args.verbosity:
-            print("Starting feature extraction")
+            print("Gathering all utterance ids from features dataset iterator")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
-        utterance_ids = [uttid.decode("utf-8") for _, _, uttids in features for uttid in uttids.numpy()]
+        utterance_ids = []
+        i = 0
+        if args.verbosity > 1:
+            print(now_str(date=True), "- 0 samples done")
+        for _, _, uttids in features.as_numpy_iterator():
+            for uttid in uttids:
+                utterance_ids.append(uttid.decode("utf-8"))
+                i += 1
+                if args.verbosity > 1 and i % 10000 == 0:
+                    print(now_str(date=True), "-", i, "samples done")
+        if args.verbosity > 1:
+            print(now_str(date=True), "- all", i, "samples done")
         if args.verbosity:
             print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
         with open(args.trials, "w") as trials_f:
@@ -594,7 +620,7 @@ class Predict(E2EBase):
                 for lang in int2label:
                     print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
         if args.verbosity:
-            print("Dropping all metadata except features and starting prediction on features")
+            print("Starting prediction with model")
         predictions = model.predict(features.map(lambda *t: t[0]))
         if args.verbosity > 1:
             print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
@@ -613,131 +639,131 @@ class Predict(E2EBase):
         return self.predict()
 
 
-class Evaluate(E2EBase):
-    """Evaluate predicted scores by average detection cost (C_avg)."""
+#class Evaluate(E2EBase):
+#    """Evaluate predicted scores by average detection cost (C_avg)."""
 
-    @classmethod
-    def create_argparser(cls, parent_parser):
-        parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("evaluate options")
-        optional.add_argument("--trials", type=str)
-        optional.add_argument("--scores", type=str)
-        optional.add_argument("--threshold-bins", type=int, default=40)
-        optional.add_argument("--convert-scores", choices=("softmax", "exp", "none"), default=None)
-        return parser
+#    @classmethod
+#    def create_argparser(cls, parent_parser):
+#        parser = super().create_argparser(parent_parser)
+#        optional = parser.add_argument_group("evaluate options")
+#        optional.add_argument("--trials", type=str)
+#        optional.add_argument("--scores", type=str)
+#        optional.add_argument("--threshold-bins", type=int, default=40)
+#        optional.add_argument("--convert-scores", choices=("softmax", "exp", "none"), default=None)
+#        return parser
 
-    #TODO tf is very slow in the for loop, maybe numpy would be sufficient
-    def evaluate(self):
-        args = self.args
-        self.model_id = self.experiment_config["experiment"]["name"]
-        if not args.trials:
-            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
-        if not args.scores:
-            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
-        if args.verbosity > 1:
-            print("Evaluating minimum average detection cost using trials '{}' and scores '{}'".format(args.trials, args.scores))
-        score_lines = list(parse_space_separated(args.scores))
-        langs = score_lines[0]
-        lang2int = {l: i for i, l in enumerate(langs)}
-        utt2scores = {utt: tf.constant([float(s) for s in scores], dtype=tf.float32) for utt, *scores in score_lines[1:]}
-        if args.verbosity > 1:
-            print("Parsed scores for {} utterances".format(len(utt2scores)))
-        if args.convert_scores == "softmax":
-            print("Applying softmax on logit scores")
-            utt2scores = {utt: tf.keras.activations.softmax(tf.expand_dims(scores, 0))[0] for utt, scores in utt2scores.items()}
-        elif args.convert_scores == "exp":
-            print("Applying exp on log likelihood scores")
-            utt2scores = {utt: tf.math.exp(scores) for utt, scores in utt2scores.items()}
-        if args.verbosity > 2:
-            print("Asserting all scores sum to 1")
-            tolerance = 1e-3
-            for utt, scores in utt2scores.items():
-                one = tf.constant(1.0, dtype=tf.float32)
-                tf.debugging.assert_near(
-                    tf.reduce_sum(scores),
-                    one,
-                    rtol=tolerance,
-                    atol=tolerance,
-                    message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1".format(utt))
-        if args.verbosity > 1:
-            print("Generating {} threshold bins".format(args.threshold_bins))
-        assert args.threshold_bins > 0
-        from_logits = False
-        max_score = tf.constant(-float("inf"), dtype=tf.float32)
-        min_score = tf.constant(float("inf"), dtype=tf.float32)
-        for utt, scores in utt2scores.items():
-            max_score = tf.math.maximum(max_score, tf.math.reduce_max(scores))
-            min_score = tf.math.minimum(min_score, tf.math.reduce_min(scores))
-        if args.verbosity > 2:
-            tf_data.tf_print("Max score", max_score, "min score", min_score)
-        thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
-        if args.verbosity > 2:
-            print("Score thresholds for language detection decisions:")
-            tf_data.tf_print(thresholds, summarize=5)
-        # First do C_avg to get the best threshold
-        cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
-        if args.verbosity > 1:
-            print("Sorting trials")
-        trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
-        trials_by_utt = [
-            (utt, tf.constant([float(t == "target") for _, _, t in sorted(group, key=lambda t: lang2int[t[0]])], dtype=tf.float32))
-            for utt, group in itertools.groupby(trials_by_utt, key=lambda t: t[1])
-        ]
-        if args.verbosity:
-            print("Computing minimum C_avg using {} score thresholds".format(len(thresholds)))
-        # Collect labels and predictions for confusion matrix
-        cm_labels = []
-        cm_predictions = []
-        for utt, y_true in trials_by_utt:
-            if utt not in utt2scores:
-                print("Warning: correct class for utterance '{}' listed in trials but it has no predicted scores, skipping".format(utt), file=sys.stderr)
-                continue
-            y_pred = utt2scores[utt]
-            # Update using singleton batches
-            cavg.update_state(
-                tf.expand_dims(y_true, 0),
-                tf.expand_dims(y_pred, 0)
-            )
-            cm_labels.append(tf.math.argmax(y_true))
-            cm_predictions.append(tf.math.argmax(y_pred))
-        # Evaluating the cavg result has a side effect of generating the argmin of the minimum cavg into cavg.min_index
-        _ = cavg.result()
-        min_threshold = thresholds[cavg.min_index].numpy()
-        def print_metric(m):
-            print("{:15s}\t{:.3f}".format(m.name + ":", m.result().numpy()))
-        print("min C_avg at threshold {:.6f}".format(min_threshold))
-        print_metric(cavg)
-        # Now we know the threshold that minimizes C_avg and use the same threshold to compute all other metrics
-        metrics = [
-            M(langs, from_logits=from_logits, thresholds=min_threshold)
-            for M in (AverageEqualErrorRate, AveragePrecision, AverageRecall)
-        ]
-        if args.verbosity:
-            print("Computing rest of the metrics using threshold {:.6f}".format(min_threshold))
-        for utt, y_true in trials_by_utt:
-            if utt not in utt2scores:
-                continue
-            y_true_batch = tf.expand_dims(y_true, 0)
-            y_pred = tf.expand_dims(utt2scores[utt], 0)
-            for m in metrics:
-                m.update_state(y_true_batch, y_pred)
-        for avg_m in metrics:
-            print_metric(avg_m)
-        print("\nMetrics by target, using threshold {:.6f}".format(min_threshold))
-        for avg_m in metrics:
-            print(avg_m.name)
-            for m in avg_m:
-                print_metric(m)
-        print("\nConfusion matrix")
-        cm_labels = tf.cast(tf.stack(cm_labels), dtype=tf.int32)
-        cm_predictions = tf.cast(tf.stack(cm_predictions), dtype=tf.int32)
-        confusion_matrix = tf.math.confusion_matrix(cm_labels, cm_predictions, len(langs))
-        print(langs)
-        print(np.array_str(confusion_matrix.numpy()))
+#    #TODO tf is very slow in the for loop, maybe numpy would be sufficient
+#    def evaluate(self):
+#        args = self.args
+#        self.model_id = self.experiment_config["experiment"]["name"]
+#        if not args.trials:
+#            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
+#        if not args.scores:
+#            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
+#        if args.verbosity > 1:
+#            print("Evaluating minimum average detection cost using trials '{}' and scores '{}'".format(args.trials, args.scores))
+#        score_lines = list(parse_space_separated(args.scores))
+#        langs = score_lines[0]
+#        lang2int = {l: i for i, l in enumerate(langs)}
+#        utt2scores = {utt: tf.constant([float(s) for s in scores], dtype=tf.float32) for utt, *scores in score_lines[1:]}
+#        if args.verbosity > 1:
+#            print("Parsed scores for {} utterances".format(len(utt2scores)))
+#        if args.convert_scores == "softmax":
+#            print("Applying softmax on logit scores")
+#            utt2scores = {utt: tf.keras.activations.softmax(tf.expand_dims(scores, 0))[0] for utt, scores in utt2scores.items()}
+#        elif args.convert_scores == "exp":
+#            print("Applying exp on log likelihood scores")
+#            utt2scores = {utt: tf.math.exp(scores) for utt, scores in utt2scores.items()}
+#        if args.verbosity > 2:
+#            print("Asserting all scores sum to 1")
+#            tolerance = 1e-3
+#            for utt, scores in utt2scores.items():
+#                one = tf.constant(1.0, dtype=tf.float32)
+#                tf.debugging.assert_near(
+#                    tf.reduce_sum(scores),
+#                    one,
+#                    rtol=tolerance,
+#                    atol=tolerance,
+#                    message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1".format(utt))
+#        if args.verbosity > 1:
+#            print("Generating {} threshold bins".format(args.threshold_bins))
+#        assert args.threshold_bins > 0
+#        from_logits = False
+#        max_score = tf.constant(-float("inf"), dtype=tf.float32)
+#        min_score = tf.constant(float("inf"), dtype=tf.float32)
+#        for utt, scores in utt2scores.items():
+#            max_score = tf.math.maximum(max_score, tf.math.reduce_max(scores))
+#            min_score = tf.math.minimum(min_score, tf.math.reduce_min(scores))
+#        if args.verbosity > 2:
+#            tf_data.tf_print("Max score", max_score, "min score", min_score)
+#        thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
+#        if args.verbosity > 2:
+#            print("Score thresholds for language detection decisions:")
+#            tf_data.tf_print(thresholds, summarize=5)
+#        # First do C_avg to get the best threshold
+#        cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
+#        if args.verbosity > 1:
+#            print("Sorting trials")
+#        trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
+#        trials_by_utt = [
+#            (utt, tf.constant([float(t == "target") for _, _, t in sorted(group, key=lambda t: lang2int[t[0]])], dtype=tf.float32))
+#            for utt, group in itertools.groupby(trials_by_utt, key=lambda t: t[1])
+#        ]
+#        if args.verbosity:
+#            print("Computing minimum C_avg using {} score thresholds".format(len(thresholds)))
+#        # Collect labels and predictions for confusion matrix
+#        cm_labels = []
+#        cm_predictions = []
+#        for utt, y_true in trials_by_utt:
+#            if utt not in utt2scores:
+#                print("Warning: correct class for utterance '{}' listed in trials but it has no predicted scores, skipping".format(utt), file=sys.stderr)
+#                continue
+#            y_pred = utt2scores[utt]
+#            # Update using singleton batches
+#            cavg.update_state(
+#                tf.expand_dims(y_true, 0),
+#                tf.expand_dims(y_pred, 0)
+#            )
+#            cm_labels.append(tf.math.argmax(y_true))
+#            cm_predictions.append(tf.math.argmax(y_pred))
+#        # Evaluating the cavg result has a side effect of generating the argmin of the minimum cavg into cavg.min_index
+#        _ = cavg.result()
+#        min_threshold = thresholds[cavg.min_index].numpy()
+#        def print_metric(m):
+#            print("{:15s}\t{:.3f}".format(m.name + ":", m.result().numpy()))
+#        print("min C_avg at threshold {:.6f}".format(min_threshold))
+#        print_metric(cavg)
+#        # Now we know the threshold that minimizes C_avg and use the same threshold to compute all other metrics
+#        metrics = [
+#            M(langs, from_logits=from_logits, thresholds=min_threshold)
+#            for M in (AverageEqualErrorRate, AveragePrecision, AverageRecall)
+#        ]
+#        if args.verbosity:
+#            print("Computing rest of the metrics using threshold {:.6f}".format(min_threshold))
+#        for utt, y_true in trials_by_utt:
+#            if utt not in utt2scores:
+#                continue
+#            y_true_batch = tf.expand_dims(y_true, 0)
+#            y_pred = tf.expand_dims(utt2scores[utt], 0)
+#            for m in metrics:
+#                m.update_state(y_true_batch, y_pred)
+#        for avg_m in metrics:
+#            print_metric(avg_m)
+#        print("\nMetrics by target, using threshold {:.6f}".format(min_threshold))
+#        for avg_m in metrics:
+#            print(avg_m.name)
+#            for m in avg_m:
+#                print_metric(m)
+#        print("\nConfusion matrix")
+#        cm_labels = tf.cast(tf.stack(cm_labels), dtype=tf.int32)
+#        cm_predictions = tf.cast(tf.stack(cm_predictions), dtype=tf.int32)
+#        confusion_matrix = tf.math.confusion_matrix(cm_labels, cm_predictions, len(langs))
+#        print(langs)
+#        print(np.array_str(confusion_matrix.numpy()))
 
-    def run(self):
-        super().run()
-        return self.evaluate()
+#    def run(self):
+#        super().run()
+#        return self.evaluate()
 
 
 class Util(E2EBase):
@@ -771,5 +797,5 @@ class Util(E2EBase):
 
 
 command_tree = [
-    (E2E, [Train, Predict, Evaluate, Util]),
+    (E2E, [Train, Predict, Util]),
 ]

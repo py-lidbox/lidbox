@@ -3,7 +3,7 @@ import sys
 import time
 
 from . import audio_feat
-from speechbox import yaml_pprint
+from lidbox import yaml_pprint
 import kaldiio
 import matplotlib.cm
 import numpy as np
@@ -377,6 +377,7 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
         image, onehot, uttid = batch[:3]
         if debug_squeeze_last_dim:
             image = tf.squeeze(image, -1)
+        tf.summary.histogram("input_batch", image, step=batch_idx)
         # Scale grayscale channel between 0 and 1 over whole image
         image = feature_scaling(image, tf.constant(0.0), tf.constant(1.0))
         # Map linear colormap over all grayscale values [0, 1] to produce an RGB image

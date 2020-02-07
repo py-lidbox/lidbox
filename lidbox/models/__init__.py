@@ -8,8 +8,7 @@ import sys
 import numpy as np
 import tensorflow as tf
 
-import speechbox.metrics
-from speechbox.tf_data import without_metadata
+from lidbox.tf_data import without_metadata
 
 # Check if the KerasWrapper instance has a tf.device string argument and use that when running the method, else let tf decide
 def with_device(method):
@@ -44,16 +43,6 @@ def parse_metrics(metrics, target_names):
         kwargs = dict(m.get("kwargs", {}))
         if "cls" in m:
             metric = getattr(tf.keras.metrics, m["cls"])(**kwargs)
-        else:
-            name = m["name"]
-            if name in ("avg_equal_error_rate", "avg_eer"):
-                metric = speechbox.metrics.AverageEqualErrorRate(target_names, **kwargs)
-            elif name == "avg_recall":
-                metric = speechbox.metrics.AverageRecall(target_names, **kwargs)
-            elif name == "avg_precision":
-                metric = speechbox.metrics.AveragePrecision(target_names, **kwargs)
-            elif name == "C_avg":
-                metric = speechbox.metrics.AverageDetectionCost(target_names, **kwargs)
         assert metric is not None, "unknown metric: '{}'".format(m)
         keras_metrics.append(metric)
     return keras_metrics
@@ -94,7 +83,7 @@ class KerasWrapper:
         self.device_str = device_str
         self.model = None
         self.initial_epoch = 0
-        model_module = importlib.import_module("speechbox.models." + model_definition["name"])
+        model_module = importlib.import_module("lidbox.models." + model_definition["name"])
         self.model_loader = functools.partial(model_module.loader, **model_definition.get("kwargs", {}))
         self.predict_fn = model_module.predict
         self.callbacks = []
@@ -132,7 +121,12 @@ class KerasWrapper:
             opt_kwargs["learning_rate"] = getattr(tf.keras.optimizers.schedules, lr_scheduler["cls"])(**lr_scheduler["kwargs"])
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_kwargs)
         loss_conf = training_config["loss"]
-        loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
+        # if loss_conf["cls"] == "AdditiveMarginSoftmax":
+            # loss = lidbox.metrics.AdditiveMarginSoftmax(**loss_conf.get("kwargs", {}))
+        # elif loss_conf["cls"] == "CosineDistance":
+            # loss = lidbox.metrics.CosineDistance()
+        else:
+            loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
         if "metrics" in training_config:
             metrics = parse_metrics(training_config["metrics"], target_names)
         else:

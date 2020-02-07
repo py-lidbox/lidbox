@@ -8,7 +8,7 @@ plt.rcParams["svg.fonttype"] = "none"
 import numpy as np
 # import seaborn
 
-import speechbox.system as system
+import lidbox.system as system
 
 
 # Modified from:

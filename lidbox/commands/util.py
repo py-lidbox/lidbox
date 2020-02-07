@@ -7,13 +7,13 @@ import time
 
 import numpy as np
 
-from speechbox.commands.base import State, Command, StatefulCommand, ExpandAbspath
-import speechbox.system as system
-import speechbox.visualization as visualization
+from lidbox.commands.base import Command, BaseCommand, ExpandAbspath
+import lidbox.system as system
+import lidbox.visualization as visualization
 
 
-class Util(Command):
-    """CLI for IO functions in speechbox.system."""
+class Util(BaseCommand):
+    """CLI for IO functions in lidbox.system."""
     tasks = (
         "yaml_get",
         "get_unique_duration",
@@ -156,77 +156,7 @@ class Util(Command):
         return self.run_tasks()
 
 
-class Plot(StatefulCommand):
-    requires_state = State.has_features
-
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        required = parser.add_argument_group("plot arguments")
-        required.add_argument("plot_type",
-            type=str,
-            choices=("sequence_sample", "rand_samples"),
-            help="What to plot.")
-        required.add_argument("datagroup",
-            type=str,
-            help="Which datagroup to plot from.")
-        optional = parser.add_argument_group("plot options")
-        optional.add_argument("--figure-path",
-            type=str,
-            metavar="plot.svg",
-            help="If given, plots will not be shown using tkinter (or whatever the default is) but written to this file.")
-        optional.add_argument("--shuffle-buffer-size",
-            type=int,
-            help="How many examples to load per label from the TFRecords.")
-        optional.add_argument("--num-samples",
-            type=int,
-            default=1,
-            help="How many samples to include in the plots.")
-        return parser
-
-    def get_dataset(self):
-        args = self.args
-        datagroup = self.state["data"][args.datagroup]
-        if args.shuffle_buffer_size is None:
-            shuffle_buffer_size = self.experiment_config["experiment"]["shuffle_buffer_size"] // len(self.state["label_to_index"])
-        else:
-            shuffle_buffer_size = args.shuffle_buffer_size
-        assert shuffle_buffer_size > 0
-        dataset_by_label = {}
-        for label, tfrecord_path in datagroup["features"].items():
-            dataset, _ = system.load_features_as_dataset(
-                [tfrecord_path],
-                training_config={"shuffle_buffer_size": shuffle_buffer_size}
-            )
-            dataset_by_label[label] = np.array([example.numpy() for example, _ in dataset.take(shuffle_buffer_size)])
-        return dataset_by_label
-
-    def plot_sequence_sample(self):
-        visualization.plot_sequence_features_sample(
-            self.get_dataset(),
-            figpath=self.args.figure_path,
-            sample_width=self.args.num_samples
-        )
-        return 0
-
-    def plot_rand_samples(self):
-        visualization.plot_features_samples(
-            self.get_dataset(),
-            self.args.num_samples,
-            figpath=self.args.figure_path
-        )
-        return 0
-
-    def run(self):
-        super().run()
-        if self.args.plot_type == "sequence_sample":
-            return self.plot_sequence_sample()
-        if self.args.plot_type == "rand_samples":
-            return self.plot_rand_samples()
-        return 1
-
-
-class Kaldi(Command):
+class Kaldi(BaseCommand):
 
     @classmethod
     def create_argparser(cls, subparsers):
@@ -294,6 +224,6 @@ class Kaldi(Command):
 
 
 command_tree = [
-    (Util, [Plot]),
+    (Util, []),
     (Kaldi, []),
 ]

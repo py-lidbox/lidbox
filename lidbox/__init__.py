@@ -5,7 +5,7 @@ import os
 import yaml
 
 def get_package_root():
-    from speechbox import __path__
+    from lidbox import __path__
     return os.path.abspath(os.path.dirname(__path__[0]))
 
 def _get_unittest_data_dir():
@@ -15,7 +15,7 @@ def _get_unittest_data_dir():
 
 def _get_random_wav():
     from random import choice
-    from speechbox.system import read_wavfile, get_audio_type
+    from lidbox.system import read_wavfile, get_audio_type
     data_root = _get_unittest_data_dir()
     label_dirs = [d for d in os.scandir(data_root) if d.is_dir()]
     label_dir = choice(label_dirs)
