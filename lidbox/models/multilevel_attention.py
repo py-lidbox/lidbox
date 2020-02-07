@@ -1,8 +1,9 @@
 """
-Multi-level attention model for classifying audio class embeddings by
+TensorFlow implementation of the multi-level attention model for classifying audio class embeddings by
 Yu, Changsong et al. (2018). “Multi-level attention model for weakly supervised audio classification”.
 In: DCASE2018 Workshop on Detection and Classification of Acoustic Scenes and Events.
 URL: http://epubs.surrey.ac.uk/849626/.
+See also https://github.com/ChangsongYu/Eusipco2018_Google_AudioSet.git
 """
 from tensorflow.keras.layers import (
     Activation,

@@ -1,8 +1,8 @@
 """
-TensorFlow implementation of the X-vector DNN consisting of five temporal convolutions followed by stats pooling and 3 fully connected layers.
-See also:
-David Snyder, et al. "Spoken Language Recognition using X-vectors." Odyssey. 2018.
-http://danielpovey.com/files/2018_odyssey_xvector_lid.pdf
+TensorFlow implementation of the x-vector TDNN using five temporal convolutions followed by stats pooling and 3 fully connected layers proposed by
+David Snyder, et al. (2018) "Spoken Language Recognition using X-vectors."
+In: Proc. Odyssey 2018.
+URL: http://danielpovey.com/files/2018_odyssey_xvector_lid.pdf
 """
 from tensorflow.keras.layers import (
     Activation,

@@ -1,8 +1,5 @@
 """
-X-vector with frequency attention mechanism by Miao, X., McLoughlin, I., Yan, Y. (2019)
-"A New Time-Frequency Attention Mechanism for TDNN and CNN-LSTM-TDNN, with Application to Language Identification".
-Proc. Interspeech 2019, 4080-4084, DOI: 10.21437/Interspeech.2019-1256.
-https://www.isca-speech.org/archive/Interspeech_2019/pdfs/1256.pdf
+xvector.py with frequency attention from clstm.py
 """
 from tensorflow.keras.layers import (
     Activation,

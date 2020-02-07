@@ -1,6 +1,6 @@
 """
-CNN + average pooling for variable length input utterances by
-Suwon Shon, Ahmed Ali, and James Glass (June 2018). “Convolutional Neural Network and Language Embeddings for End-to-End Dialect Recognition”.
+TensorFlow implementation of the CNN + average pooling model for variable length input utterances by
+Suwon Shon, Ahmed Ali, and James Glass (June 2018) "Convolutional Neural Network and Language Embeddings for End-to-End Dialect Recognition".
 See also
 https://github.com/swshon/dialectID_e2e/blob/20bec9bea05747fcf4845921498f8b3abf52c7c6/models/e2e_model.py
 """

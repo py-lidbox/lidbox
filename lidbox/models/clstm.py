@@ -1,8 +1,9 @@
 """
-CNN + LSTM with 2-dimensional time-frequency attention mechanism by Miao, X., McLoughlin, I., Yan, Y. (2019)
-"A New Time-Frequency Attention Mechanism for TDNN and CNN-LSTM-TDNN, with Application to Language Identification".
-Proc. Interspeech 2019, 4080-4084, DOI: 10.21437/Interspeech.2019-1256.
-https://www.isca-speech.org/archive/Interspeech_2019/pdfs/1256.pdf
+TensorFlow implementation of the x-vector extension with 2-dimensional time-frequency attention mechanism by
+Miao, X., McLoughlin, I., Yan, Y. (2019) "A New Time-Frequency Attention Mechanism for TDNN and CNN-LSTM-TDNN, with Application to Language Identification".
+In: Proc. Interspeech 2019, 4080-4084
+DOI: 10.21437/Interspeech.2019-1256.
+URL: https://www.isca-speech.org/archive/Interspeech_2019/pdfs/1256.pdf
 """
 from tensorflow.keras.layers import (
     Activation,

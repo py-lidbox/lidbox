@@ -1,7 +1,8 @@
 """
-BLSTM-based language vector extractor used by
-Gelly, G. and J.L. Gauvain (Aug. 2017). “Spoken Language Identification Using LSTM-Based Angular Proximity”. In: Proc. Interspeech 2017
-https://www.isca-speech.org/archive/Interspeech_2017/abstracts/1334.html
+TensorFlow implementation of the BLSTM-based language vector extractor used by
+Gelly, G. and J.L. Gauvain (Aug. 2017) "Spoken Language Identification Using LSTM-Based Angular Proximity".
+In: Proc. Interspeech 2017
+URL: https://www.isca-speech.org/archive/Interspeech_2017/abstracts/1334.html
 """
 from tensorflow.keras.layers import (
     Bidirectional,

@@ -1,6 +1,6 @@
 """
-2-dim CNN for spectrogram images, followed by a bi-directional LSTM.
-Used by Bartz, C. et al. (2017) "Language identification using deep convolutional recurrent neural networks".
+TensorFlow implementation of the CRNN model used by
+Bartz, C. et al. (2017) "Language identification using deep convolutional recurrent neural networks".
 See also
 https://github.com/HPI-DeepLearning/crnn-lid/blob/d78d5db14c4ee21b2cfcb09bf1d9187486371989/keras/models/crnn.py
 """
