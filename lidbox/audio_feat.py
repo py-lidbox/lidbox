@@ -12,7 +12,7 @@ import webrtcvad
 Wav = collections.namedtuple("Wav", ["audio", "sample_rate"])
 
 @tf.function
-def fft_frequencies(sample_rate=16000, n_fft=400):
+def fft_frequencies(sample_rate, n_fft):
     # Equal to librosa.core.fft_frequencies
     begin = 0.0
     end = tf.cast(sample_rate // 2, tf.float32)
@@ -25,19 +25,24 @@ def log10(x):
 
 @tf.function
 def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
-    db_spectrogram = 10.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, ref(S))))
+    db_spectrogram = 20.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, ref(S))))
     return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
 
 @tf.function
-def spectrograms(signals, frame_length=400, frame_step=160, power=2.0, fmin=0.0, fmax=8000.0):
+def ms_to_frames(sample_rate, ms):
+    return tf.cast(sample_rate * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
+
+@tf.function
+def spectrograms(signals, frame_length_ms=25, frame_step_ms=10, power=2.0, fmin=0.0, fmax=8000.0, fft_length=512):
     tf.debugging.assert_rank(signals.audio, 2, "Expected input signals from which to compute spectrograms to be of shape (batch_size, signal_frames)")
-    # This should be more or less the same as:
-    # S = np.power(np.abs(librosa.core.stft(y, n_fft=400, hop_length=160, center=False)), 2)
-    # S = tf.signal.stft(signals.audio, frame_length, frame_step, fft_length=frame_length)
-    S = tf.signal.stft(signals.audio, frame_length, frame_step, fft_length=frame_length)
+    # Assume all signals in this batch have the same sample rate
+    sample_rate = signals.sample_rate[0]
+    frame_length = ms_to_frames(sample_rate, frame_length_ms)
+    frame_step = ms_to_frames(sample_rate, frame_step_ms)
+    S = tf.signal.stft(signals.audio, frame_length, frame_step, fft_length=fft_length)
     S = tf.math.pow(tf.math.abs(S), power)
     # Drop all fft bins that are outside the given [fmin, fmax] band
-    fft_freqs = fft_frequencies(sample_rate=signals.sample_rate[0], n_fft=frame_length)
+    fft_freqs = fft_frequencies(sample_rate=signals.sample_rate[0], n_fft=fft_length)
     # With default [fmin, fmax] of [0, 8000] this will contain only 'True's
     bins_in_band = tf.math.logical_and(fmin <= fft_freqs, fft_freqs <= fmax)
     return tf.boolean_mask(S, bins_in_band, axis=2)
@@ -54,12 +59,15 @@ def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     return tf.matmul(S, mel_weights)
 
 @tf.function
-def framewise_rms_energy_vad_decisions(signals, frame_length=400, frame_step=160, strength=0.5, min_rms_threshold=1e-3):
+def framewise_rms_energy_vad_decisions(signals, frame_length_ms=25, frame_step_ms=10, strength=0.5, min_rms_threshold=1e-3):
     """
     For a batch of 1D-signals, compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal (separately for each signal), such that True means the frame is voiced and False unvoiced.
     VAD threshold is 'strength' multiplied by mean RMS, i.e. larger 'strength' values increase VAD aggressiveness.
     """
     tf.debugging.assert_rank(signals, 2, message="energy_vad_decisions expects batches of single channel signals")
+    sample_rate = signals.sample_rate[0]
+    frame_length = ms_to_frames(sample_rate, frame_length_ms)
+    frame_step = ms_to_frames(sample_rate, frame_step_ms)
     frames = tf.signal.frame(signals, frame_length, frame_step, axis=1)
     rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=2))
     mean_rms = tf.math.reduce_mean(rms, axis=1, keepdims=True)
