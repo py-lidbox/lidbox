@@ -100,7 +100,6 @@ class Command(BaseCommand):
 
     def __init__(self, args):
         super().__init__(args)
-        self.dataset_id = None
         self.cache_dir = None
         self.experiment_config = {}
 
@@ -121,4 +120,3 @@ class Command(BaseCommand):
         self.cache_dir = os.path.abspath(self.experiment_config["cache"])
         if args.verbosity > 1:
             print("Cache dir is '{}'".format(self.cache_dir))
-        self.dataset_id = self.experiment_config["dataset"]["key"]

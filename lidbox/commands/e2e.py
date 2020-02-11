@@ -14,7 +14,7 @@ import numpy as np
 import tensorflow as tf
 
 from lidbox import yaml_pprint
-from lidbox.commands.base import BaseCommand, Command
+from lidbox.commands.base import BaseCommand, Command, ExpandAbspath
 # from lidbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
 import lidbox.models as models
 import lidbox.tf_data as tf_data
@@ -31,7 +31,7 @@ def parse_space_separated(path):
         for l in f:
             l = l.strip()
             if l:
-                yield l.split()
+                yield l.split(' ')
 
 def make_label2onehot(labels):
     labels_enum = tf.range(len(labels))
@@ -220,6 +220,7 @@ class E2EBase(Command):
             )
         return feat
 
+
 class Train(E2EBase):
 
     @classmethod
@@ -236,6 +237,10 @@ class Train(E2EBase):
             action="store_true",
             default=False,
             help="Explictly iterate once over the feature extractor tf.data.Dataset object in order to evaluate the feature extraction pipeline and fill the feature cache on disk. Using this with --skip-training allows you to extract features on multiple CPUs without needing a GPU.")
+        optional.add_argument("--dataset-config",
+            type=str,
+            action=ExpandAbspath,
+            help="Path to a yaml-file containing a list of datasets.")
         return parser
 
     def train(self):
@@ -252,12 +257,13 @@ class Train(E2EBase):
             print("Using feature extraction parameters:")
             yaml_pprint(feat_config)
             print()
-        if feat_config["type"] == "xvector-embedding":
-            xvec_config = system.load_yaml(feat_config["xvector_experiment_config"])
-            feat_config = xvec_config.pop("features")
+        if args.dataset_config:
+            assert "dataset" not in self.experiment_config, "config file should not contain a 'dataset' key if a separate datasets yaml is supplied"
+            dataset_config = system.load_yaml(args.dataset_config)
+            self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
+            labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         else:
-            xvec_config = {}
-        labels = self.experiment_config["dataset"]["labels"]
+            labels = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(labels)
         onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
         if onehot_dims:
@@ -281,6 +287,7 @@ class Train(E2EBase):
         if args.verbosity:
             print("Using model:\n{}".format(str(model)))
         dataset = {}
+        #todo prepare all datasets
         for ds in ("train", "validation"):
             if args.verbosity > 2:
                 print("Dataset config for '{}'".format(ds))
@@ -296,31 +303,6 @@ class Train(E2EBase):
                 summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim,
             )
-            if xvec_config:
-                if args.verbosity:
-                    print("Features extracted, now feeding them to the xvector encoder")
-                xvec_model = models.KerasWrapper(
-                    xvec_config["experiment"]["name"],
-                    xvec_config["experiment"]["model_definition"],
-                )
-                xvec_model.prepare(
-                    xvec_config["dataset"]["labels"],
-                    xvec_config["experiment"],
-                )
-                xvec_weights = os.path.join(
-                    xvec_config["cache"],
-                    xvec_config["experiment"]["name"],
-                    "checkpoints",
-                    xvec_config["prediction"]["best_checkpoint"],
-                )
-                xvec_model.load_weights(xvec_weights)
-                xvector_extractor = tf.keras.Sequential(
-                    [xvec_model.model.get_layer(l) for l in importlib.import_module("lidbox.models.xvector").xvector_layer_names]
-                )
-                if args.verbosity > 1:
-                    print("Xvector extractor is:\n", xvector_extractor)
-                embed_xvec = lambda feats, *meta: (tf.expand_dims(xvector_extractor(feats), -2), *meta)
-                extractor_ds = extractor_ds.batch(1).map(embed_xvec).unbatch()
             if ds_config.get("persistent_features_cache", True):
                 features_cache_dir = os.path.join(self.cache_dir, "features")
             else:

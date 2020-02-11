@@ -121,10 +121,10 @@ class KerasWrapper:
             opt_kwargs["learning_rate"] = getattr(tf.keras.optimizers.schedules, lr_scheduler["cls"])(**lr_scheduler["kwargs"])
         optimizer = getattr(tf.keras.optimizers, opt_conf["cls"])(**opt_kwargs)
         loss_conf = training_config["loss"]
-        # if loss_conf["cls"] == "AdditiveMarginSoftmax":
-            # loss = lidbox.metrics.AdditiveMarginSoftmax(**loss_conf.get("kwargs", {}))
-        # elif loss_conf["cls"] == "CosineDistance":
-            # loss = lidbox.metrics.CosineDistance()
+        if loss_conf["cls"] == "AdditiveMarginSoftmax":
+            loss = lidbox.metrics.AdditiveMarginSoftmax(**loss_conf.get("kwargs", {}))
+        elif loss_conf["cls"] == "CosineDistance":
+            loss = lidbox.metrics.CosineDistance()
         else:
             loss = getattr(tf.keras.losses, loss_conf["cls"])(**loss_conf.get("kwargs", {}))
         if "metrics" in training_config:

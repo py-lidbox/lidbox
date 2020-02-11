@@ -19,6 +19,7 @@ setuptools.setup(
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
         "sox ~= 1.3.7",
+        "webrtcvad ~= 2.0.10",
     ],
     packages=[
         "lidbox",
