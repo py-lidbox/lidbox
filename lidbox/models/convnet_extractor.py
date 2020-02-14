@@ -40,7 +40,7 @@ def loader(input_shape, num_outputs, core="resnet50_v2", output_activation="soft
     outputs = Dense(num_outputs, activation=None, name="output")(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="CNN_extractor")
 
 
 def predict(model, inputs):

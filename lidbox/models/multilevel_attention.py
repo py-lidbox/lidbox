@@ -76,7 +76,7 @@ def loader(input_shape, num_outputs, output_activation="softmax", L=2, H=512):
     outputs = Dense(num_outputs, name="outputs")(concat)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="DNN_multilevel_attention")
 
 
 def predict(model, inputs):

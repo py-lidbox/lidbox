@@ -20,7 +20,7 @@ def loader(input_shape, num_outputs):
     blstm_2 = Bidirectional(LSTM(256, return_sequences=True), name="blstm_2")(blstm_1)
     concat = Concatenate(name="blstm_concat")([blstm_1, blstm_2])
     outputs = GlobalAveragePooling1D(name="avg_over_time")(concat)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="angular_proximity_lstm")
 
 def predict(model, utterances):
     return model.predict(utterances)

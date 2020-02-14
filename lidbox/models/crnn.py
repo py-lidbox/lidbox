@@ -50,7 +50,7 @@ def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0
     outputs = Dense(num_outputs, activation=None, name="output")(blstm)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="CRNN")
 
 
 def predict(model, utterances):

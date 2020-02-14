@@ -112,7 +112,7 @@ def loader(input_shape, num_outputs, output_activation="log_softmax"):
     outputs = Dense(num_outputs, name="output", activation=None)(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="x-vector")
 
 
 def predict(model, inputs):

@@ -26,7 +26,7 @@ def loader(input_shape, num_outputs, output_activation="softmax", padding="same"
     outputs = Dense(num_outputs, name="output", activation=None)(fc_2)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="MGB-3_CNN")
 
 def predict(model, samples):
     return model.predict(samples)

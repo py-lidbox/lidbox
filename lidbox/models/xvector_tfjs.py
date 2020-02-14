@@ -51,7 +51,7 @@ def loader(input_shape, num_outputs, output_activation="softmax", dropout_rate=N
     outputs = x
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs)
+    return Model(inputs=inputs, outputs=outputs, name="x-vector-javascript")
 
 def predict(model, inputs):
     return model.predict(inputs)
