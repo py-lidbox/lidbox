@@ -48,10 +48,9 @@ def make_label2onehot(labels):
     return label2int, OH
 
 def config_checksum(config, datagroup_key):
-    md5input = {
-        "features": config["features"],
-        "wav_config": config["dataset"]["datagroups"][datagroup_key],
-    }
+    md5input = {k: config[k] for k in ("features", "datasets")}
+    print("computing md5sum from")
+    yaml_pprint(md5input)
     json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
@@ -132,30 +131,59 @@ class E2EBase(Command):
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
 
-    def extract_features(self, config, datagroup_key, trim_audio, debug_squeeze_last_dim):
+    def extract_features(self, datasets, config, datagroup_key, trim_audio, debug_squeeze_last_dim):
         args = self.args
-        datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
-        if args.verbosity > 2:
-            print("Extracting features from datagroup '{}' with config".format(datagroup_key))
-            yaml_pprint(config)
-        utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
-        utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
-        if args.verbosity:
-            print("Reading paths of wav files from utt2path file '{}'".format(utt2path_path))
-        utt2path = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2path_path)
-        )
-        if args.verbosity:
-            print("Reading labels for utterances from utt2label file '{}'".format(utt2label_path))
-        utt2label = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2label_path)
-        )
+        utt2path = collections.OrderedDict()
+        utt2meta = collections.OrderedDict()
         if args.verbosity > 1:
-            print("Non-empty lines read from utt2path {}, and utt2label {}".format(len(utt2path), len(utt2label)))
+            print("Extracting features from datagroup '{}'".format(datagroup_key))
+            if args.verbosity > 2:
+                yaml_pprint(config)
+        num_utts_dropped = collections.Counter()
+        for ds_config in datasets:
+            if args.verbosity > 1:
+                print("Dataset '{}'".format(ds_config["key"]))
+            datagroup = ds_config["datagroups"][datagroup_key]
+            utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
+            utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
+            if args.verbosity:
+                print("Reading labels for utterances from utt2label file '{}'".format(utt2label_path))
+            if args.verbosity > 1:
+                print("Expected labels (utterances with other labels will be ignored):")
+                for l in ds_config["labels"]:
+                    print(l)
+            enabled_labels = set(ds_config["labels"])
+            skipped_utterances = set()
+            for utt, label, *rest in parse_space_separated(utt2label_path):
+                if label not in enabled_labels:
+                    skipped_utterances.add(utt)
+                    continue
+                assert utt not in utt2meta, "duplicate utterance id found when parsing labels: '{}'".format(utt)
+                utt2meta[utt] = {"label": label, "dataset": ds_config["key"], "duration_sec": -1.0}
+            utt2dur_path = os.path.join(datagroup["path"], datagroup.get("utt2dur", "utt2dur"))
+            if os.path.exists(utt2dur_path):
+                if args.verbosity:
+                    print("Reading durations from utt2dur file '{}'".format(utt2dur_path))
+                for utt, duration, *rest in parse_space_separated(utt2dur_path):
+                    assert utt in utt2meta, "utterance id without label found when parsing durations: '{}'".format(utt)
+                    utt2meta[utt]["duration_sec"] = float(duration)
+            else:
+                if args.verbosity:
+                    print("Skipping signal duration parse since utt2dur file '{}' does not exist".format(utt2dur_path))
+            if args.verbosity:
+                print("Reading paths of wav files from utt2path file '{}'".format(utt2path_path))
+            for utt, path, *rest in parse_space_separated(utt2path_path):
+                if utt in skipped_utterances:
+                    continue
+                assert utt not in utt2path, "duplicate utterance id found when parsing paths: '{}'".format(utt)
+                utt2path[utt] = path
+        if args.verbosity > 1:
+            print("Total amount of non-empty lines read from utt2path {}, and utt2meta {}".format(len(utt2path), len(utt2meta)))
+            print("Total amount of utterances skipped due to unexpected labels: {}".format(len(skipped_utterances)))
         # All utterance ids must be present in both files
-        assert set(utt2path) == set(utt2label), "utt2path and utt2label must have exactly matching sets of utterance ids"
+        assert set(utt2path) == set(utt2meta), "Mismatching sets of utterances in utt2path and utt2meta, the utterance ids must be exactly the same"
         utterance_list = list(utt2path.keys())
-        if datagroup.get("shuffle_utt2path", False):
+        if args.shuffle_utt2path or datagroup.get("shuffle_utt2path", False):
             if args.verbosity > 1:
                 print("Shuffling utterance ids, all wavpaths in the utt2path list will be processed in random order.")
             random.shuffle(utterance_list)
@@ -169,25 +197,18 @@ class E2EBase(Command):
             if args.verbosity > 3:
                 print("Using utterance ids:")
                 yaml_pprint(utterance_list)
-        labels_set = set(self.experiment_config["dataset"]["labels"])
-        num_dropped = collections.Counter()
         paths = []
         paths_meta = []
         for utt in utterance_list:
-            label = utt2label[utt]
-            if label not in labels_set:
-                num_dropped[label] += 1
-                continue
             paths.append(utt2path[utt])
-            paths_meta.append((utt, label))
+            meta = utt2meta[utt]
+            paths_meta.append((utt, meta["label"], meta["dataset"], meta["duration_sec"]))
         if args.verbosity:
             print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
-            if num_dropped:
-                print("Amount of files ignored since they had a label that was not in the labels list dataset.labels: {}".format(num_dropped.most_common(None)))
             if args.verbosity > 3:
-                print("Using paths:")
-                for path, (utt, label) in zip(paths, paths_meta):
-                    print(utt, path, label)
+                print("All utterances:")
+                for path, (utt, label, dataset, *rest) in zip(paths, paths_meta):
+                    print(utt, label, dataset, sep='\t')
         if config["type"] == "sparsespeech":
             seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
             if args.verbosity:
@@ -211,12 +232,12 @@ class E2EBase(Command):
         else:
             feat = tf_data.extract_features_from_paths(
                 config,
-                self.experiment_config["dataset"]["datagroups"][datagroup_key],
                 paths,
                 paths_meta,
-                verbosity=args.verbosity,
+                datagroup_key,
                 trim_audio=trim_audio,
                 debug_squeeze_last_dim=debug_squeeze_last_dim,
+                verbosity=args.verbosity,
             )
         return feat
 
@@ -233,6 +254,10 @@ class Train(E2EBase):
         optional.add_argument("--debug-dataset",
             action="store_true",
             default=False)
+        optional.add_argument("--shuffle-utt2path",
+            action="store_true",
+            default=False,
+            help="Override utt2path shuffling")
         optional.add_argument("--exhaust-dataset-iterator",
             action="store_true",
             default=False,
@@ -287,7 +312,6 @@ class Train(E2EBase):
         if args.verbosity:
             print("Using model:\n{}".format(str(model)))
         dataset = {}
-        #todo prepare all datasets
         for ds in ("train", "validation"):
             if args.verbosity > 2:
                 print("Dataset config for '{}'".format(ds))
@@ -297,8 +321,10 @@ class Train(E2EBase):
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
             debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
             datagroup_key = ds_config.pop("datagroup")
+            conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
             extractor_ds = self.extract_features(
-                feat_config,
+                self.experiment_config["datasets"],
+                json.loads(json.dumps(feat_config)),
                 datagroup_key,
                 summary_kwargs.pop("trim_audio", False),
                 debug_squeeze_last_dim,
@@ -307,11 +333,9 @@ class Train(E2EBase):
                 features_cache_dir = os.path.join(self.cache_dir, "features")
             else:
                 features_cache_dir = "/tmp/tensorflow-cache"
-            conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
             features_cache_path = os.path.join(
                 features_cache_dir,
-                self.experiment_config["dataset"]["key"],
-                ds,
+                datagroup_key,
                 feat_config["type"],
                 conf_checksum,
             )
@@ -332,15 +356,13 @@ class Train(E2EBase):
                 i = 0
                 if args.verbosity > 1:
                     print(now_str(date=True), "- 0 samples done")
-                for i, (feats, meta, *rest) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
+                for i, (feats, *meta) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
                     if args.verbosity > 1 and i % 10000 == 0:
                         print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
-                        tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", meta)
+                        tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", *meta)
                 if args.verbosity > 1:
                     print(now_str(date=True), "- all", i, "samples done")
-            if args.verbosity > 2:
-                print("Preparing dataset iterator for training")
             dataset[ds] = tf_data.prepare_dataset_for_training(
                 extractor_ds,
                 ds_config,
@@ -374,9 +396,18 @@ class Train(E2EBase):
                             if args.verbosity:
                                 print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                             i = 0
-                            for i, elem in enumerate(logged_dataset.as_numpy_iterator()):
+                            max_outputs = summary_kwargs.get("max_outputs", 10)
+                            for i, (samples, labels, *meta) in enumerate(logged_dataset.as_numpy_iterator()):
                                 if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                                     print(i, "batches done")
+                                if args.verbosity > 3:
+                                    tf_data.tf_print(
+                                            "batch:", i,
+                                            "utts", meta[0][:max_outputs],
+                                            "samples shape:", tf.shape(samples),
+                                            "onehot shape:", tf.shape(labels),
+                                            "wav.audio.shape", meta[1].audio.shape,
+                                            "wav.sample_rate[0]", meta[1].sample_rate[0])
                             if args.verbosity > 1:
                                 print(i, "batches done")
                             del logged_dataset

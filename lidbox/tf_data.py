@@ -1,13 +1,21 @@
+import contextlib
+import collections
+import io
 import os
+import random
 import sys
 import time
+import wave
 
 from . import audio_feat
 from lidbox import yaml_pprint
 import kaldiio
+import librosa.core
 import matplotlib.cm
 import numpy as np
+import soundfile
 import tensorflow as tf
+import webrtcvad
 
 debug = False
 if debug:
@@ -140,6 +148,19 @@ def load_wav(path):
     # Merge channels by averaging, for mono this just drops the channel dim.
     return audio_feat.Wav(tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), wav.sample_rate)
 
+# Copied from
+# https://github.com/wiseman/py-webrtcvad/blob/fe9d953217932c319070a6aeeeb6860aeb1c474e/example.py
+def read_wave(path):
+    with contextlib.closing(wave.open(path, 'rb')) as wf:
+        num_channels = wf.getnchannels()
+        assert num_channels == 1
+        sample_width = wf.getsampwidth()
+        assert sample_width == 2
+        sample_rate = wf.getframerate()
+        assert sample_rate in (8000, 16000, 32000, 48000)
+        pcm_data = wf.readframes(wf.getnframes())
+        return pcm_data, sample_rate
+
 @tf.function
 def write_wav(path, wav):
     tf.debugging.assert_rank(wav, 2, "write_wav expects signals with shape [N, c] where N is amount of samples and c channels.")
@@ -217,33 +238,8 @@ def make_random_frame_chunker_fn(len_config):
     return chunk_timedim_randomly
 
 def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id, conf_checksum='', verbosity=0):
-    image_resize_kwargs = dict(config.get("convert_to_images", {}))
-    if image_resize_kwargs:
-        size = image_resize_kwargs.pop("size")
-        if verbosity:
-            print("Resizing features to size", size)
-        new_height = tf.constant(size.get("height", 0), dtype=tf.int32)
-        new_width = tf.constant(size.get("width", 0), dtype=tf.int32)
-        @tf.function
-        def convert_to_images(feats, *meta):
-            # Add single grayscale channel
-            imgs = tf.expand_dims(feats, -1)
-            # Ensure timesteps are the columns of the image
-            imgs = tf.image.transpose(imgs)
-            # Resize
-            old_height, old_width = tf.shape(imgs)[0], tf.shape(imgs)[1]
-            if new_height == 0 and new_width == 0:
-                new_size = [old_height, old_width]
-            elif new_height == 0:
-                new_size = [old_height, new_width]
-            elif new_width == 0:
-                new_size = [new_height, old_width]
-            else:
-                new_size = [new_height, new_width]
-            imgs = tf.image.resize(imgs, new_size, **image_resize_kwargs)
-            return (imgs, *meta)
-        ds = ds.map(convert_to_images, num_parallel_calls=TF_AUTOTUNE)
     if "frames" in config:
+        raise NotImplementedError("todo")
         if verbosity:
             print("Dividing features time dimension into frames")
         assert "convert_to_images" not in config, "todo, time dim random chunks for image data"
@@ -283,13 +279,13 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
                 return (frames - tf.math.reduce_mean(frames, axis=axis, keepdims=True), *meta)
             ds = ds.map(normalize_frames)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
-    to_model_input = lambda feats, meta, *rest: (feats, label2onehot(meta[1]), meta[0], *rest)
+    to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]), meta[0], *meta[2:])
     ds = ds.map(to_model_input)
     if "min_shape" in config:
         if verbosity:
             print("Filtering features by minimum shape", config["min_shape"])
         ds = filter_with_min_shape(ds, config["min_shape"])
-    shuffle_buffer_size = config.get("shuffle_buffer_size", 0)
+    shuffle_buffer_size = config.get("shuffle_buffer", {"before_cache": 0})["before_cache"]
     if shuffle_buffer_size:
         if verbosity:
             print("Shuffling features with shuffle buffer size", shuffle_buffer_size)
@@ -309,7 +305,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
     if "bucket_by_sequence_length" in config:
         if verbosity:
             print("Batching features by bucketing samples into fixed length, padded sequence length buckets")
-        seq_len_fn = lambda feats, *meta: tf.shape(feats)[0]
+        seq_len_fn = lambda feats, meta: tf.shape(feats)[0]
         bucket_conf = config["bucket_by_sequence_length"]
         bucket_boundaries = np.linspace(
             bucket_conf["bins"]["min"],
@@ -327,7 +323,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
         max_batch_size = tf.constant(config["group_by_sequence_length"]["max_batch_size"], tf.int64)
         if verbosity:
             tf_print("Grouping samples by sequence length into batches of max size", max_batch_size)
-        get_seq_len = lambda feat, *meta: tf.cast(tf.shape(feat)[0], tf.int64)
+        get_seq_len = lambda feat, meta: tf.cast(tf.shape(feat)[0], tf.int64)
         group_to_batch = lambda key, group: group.batch(max_batch_size)
         ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, window_size=max_batch_size))
         if "min_batch_size" in config["group_by_sequence_length"]:
@@ -335,19 +331,18 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
             if verbosity:
                 print("Dropping batches smaller than min_batch_size", min_batch_size)
             min_batch_size = tf.constant(min_batch_size, tf.int32)
-            ds = ds.filter(lambda batch, *meta: (tf.shape(batch)[0] >= min_batch_size))
+            ds = ds.filter(lambda batch, meta: (tf.shape(batch)[0] >= min_batch_size))
     if config.get("copy_cache_to_tmp", False):
         tmp_cache_path = "/tmp/tensorflow-cache/{}/training-prepared_{}_{}".format(model_id, int(time.time()), conf_checksum)
         if verbosity:
             print("Caching prepared dataset iterator to '{}'".format(tmp_cache_path))
         os.makedirs(os.path.dirname(tmp_cache_path), exist_ok=True)
         ds = ds.cache(filename=tmp_cache_path)
-        if shuffle_buffer_size:
-            #TODO
-            shuffle_buffer_size = min(100, shuffle_buffer_size)
+        cache_shuffle_buffer_size = config.get("shuffle_buffer", {"after_cache": 0})["after_cache"]
+        if cache_shuffle_buffer_size:
             if verbosity:
-                print("Also shuffling cached features with (capped) shuffle buffer size", shuffle_buffer_size)
-            ds = ds.shuffle(shuffle_buffer_size)
+                print("Shuffling cached features with shuffle buffer size", cache_shuffle_buffer_size)
+            ds = ds.shuffle(cache_shuffle_buffer_size)
     # assume autotuned prefetch (turned off when config["prefetch"] is None)
     if "prefetch" not in config:
         if verbosity:
@@ -374,12 +369,11 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
     img_size_multiplier = tf.constant(image_resize_kwargs.pop("size_multiplier", 1), dtype=tf.float32)
     @tf.function
     def inspect_batches(batch_idx, batch):
-        image, onehot, uttid = batch[:3]
+        samples, labels, uttids, wavs = batch[:4]
         if debug_squeeze_last_dim:
-            image = tf.squeeze(image, -1)
-        tf.summary.histogram("input_batch", image, step=batch_idx)
-        # Scale grayscale channel between 0 and 1 over whole image
-        image = feature_scaling(image, tf.constant(0.0), tf.constant(1.0))
+            samples = tf.squeeze(samples, -1)
+        # Scale features between 0 and 1 to produce a grayscale image
+        image = feature_scaling(samples, tf.constant(0.0), tf.constant(1.0))
         # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
         indices = tf.dtypes.cast(tf.math.round(image * num_colors), tf.int32)
         image = tf.gather(colors, indices)
@@ -391,11 +385,16 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
             new_size = tf.cast(img_size_multiplier * old_size, tf.int32)
             image = tf.image.resize(image, new_size, **image_resize_kwargs)
         tf.debugging.assert_all_finite(image, message="non-finite values in image when trying to create dataset logger for tensorboard")
+        tf.summary.histogram("input_samples", samples, step=batch_idx)
+        tf.summary.histogram("input_labels", labels, step=batch_idx)
         tf.summary.image(features_name, image, step=batch_idx, max_outputs=max_outputs)
-        # if copy_original_audio:
-            # wav = batch[3]
-            # tf.summary.audio("original_audio", wav.audio, wav.sample_rate, step=batch_idx, max_outputs=max_outputs)
-        tf.summary.text("utterance_ids", uttid[:max_outputs], step=batch_idx)
+        tf.debugging.assert_equal(tf.expand_dims(wavs.sample_rate[0], 0), wavs.sample_rate, message="All utterances in a batch must have the same sample rate")
+        tf.summary.audio("utterances", tf.expand_dims(wavs.audio, -1), wavs.sample_rate[0], step=batch_idx, max_outputs=max_outputs)
+        enumerated_uttids = tf.strings.reduce_join(
+                (tf.strings.as_string(tf.range(1, max_outputs + 1)), uttids[:max_outputs]),
+                axis=0,
+                separator=": ")
+        tf.summary.text("utterance_ids", enumerated_uttids, step=batch_idx)
         return batch
     return (ds.take(num_batches)
               .enumerate()
@@ -404,7 +403,130 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
 def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
 
+# Copied from
+# https://github.com/microsoft/MS-SNSD/blob/e84aba38cac499a109c0d237a00dc600dcf9b7e7/audiolib.py
+def snr_mixer(clean, noise, snr):
+    # Normalizing to -25 dB FS
+    rmsclean = np.sqrt((clean**2).mean())
+    scalarclean = 10 ** (-25 / 20) / rmsclean
+    clean = clean * scalarclean
+    rmsclean = np.sqrt((clean**2).mean())
+    rmsnoise = np.sqrt((noise**2).mean())
+    scalarnoise = 10 ** (-25 / 20) /rmsnoise
+    noise = noise * scalarnoise
+    rmsnoise = np.sqrt((noise**2).mean())
+    # Set the noise level for a given SNR
+    noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
+    noisenewlevel = noise * noisescalar
+    noisyspeech = clean + noisenewlevel
+    return clean, noisenewlevel, noisyspeech
+
+def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
+    chunks = wav_config["chunks"]
+    target_sr = wav_config.get("target_sample_rate")
+    augment_config = wav_config.get("augmentation", [])
+    if datagroup_key != "train":
+        if verbosity:
+            print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key))
+        augment_config = []
+    vad_trim = wav_config.get("webrtcvad_trim")
+    for conf in augment_config:
+        # prepare noise augmentation
+        if conf["type"] == "additive_noise":
+            noise_source_dir = conf["noise_source"]
+            conf["noise_source"] = {}
+            with open(os.path.join(noise_source_dir, "id2label")) as f:
+                id2label = dict(l.strip().split() for l in f)
+            label2path = collections.defaultdict(list)
+            with open(os.path.join(noise_source_dir, "id2path")) as f:
+                for id, path in (l.strip().split() for l in f):
+                    label2path[id2label[id]].append(path)
+            for noise_type, noise_paths in label2path.items():
+                conf["noise_source"][noise_type] = noise_paths
+    def trim_silence(signal, sr):
+        vad_frame_ms = vad_trim["frame_ms"]
+        assert vad_frame_ms in (10, 20, 30)
+        assert sr == target_sr, "unexpected sample rate {}, cannot do vad_trim because wav write would distort pitch".format(sr)
+        with contextlib.closing(io.BytesIO()) as buf:
+            soundfile.write(buf, signal, sr, format="WAV")
+            buf.seek(0)
+            pcm_data, sr = read_wave(buf)
+        assert sr == target_sr, "vad_trim failed during WAV read"
+        step = int(sr * 1e-3 * vad_frame_ms * 2)
+        if signal.size < step//2:
+            return np.zeros(0, dtype=signal.dtype)
+        frames = librosa.util.frame(signal, step//2, step//2, axis=0)
+        vad_decisions = np.ones(frames.shape[0], dtype=np.bool)
+        pcm_data_end = len(pcm_data) - len(pcm_data) % step
+        a, b = len(range(0, pcm_data_end, step)), len(range(pcm_data_end, 0, -step))
+        assert a == b == len(vad_decisions), (a, b, len(vad_decisions))
+        del a, b
+        vad = webrtcvad.Vad(vad_trim["aggressiveness"])
+        for f, i in enumerate(range(0, pcm_data_end, step)):
+            if not vad.is_speech(pcm_data[i:i+step], sr):
+                vad_decisions[f] = False
+            else:
+                break
+        for f, i in enumerate(range(pcm_data_end, 0, -step)):
+            if not vad.is_speech(pcm_data[i-step:i], sr):
+                vad_decisions[f] = False
+            else:
+                break
+        voiced_frames = frames[vad_decisions]
+        if voiced_frames.size > 0:
+            voiced_signal = np.concatenate(voiced_frames, axis=0)
+        else:
+            voiced_signal = np.zeros(0, dtype=signal.dtype)
+        if verbosity > 3:
+            print("dropping {} frames due to vad, signal shape {} voiced_signal shape {}".format(int((~vad_decisions).sum()), signal.shape, voiced_signal.shape))
+        return voiced_signal
+    def chunker(signal, sr, meta):
+        chunk_len = int(sr * 1e-3 * chunks["length_ms"])
+        chunk_step = int(sr * 1e-3 * chunks["step_ms"])
+        if signal.size >= chunk_len:
+            for i, chunk in enumerate(librosa.util.frame(signal, chunk_len, chunk_step, axis=0)):
+                yield (chunk, sr), meta[0] + "-{:06d}".format(i), meta[1]
+    def chunk_loader():
+        for p, meta in zip(paths, meta_list):
+            utt, label, dataset = meta[:3]
+            original_signal, sr = librosa.core.load(p, sr=target_sr, mono=True)
+            if vad_trim:
+                original_signal = trim_silence(original_signal, sr)
+            if original_signal.size < int(sr * 1e-3 * chunks["length_ms"]):
+                continue
+            yield from chunker(original_signal, target_sr, meta)
+            for conf in augment_config:
+                if conf["type"] == "speed_modification":
+                    #TODO using a byte buffer is probably not the smartest way to do a speed modification
+                    for rate in conf["range"]:
+                        if rate == 1:
+                            signal = original_signal
+                        else:
+                            with contextlib.closing(io.BytesIO()) as buf:
+                                soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
+                                buf.seek(0)
+                                signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
+                        new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
+                        yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
+                elif conf["type"] == "additive_noise" and dataset in conf["datasets"]:
+                    for noise_type, db_min, db_max in conf["snr-def"]:
+                        noise_signal = np.zeros(0, dtype=original_signal.dtype)
+                        while noise_signal.size < original_signal.size:
+                            rand_noise_path = random.choice(conf["noise_source"][noise_type])
+                            sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
+                            noise_signal = np.concatenate((noise_signal, sig))
+                        noise_begin = random.randint(0, noise_signal.size - original_signal.size)
+                        noise_signal = noise_signal[noise_begin:noise_begin+original_signal.size]
+                        snr_db = random.randint(db_min, db_max)
+                        clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
+                        new_uttid = "{:s}-{:s}_snr{:d}".format(utt, noise_type, snr_db)
+                        yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
+    if verbosity:
+        tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
+    return chunk_loader
+
 def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
+    raise NotImplementedError("todo")
     chunk_config = wav_config["wav_to_random_chunks"]
     sample_rate = wav_config["filter_sample_rate"]
     lengths = tf.cast(
@@ -444,80 +566,35 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
+def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
     paths, meta = list(paths), list(meta)
     assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
-    if "wav_to_random_chunks" in wav_config:
-        # TODO interleave or without generator might improve performance
-        wavs = tf.data.Dataset.from_generator(
-            get_random_chunk_loader(paths, meta, wav_config, verbosity),
-            ((tf.float32, tf.int32), tf.string),
-            ((tf.TensorShape([None]), tf.TensorShape([])), tf.TensorShape([None]))
-        )
-        wavs = wavs.map(lambda wav, meta: (audio_feat.Wav(wav[0], wav[1]), meta))
+    wav_config = feat_config.get("wav_config")
+    if wav_config:
+        dataset_types = (tf.float32, tf.int32), tf.string, tf.string
+        dataset_shapes = (tf.TensorShape([None]), tf.TensorShape([])), tf.TensorShape([]), tf.TensorShape([])
+        if "random_chunks" in wav_config:
+            # TODO interleave or without generator might improve performance
+            wavs = tf.data.Dataset.from_generator(
+                get_random_chunk_loader(paths, meta, wav_config, verbosity),
+                dataset_types,
+                dataset_shapes)
+        if "chunks" in wav_config:
+            wavs = tf.data.Dataset.from_generator(
+                get_chunk_loader(paths, meta, wav_config, verbosity, datagroup_key),
+                dataset_types,
+                dataset_shapes)
+        else:
+            print("unknown, non-empty wav_config given:")
+            yaml_pprint(wav_config)
+            assert False
+        wavs = wavs.map(lambda wav, *meta: (audio_feat.Wav(wav[0], wav[1]), *meta))
     else:
         wav_paths = tf.data.Dataset.from_tensor_slices((
             tf.constant(paths, dtype=tf.string),
             tf.constant(meta, dtype=tf.string)))
         load_wav_with_meta = lambda path, *meta: (load_wav(path), *meta)
         wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
-    if "filter_sample_rate" in wav_config:
-        expected_sample_rate = tf.constant(wav_config["filter_sample_rate"], tf.int32)
-        if verbosity:
-            tf_print("Filtering wavs by expected sample rate", expected_sample_rate)
-        def has_expected_sample_rate(wav, meta, *rest):
-            batch_ok = tf.math.reduce_all(wav.sample_rate == expected_sample_rate)
-            if verbosity > 3 and not batch_ok:
-                tf_print("dropping", meta[0], "which has sample rate", wav.sample_rate)
-            return batch_ok
-        wavs = wavs.filter(has_expected_sample_rate)
-    if "filter_min_length" in wav_config:
-        min_len = tf.constant(wav_config["filter_min_length"], tf.int32)
-        if verbosity:
-            tf_print("Filtering wavs by min length", min_len)
-        def has_min_len(wav, meta, *rest):
-            batch_ok = tf.math.reduce_all(tf.size(wav.audio) >= min_len)
-            if verbosity > 3 and not batch_ok:
-                tf_print("dropping", meta[0], "which has too short length", tf.size(wav.audio))
-            return batch_ok
-        wavs = wavs.filter(has_min_len)
-    if "trim_or_pad_to_length" in wav_config:
-        target_len = tf.constant(wav_config["trim_or_pad_to_length"], tf.int32)
-        if verbosity:
-            tf_print("Ensuring all wavs are of length", target_len, "(too long files are trimmed, too short are padded)")
-        def pad_or_slice_wavs(wav, *rest):
-            padding = [[0, tf.maximum(0, target_len - tf.size(wav.audio))]]
-            trimmed = tf.pad(wav.audio[:target_len], padding)
-            if verbosity > 3:
-                tf_print("pad_or_slice_wavs: before", tf.size(wav.audio), "after", tf.size(trimmed))
-            return (audio_feat.Wav(trimmed, wav.sample_rate), *rest)
-        wavs = wavs.map(pad_or_slice_wavs, num_parallel_calls=TF_AUTOTUNE)
-    vad_config = feat_config.get("voice_activity_detection")
-    if vad_config:
-        if verbosity > 1:
-            print("VAD config is:")
-            yaml_pprint(vad_config)
-        if vad_config["type"] == "webrtcvad":
-            if verbosity:
-                print("Computing voice activity decisions using webrtcvad")
-            vad_kwargs = {
-                "vad_frame_length": vad_config["frame_length"],
-                "vad_frame_step": vad_config["frame_step"],
-                "aggressiveness": vad_config["aggressiveness"],
-                "feat_frame_length": feat_config["spectrogram"]["frame_length"],
-                "feat_frame_step": feat_config["spectrogram"]["frame_step"],
-            }
-            wavs = append_webrtcvad_decisions(wavs, vad_kwargs)
-        elif vad_config["type"] == "mfcc_energy":
-            vad_kwargs = {
-                "spectrogram": feat_config["spectrogram"],
-                "melspectrogram": feat_config["melspectrogram"],
-                "energy_threshold": vad_config["energy_threshold"],
-                "energy_mean_scale": vad_config["energy_mean_scale"],
-            }
-            wavs = append_mfcc_energy_vad_decisions(wavs, vad_kwargs)
-        else:
-            raise NotImplementedError("unknown VAD type '{}'".format(vad_config["type"]))
     if "batch_wavs_by_length" in feat_config:
         window_size = feat_config["batch_wavs_by_length"]["max_batch_size"]
         if verbosity:
@@ -537,8 +614,7 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
     # This function expects batches of wavs
     extract_feats = lambda wavs, *meta: (
         extract_features(wavs, *feat_extract_args),
-        *meta,
-        wavs,
+        (*meta, wavs)
     )
     features = wavs_batched.map(extract_feats, num_parallel_calls=TF_AUTOTUNE)
     if "cmvn_numpy" in feat_config:
@@ -555,19 +631,6 @@ def extract_features_from_paths(feat_config, wav_config, paths, meta, trim_audio
             return (normalized, *rest)
         features = features.map(apply_cmvn_numpy, num_parallel_calls=TF_AUTOTUNE)
     features = features.unbatch()
-    if vad_config:
-        if verbosity:
-            print("Selecting voiced frames from extracted features")
-        def select_voiced_frames(features, meta, vad_decisions, wavs):
-            tf.debugging.assert_equal(tf.shape(features)[0], tf.shape(vad_decisions), message="Amount of voice activity decisions must match amount of feature frames")
-            vad_decisions.set_shape([None])
-            voiced_frames = tf.boolean_mask(features, vad_decisions)
-            if verbosity > 3:
-                tf_print("before vad", tf.shape(features), "after vad", tf.shape(voiced_frames))
-            return voiced_frames, meta, wavs
-        features = features.map(select_voiced_frames)
-    # drop wavs for now
-    features = features.map(lambda feats, meta, wavs: (feats, meta))
     return features
 
 def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):

@@ -30,7 +30,7 @@ def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
 
 @tf.function
 def ms_to_frames(sample_rate, ms):
-    return tf.cast(sample_rate * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
+    return tf.cast(tf.cast(sample_rate, tf.float32) * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
 
 @tf.function
 def spectrograms(signals, frame_length_ms=25, frame_step_ms=10, power=2.0, fmin=0.0, fmax=8000.0, fft_length=512):

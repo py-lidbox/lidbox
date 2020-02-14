@@ -33,7 +33,7 @@ def main():
     try:
         # Initialize a Command object from the class specified in args.cmd_class and remove the class from args
         command = args.__dict__.pop("cmd_class")(args)
-        ret = command.run() or command.exit()
+        ret = command.run()
     finally:
         if tf_profiler:
             tf_profiler_result = tf_profiler.stop()
