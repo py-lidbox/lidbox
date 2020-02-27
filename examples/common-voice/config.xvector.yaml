@@ -32,11 +32,11 @@ features:
       step_ms: 980
     target_sample_rate: 16000
     # Create new audio samples by resampling randomly between a given range [a, b)
-    augmentation:
-      - type: random_resampling
-        range: [1.0, 1.2]
-      - type: random_resampling
-        range: [0.8, 1.0]
+    # augmentation:
+      # - type: random_resampling
+        # range: [1.0, 1.2]
+      # - type: random_resampling
+        # range: [0.8, 1.0]
   # How many wav-files to process in one batch
   batch_size: 100
   # Extract log-scale Mel-spectrograms from input wavs
