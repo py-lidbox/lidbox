@@ -177,7 +177,8 @@ class E2EBase(Command):
                 utt2path[utt] = path
         if args.verbosity > 1:
             print("Total amount of non-empty lines read from utt2path {}, and utt2meta {}".format(len(utt2path), len(utt2meta)))
-            print("Total amount of utterances skipped due to unexpected labels: {}".format(len(skipped_utterances)))
+            if skipped_utterances:
+                print("Utterances skipped due to unexpected labels: {}".format(len(skipped_utterances)))
         # All utterance ids must be present in both files
         assert set(utt2path) == set(utt2meta), "Mismatching sets of utterances in utt2path and utt2meta, the utterance ids must be exactly the same"
         utterance_list = list(utt2path.keys())
@@ -285,14 +286,8 @@ class Train(E2EBase):
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
         labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         label2int, OH = make_label2onehot(labels)
-        onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
-        if onehot_dims:
-            def label2onehot(label):
-                o = OH[label2int.lookup(label)]
-                return tf.concat((o, tf.zeros(onehot_dims - tf.size(o))))
-        else:
-            def label2onehot(label):
-                return OH[label2int.lookup(label)]
+        def label2onehot(label):
+            return OH[label2int.lookup(label)]
         if args.verbosity > 2:
             print("Generating onehot encoding from labels:", ', '.join(labels))
             print("Generated onehot encoding as tensors:")
@@ -551,14 +546,8 @@ class Predict(E2EBase):
                 yaml_pprint(utterance_list)
         int2label = self.experiment_config["dataset"]["labels"]
         label2int, OH = make_label2onehot(int2label)
-        onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
-        if onehot_dims:
-            def label2onehot(label):
-                o = OH[label2int.lookup(label)]
-                return tf.concat((o, tf.zeros(onehot_dims - tf.size(o))))
-        else:
-            def label2onehot(label):
-                return OH[label2int.lookup(label)]
+        def label2onehot(label):
+            return OH[label2int.lookup(label)]
         labels_set = set(int2label)
         paths = []
         paths_meta = []

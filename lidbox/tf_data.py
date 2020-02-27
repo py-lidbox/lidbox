@@ -301,7 +301,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
     elif "batch_size" in config:
         if verbosity:
             print("Batching features with batch size", config["batch_size"])
-        ds = ds.batch(config["batch_size"])
+        ds = ds.batch(config["batch_size"], drop_remainder=True)
     if "bucket_by_sequence_length" in config:
         if verbosity:
             print("Batching features by bucketing samples into fixed length, padded sequence length buckets")
