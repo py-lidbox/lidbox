@@ -1,0 +1,100 @@
+# List of input datasets containing wav-files
+datasets:
+  - key: common-voice
+    # Language labels as BCP-47 tags
+    # See also https://schneegans.de/lv/?tags=br%0D%0Aet%0D%0Amn%0D%0Atr&format=text
+    labels:
+      - br
+      - et
+      - mn
+      - tr
+    datagroups:
+        # Root directories for the training and test set metadata
+        # Note that the wav-files do not need to be in these directories, since the wav-paths are defined in the utt2path files
+        train:
+            path: ./common-voice-data/train
+            shuffle_utt2path: true
+        test:
+            path: ./common-voice-data/test
+
+# Feature extraction pipeline configuration
+features:
+  wav_config:
+    # Apply voice activity detection with WebRTC using maximum aggressiveness level
+    webrtcvad:
+      aggressiveness: 3
+      frame_ms: 10
+      # Do not drop non-speech segments that are shorter than 200 ms
+      min_non_speech_length_ms: 200
+    # Divide all wav-files into non-overlapping chunks of 980 ms
+    chunks:
+      length_ms: 980
+      step_ms: 980
+    target_sample_rate: 16000
+    # Create new audio samples by resampling randomly between a given range [a, b)
+    augmentation:
+      - type: random_resampling
+        range: [1.0, 1.2]
+      - type: random_resampling
+        range: [0.8, 1.0]
+  # How many wav-files to process in one batch
+  batch_size: 100
+  # Extract log-scale Mel-spectrograms from input wavs
+  type: logmelspectrogram
+  spectrogram:
+    frame_length_ms: 25
+    frame_step_ms: 10
+  melspectrogram:
+    num_mel_bins: 64
+    fmin: 20
+    fmax: 8000
+  # Mean-normalization with sliding window over 300 feature frames
+  mean_var_norm_slide:
+    window_len: 300
+    normalize_variance: false
+
+# Directory to use as a persistent cache for e.g. extracted features, trained model checkpoints, TensorBoard data etc.
+cache: ./lidbox-cache
+
+# Experiment configuration for training a model
+experiment:
+  name: xvector
+  model_definition:
+    # See lidbox/models/xvector.py
+    name: xvector
+  optimizer:
+    cls: Adam
+    kwargs:
+      learning_rate: 0.0001
+  other_callbacks:
+    - cls: LearningRateDateLogger
+  epochs: 50
+  input_shape: [96, 64]
+  loss:
+    cls: CategoricalCrossentropy
+    kwargs:
+      from_logits: true
+  metrics:
+    - cls: CategoricalAccuracy
+  checkpoints:
+    monitor: val_loss
+    format: "epoch{epoch:06d}__val_loss{val_loss:.12f}__val_categorical_accuracy{val_categorical_accuracy:.12f}.hdf5"
+    mode: min
+  train:
+    datagroup: train
+    batch_size: 64
+    shuffle_buffer:
+      before_cache: 20000
+    dataset_logger:
+      num_batches: 50
+      max_outputs: 16
+      image_resize_kwargs:
+        size_multiplier: 3
+  validation:
+    datagroup: test
+    batch_size: 1
+    dataset_logger:
+      num_batches: 20
+      max_outputs: 1
+      image_resize_kwargs:
+        size_multiplier: 3
