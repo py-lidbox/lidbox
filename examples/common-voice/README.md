@@ -53,7 +53,7 @@ Take some time inspecting the data before running the pipeline on the whole data
 rm -r ./lidbox-cache
 ```
 
-6. Now extract all features (this will take some time) into the cache directory before training:
+6. Now extract all features into the cache directory (creates an additional 6G of features into `./lidbox-cache/features`) before training:
 ```
 lidbox e2e train -vvv config.xvector.yaml --exhaust-dataset-iterator --skip-training --debug-dataset
 ```
