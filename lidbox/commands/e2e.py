@@ -49,8 +49,6 @@ def make_label2onehot(labels):
 
 def config_checksum(config, datagroup_key):
     md5input = {k: config[k] for k in ("features", "datasets")}
-    print("computing md5sum from")
-    yaml_pprint(md5input)
     json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
@@ -151,7 +149,7 @@ class E2EBase(Command):
             if args.verbosity > 1:
                 print("Expected labels (utterances with other labels will be ignored):")
                 for l in ds_config["labels"]:
-                    print(l)
+                    print("  {}".format(l))
             enabled_labels = set(ds_config["labels"])
             skipped_utterances = set()
             for utt, label, *rest in parse_space_separated(utt2label_path):
@@ -283,12 +281,9 @@ class Train(E2EBase):
             yaml_pprint(feat_config)
             print()
         if args.dataset_config:
-            assert "dataset" not in self.experiment_config, "config file should not contain a 'dataset' key if a separate datasets yaml is supplied"
             dataset_config = system.load_yaml(args.dataset_config)
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
-            labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
-        else:
-            labels = self.experiment_config["dataset"]["labels"]
+        labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         label2int, OH = make_label2onehot(labels)
         onehot_dims = self.experiment_config["experiment"].get("onehot_dims")
         if onehot_dims:
@@ -322,6 +317,9 @@ class Train(E2EBase):
             debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
             datagroup_key = ds_config.pop("datagroup")
             conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
+            if args.verbosity > 2:
+                print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
+                print(conf_json)
             extractor_ds = self.extract_features(
                 self.experiment_config["datasets"],
                 json.loads(json.dumps(feat_config)),
