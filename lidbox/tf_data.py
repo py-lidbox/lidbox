@@ -429,7 +429,7 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
         if verbosity:
             print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key))
         augment_config = []
-    vad_trim = wav_config.get("webrtcvad_trim")
+    vad_config = wav_config.get("webrtcvad")
     for conf in augment_config:
         # prepare noise augmentation
         if conf["type"] == "additive_noise":
@@ -443,35 +443,33 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
                     label2path[id2label[id]].append(path)
             for noise_type, noise_paths in label2path.items():
                 conf["noise_source"][noise_type] = noise_paths
-    def trim_silence(signal, sr):
-        vad_frame_ms = vad_trim["frame_ms"]
+    def drop_silence(signal, sr):
+        vad_frame_ms = vad_config["frame_ms"]
         assert vad_frame_ms in (10, 20, 30)
-        assert sr == target_sr, "unexpected sample rate {}, cannot do vad_trim because wav write would distort pitch".format(sr)
+        assert sr == target_sr, "unexpected sample rate {}, cannot do vad_config because wav write would distort pitch".format(sr)
         with contextlib.closing(io.BytesIO()) as buf:
             soundfile.write(buf, signal, sr, format="WAV")
             buf.seek(0)
             pcm_data, sr = read_wave(buf)
-        assert sr == target_sr, "vad_trim failed during WAV read"
+        assert sr == target_sr, "vad_config failed during WAV read"
         step = int(sr * 1e-3 * vad_frame_ms * 2)
         if signal.size < step//2:
             return np.zeros(0, dtype=signal.dtype)
         frames = librosa.util.frame(signal, step//2, step//2, axis=0)
         vad_decisions = np.ones(frames.shape[0], dtype=np.bool)
-        pcm_data_end = len(pcm_data) - len(pcm_data) % step
-        a, b = len(range(0, pcm_data_end, step)), len(range(pcm_data_end, 0, -step))
-        assert a == b == len(vad_decisions), (a, b, len(vad_decisions))
-        del a, b
-        vad = webrtcvad.Vad(vad_trim["aggressiveness"])
-        for f, i in enumerate(range(0, pcm_data_end, step)):
+        min_non_speech_frames = vad_config["min_non_speech_length_ms"] // vad_frame_ms
+        vad = webrtcvad.Vad(vad_config["aggressiveness"])
+        non_speech_begin = -1
+        for f, i in enumerate(range(0, len(pcm_data) - len(pcm_data) % step, step)):
             if not vad.is_speech(pcm_data[i:i+step], sr):
                 vad_decisions[f] = False
+                if non_speech_begin < 0:
+                    non_speech_begin = f
             else:
-                break
-        for f, i in enumerate(range(pcm_data_end, 0, -step)):
-            if not vad.is_speech(pcm_data[i-step:i], sr):
-                vad_decisions[f] = False
-            else:
-                break
+                if non_speech_begin >= 0 and f - non_speech_begin < min_non_speech_frames:
+                    # too short non-speech segment, revert all non-speech decisions up to f
+                    vad_decisions[np.arange(non_speech_begin, f)] = True
+                non_speech_begin = -1
         voiced_frames = frames[vad_decisions]
         if voiced_frames.size > 0:
             voiced_signal = np.concatenate(voiced_frames, axis=0)
@@ -490,8 +488,8 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
         for p, meta in zip(paths, meta_list):
             utt, label, dataset = meta[:3]
             original_signal, sr = librosa.core.load(p, sr=target_sr, mono=True)
-            if vad_trim:
-                original_signal = trim_silence(original_signal, sr)
+            if vad_config:
+                original_signal = drop_silence(original_signal, sr)
             if original_signal.size < int(sr * 1e-3 * chunks["length_ms"]):
                 continue
             yield from chunker(original_signal, target_sr, meta)
