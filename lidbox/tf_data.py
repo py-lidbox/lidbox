@@ -40,11 +40,11 @@ def feature_scaling(X, min, max, axis=None):
     return min + (max - min) * tf.math.divide_no_nan(X - X_min, X_max - X_min)
 
 @tf.function
-def cmvn_slide(X, window_len=300, normalize_variance=True):
-    """Apply cepstral mean and variance normalization on batches of features matrices X with a given cmvn window length."""
-    tf.debugging.assert_rank(X, 3, message="Input to cmvn_slide should be of shape (Batch, Timedim, Coefs)")
+def mean_var_norm_slide(X, window_len=300, normalize_variance=True):
+    """Apply mean and variance norm on batches of features matrices X with a given window length."""
+    tf.debugging.assert_rank(X, 3, message="Input to mean_var_norm_slide should be of shape (batch_size, timedim, channels)")
     if tf.shape(X)[1] <= window_len:
-        # All frames of X fit inside one window, no need for sliding cmvn
+        # All frames of X fit inside one window, no need for sliding window
         centered = X - tf.math.reduce_mean(X, axis=1, keepdims=True)
         if normalize_variance:
             return tf.math.divide_no_nan(centered, tf.math.reduce_std(X, axis=1, keepdims=True))
@@ -54,18 +54,18 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
         # Padding by reflecting the coefs along the time dimension should not dilute the means and variances as much as zeros would
         padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
         X_padded = tf.pad(X, padding, mode="REFLECT")
-        cmvn_windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
-        tf.debugging.assert_equal(tf.shape(cmvn_windows)[1], tf.shape(X)[1], message="Mismatching amount of CMVN output windows and time steps in the input")
-        centered = X - tf.math.reduce_mean(cmvn_windows, axis=2)
+        windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
+        tf.debugging.assert_equal(tf.shape(windows)[1], tf.shape(X)[1], message="Mismatching amount of output windows and time steps in the input")
+        centered = X - tf.math.reduce_mean(windows, axis=2)
         if normalize_variance:
-            return tf.math.divide_no_nan(centered, tf.math.reduce_std(cmvn_windows, axis=2))
+            return tf.math.divide_no_nan(centered, tf.math.reduce_std(windows, axis=2))
         else:
             return centered
 
 # NOTE tensorflow does not yet support non-zero axes in tf.gather when indices are ragged
 # @tf.function
-# def cmvn_gather(X, window_len=300):
-#     """Same as cmvn_slide but without padding."""
+# def mean_var_norm_gather(X, window_len=300):
+#     """Same as mean_var_norm_slide but without padding."""
 #     tf.debugging.assert_rank_at_least(X, 3)
 #     num_total_frames = tf.shape(X)[1]
 #     begin = tf.range(0, num_total_frames) - window_len // 2 + 1
@@ -79,7 +79,7 @@ def cmvn_slide(X, window_len=300, normalize_variance=True):
 #         tf.math.reduce_std(windows, axis=2)
 #     )
 
-def cmvn_nopad_slide_numpy(X, window_len, normalize_variance):
+def mean_var_norm_nopad_slide_numpy(X, window_len, normalize_variance):
     num_total_frames = X.shape[1]
     if num_total_frames <= window_len:
         centered = X - np.mean(X, axis=1, keepdims=True)
@@ -100,7 +100,7 @@ def cmvn_nopad_slide_numpy(X, window_len, normalize_variance):
     return result
 
 @tf.function
-def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, cmvn_kwargs):
+def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, mean_var_norm_kwargs):
     sample_rate = signals.sample_rate[0]
     tf.debugging.assert_equal(signals.sample_rate, [sample_rate], message="All signals in the feature extraction batch must have equal sample rates")
     feat = audio_feat.spectrograms(signals, **spec_kwargs)
@@ -123,9 +123,9 @@ def extract_features(signals, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs
     if feat_scale_kwargs:
         feat = feature_scaling(feat, **feat_scale_kwargs)
         tf.debugging.assert_all_finite(feat, "feature scaling failed")
-    if cmvn_kwargs:
-        feat = cmvn_slide(feat, **cmvn_kwargs)
-        tf.debugging.assert_all_finite(feat, "cmvn failed")
+    if mean_var_norm_kwargs:
+        feat = mean_var_norm_slide(feat, **mean_var_norm_kwargs)
+        tf.debugging.assert_all_finite(feat, "mean_var_norm failed")
     return feat
 
 def feat_extraction_args_as_list(feat_config):
@@ -136,7 +136,7 @@ def feat_extraction_args_as_list(feat_config):
         feat_config.get("mfcc", {}),
         feat_config.get("db_spectrogram", {}),
         feat_config.get("sample_minmax_scaling", {}),
-        feat_config.get("cmvn", {}),
+        feat_config.get("mean_var_norm_slide", {}),
     ]
     # all dict values could be converted explicitly to tensors here if tf.functions are behaving badly
     # args.extend([tf_convert(d) for d in kwarg_dicts])
@@ -621,19 +621,19 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_au
         (*meta, wavs)
     )
     features = wavs_batched.map(extract_feats, num_parallel_calls=TF_AUTOTUNE)
-    if "cmvn_numpy" in feat_config:
-        window_len = tf.constant(feat_config["cmvn_numpy"]["window_len"], tf.int32)
-        normalize_variance = tf.constant(feat_config["cmvn_numpy"].get("normalize_variance", True), tf.bool)
+    if "mean_var_norm_numpy" in feat_config:
+        window_len = tf.constant(feat_config["mean_var_norm_numpy"]["window_len"], tf.int32)
+        normalize_variance = tf.constant(feat_config["mean_var_norm_numpy"].get("normalize_variance", True), tf.bool)
         if verbosity:
-            tf_print("Using numpy to apply cmvn sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
-        def apply_cmvn_numpy(feats, *rest):
+            tf_print("Using numpy to apply mean_var_norm sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
+        def apply_mean_var_norm_numpy(feats, *rest):
             normalized = tf.numpy_function(
-                cmvn_nopad_slide_numpy,
+                mean_var_norm_nopad_slide_numpy,
                 [feats, window_len, normalize_variance],
                 feats.dtype)
             normalized.set_shape(feats.shape.as_list())
             return (normalized, *rest)
-        features = features.map(apply_cmvn_numpy, num_parallel_calls=TF_AUTOTUNE)
+        features = features.map(apply_mean_var_norm_numpy, num_parallel_calls=TF_AUTOTUNE)
     features = features.unbatch()
     return features
 
