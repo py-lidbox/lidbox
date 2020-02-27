@@ -496,8 +496,12 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
                 continue
             yield from chunker(original_signal, target_sr, meta)
             for conf in augment_config:
+                if "datasets_include" in conf and dataset not in conf["datasets_include"]:
+                    continue
+                if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
+                    continue
                 if conf["type"] == "speed_modification":
-                    #TODO using a byte buffer is probably not the smartest way to do a speed modification
+                    # apply naive speed modification by resampling
                     for rate in conf["range"]:
                         if rate == 1:
                             signal = original_signal
@@ -508,7 +512,7 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
                                 signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
                         new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
                         yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
-                elif conf["type"] == "additive_noise" and dataset in conf["datasets"]:
+                elif conf["type"] == "additive_noise":
                     for noise_type, db_min, db_max in conf["snr-def"]:
                         noise_signal = np.zeros(0, dtype=original_signal.dtype)
                         while noise_signal.size < original_signal.size:
