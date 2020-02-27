@@ -498,18 +498,15 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
                     continue
                 if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
                     continue
-                if conf["type"] == "speed_modification":
+                if conf["type"] == "random_resampling":
                     # apply naive speed modification by resampling
-                    for rate in conf["range"]:
-                        if rate == 1:
-                            signal = original_signal
-                        else:
-                            with contextlib.closing(io.BytesIO()) as buf:
-                                soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
-                                buf.seek(0)
-                                signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
-                        new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
-                        yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
+                    rate = np.random.uniform(conf["range"][0], conf["range"][1])
+                    with contextlib.closing(io.BytesIO()) as buf:
+                        soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
+                        buf.seek(0)
+                        signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
+                    new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
+                    yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
                 elif conf["type"] == "additive_noise":
                     for noise_type, db_min, db_max in conf["snr-def"]:
                         noise_signal = np.zeros(0, dtype=original_signal.dtype)
