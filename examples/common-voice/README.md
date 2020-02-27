@@ -41,18 +41,19 @@ lidbox e2e train -vvv config.xvector.yaml --file-limit 100 --exhaust-dataset-ite
 If `lidbox` does not crash after a few epochs you can interrupt training.
 You can also use verbosity level 4 (`-vvvv`) for debugging, but this generates a lot of output.
 
-4. Inspect the extracted data with TensorBoard by running:
+4. Start TensorBoard by running:
 ```
 tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/tensorboard/logs
 ```
 Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
+Take some time inspecting the data before running the pipeline on the whole dataset.
 
 5. Clear the cache before extracting all features:
 ```
 rm -r ./lidbox-cache
 ```
 
-6. Now extract all features (without training) into the cache:
+6. Now extract all features (this will take some time) into the cache directory before training:
 ```
 lidbox e2e train -vvv config.xvector.yaml --exhaust-dataset-iterator --skip-training --debug-dataset
 ```
