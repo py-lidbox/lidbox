@@ -1,22 +1,17 @@
 """File IO."""
-import collections
 import gzip
 import hashlib
-import itertools
 import json
 import os
 import subprocess
 
-# from audioread.exceptions import NoBackendError
 from scipy.io import arff
-# import librosa
+import librosa
 import numpy as np
-# import sox
-# import webrtcvad
+import sox
 import yaml
 
 
-TFRECORD_COMPRESSION = "GZIP"
 SUBPROCESS_BATCH_SIZE = 5000
 
 def run_command(cmd):
@@ -32,15 +27,6 @@ def run_for_files(cmd, filepaths, batch_size=SUBPROCESS_BATCH_SIZE):
     for begin in range(0, len(filepaths), batch_size):
         batch = ' '.join(filepaths[begin:begin+batch_size])
         yield run_command(cmd + ' ' + batch)
-
-def read_wavfile(path, **librosa_kwargs):
-    if "sr" not in librosa_kwargs:
-        # Detect sampling rate if not specified
-        librosa_kwargs["sr"] = None
-    try:
-        return librosa.core.load(path, **librosa_kwargs)
-    except (EOFError, NoBackendError):
-        return None, 0
 
 def read_arff_features(path, include_keys=None, exclude_keys=None, types=None):
     if types is None:
@@ -136,108 +122,6 @@ def get_most_recent_file(directory):
     files = (f for f in os.scandir(directory) if f.is_file())
     return max(files, key=lambda d: d.stat().st_mtime).name
 
-def feat_vec_to_example(feat_vec, onehot_label_vec):
-    """
-    Encode a single feat_vec and its label as a TensorFlow SequenceExample.
-    """
-    import tensorflow as tf
-    def float_vec_to_float_features(v):
-        return tf.train.Feature(float_list=tf.train.FloatList(value=v))
-    def feat_vec_to_floatlist_features(seq):
-        float_features = (tf.train.Feature(float_list=tf.train.FloatList(value=frame)) for frame in seq)
-        return tf.train.FeatureList(feature=float_features)
-    # Time-independent context for time-dependent sequence
-    context_definition = {
-        "target": float_vec_to_float_features(onehot_label_vec),
-    }
-    context = tf.train.Features(feature=context_definition)
-    # Sequence frames as a feature list
-    feature_list_definition = {
-        "inputs": feat_vec_to_floatlist_features(feat_vec),
-    }
-    feature_lists = tf.train.FeatureLists(feature_list=feature_list_definition)
-    return tf.train.SequenceExample(context=context, feature_lists=feature_lists)
-
-def sequence_example_to_model_input(seq_example_string, num_labels, feat_shape):
-    """
-    Decode a single sequence example string as an (input, target) pair to be fed into a model being trained.
-    """
-    import tensorflow as tf
-    context_definition = {
-        "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
-    }
-    sequence_definition = {
-        "inputs": tf.io.FixedLenSequenceFeature(shape=feat_shape[1:], dtype=tf.float32)
-    }
-    context, sequence = tf.io.parse_single_sequence_example(
-        seq_example_string,
-        context_features=context_definition,
-        sequence_features=sequence_definition
-    )
-    return sequence["inputs"], context["target"]
-
-def write_features(features, target_path):
-    import tensorflow as tf
-    # Peek the dimensions from the first sample
-    feat_vec, onehot_label = next(features)
-    features_meta = {
-        "feat_vec_shape": feat_vec.shape,
-        "num_labels": len(onehot_label)
-    }
-    target_path += ".tfrecord"
-    with open(target_path + ".meta.json", 'w') as meta_file:
-        json.dump(features_meta, meta_file)
-        meta_file.write("\n")
-    # Put back the first sample
-    features = itertools.chain([(feat_vec, onehot_label)], features)
-    # Write all samples
-    with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
-        c = collections.Counter()
-        for feat_vec, onehot_label in features:
-            c[feat_vec.shape] += 1
-            example = feat_vec_to_example(feat_vec, onehot_label)
-            record_writer.write(example.SerializeToString())
-        print("feature shape histogram, length:", len(c), ", 5 most common shapes:", c.most_common(5))
-    return target_path
-
-def features_to_example(features, onehot_label_vec):
-    import tensorflow as tf
-    def float_vec_to_float_features(v):
-        return tf.train.Feature(float_list=tf.train.FloatList(value=v))
-    features_definition = {
-        "input": float_vec_to_float_features(features),
-        "target": float_vec_to_float_features(onehot_label_vec),
-    }
-    return tf.train.Example(features=tf.train.Features(feature=features_definition))
-
-def example_to_model_input(example_string, num_labels, num_features):
-    import tensorflow as tf
-    features_definition = {
-        "input": tf.io.FixedLenFeature(shape=[num_features], dtype=tf.float32),
-        "target": tf.io.FixedLenFeature(shape=[num_labels], dtype=tf.float32),
-    }
-    example = tf.io.parse_single_example(example_string, features_definition)
-    return example["input"], example["target"]
-
-# def write_features(features, target_path):
-#     import tensorflow as tf
-#     target_path += ".tfrecord"
-#     feat, onehot_label = next(features)
-#     assert feat.ndim == 2, "Unexpected dimensions '{}' for dataset containing 1-dim feature vectors".format(feat.ndim)
-#     features_meta = {
-#         "num_features": feat.size,
-#         "num_labels": len(onehot_label)
-#     }
-#     with open(target_path + ".meta.json", 'w') as meta_file:
-#         json.dump(features_meta, meta_file)
-#         meta_file.write("\n")
-#     features = itertools.chain([(feat, onehot_label)], features)
-#     with tf.io.TFRecordWriter(target_path, options=TFRECORD_COMPRESSION) as record_writer:
-#         for feat, onehot_label in features:
-#             example = features_to_example(feat, onehot_label)
-#             record_writer.write(example.SerializeToString())
-#     return target_path
-
 def count_all_features(features_file):
     from tensorflow import device
     with device("/CPU:0"):
@@ -256,95 +140,6 @@ def load_features_meta(tfrecord_path):
     with open(tfrecord_path + ".meta.json") as f:
         return json.load(f)
 
-def load_features_as_dataset(tfrecord_paths, training_config=None):
-    import tensorflow as tf
-    if training_config is None:
-        training_config = {}
-    # All labels should have features of same dimensions
-    features_meta = load_features_meta(tfrecord_paths[0])
-    # assert all(features_meta == load_features_meta(record_path) for record_path in tfrecord_paths), "All labels should have features with equal dimensions"
-    num_labels = features_meta["num_labels"]
-    feat_shape =  features_meta["feat_vec_shape"]
-    example_parser_fn = lambda example_str: sequence_example_to_model_input(example_str, num_labels, feat_shape)
-    def parse_compressed_tfrecords(paths):
-        d = tf.data.TFRecordDataset(paths, compression_type=TFRECORD_COMPRESSION)
-        if "parallel_parse" in training_config:
-            d = d.map(example_parser_fn, num_parallel_calls=training_config["parallel_parse"])
-        else:
-            d = d.map(example_parser_fn)
-        return d
-    def parse_label(path):
-        return os.path.basename(path).split(".tfrecord")[0]
-    label_weights = training_config.get("label_weights")
-    if label_weights:
-        if isinstance(label_weights, list):
-            assert len(label_weights) == len(tfrecord_paths), "Amount of label draw probabilities should match amount of tfrecord files"
-        else:
-            assert isinstance(label_weights, float), "If the label weights are not a list, it should be a single float that will be assigned as a weight to all labels"
-            # Uniform dist.
-            label_weights = dict(zip((parse_label(p) for p in tfrecord_paths), itertools.repeat(label_weights)))
-        # Assign a higher probability for drawing a more rare sample by inverting ratios of label to total num labels
-        draw_prob = {label: 1.0/w for label, w in label_weights.items()}
-        # Normalize into a probability distribution
-        tot = sum(draw_prob.values())
-        draw_prob = {label: inv_w/tot for label, inv_w in draw_prob.items()}
-        # Assume .tfrecord files have been named by label
-        weights = [draw_prob[parse_label(path)] for path in tfrecord_paths]
-        # Assume each tfrecord file contains features only for a single label
-        label_datasets = [parse_compressed_tfrecords([path]) for path in tfrecord_paths]
-        if "repeat" in training_config:
-            label_datasets = [d.repeat(count=training_config["repeat"]) for d in label_datasets]
-        dataset = tf.data.experimental.sample_from_datasets(label_datasets, weights=weights)
-    else:
-        dataset = parse_compressed_tfrecords(tfrecord_paths)
-        if "repeat" in training_config:
-            dataset = dataset.repeat(count=training_config["repeat"])
-    if "shuffle_buffer_size" in training_config:
-        dataset = dataset.shuffle(training_config["shuffle_buffer_size"])
-    if "batch_size" in training_config:
-        dataset = dataset.batch(training_config["batch_size"])
-    if "prefetch" in training_config:
-        dataset = dataset.prefetch(training_config["prefetch"])
-    return dataset, features_meta
-
-def generate_and_load_dummy_features(N, features_meta, training_config=None):
-    """
-    Generate dummy dataset with normally distributed features with unit variance and far apart means.
-    """
-    import tensorflow as tf
-    if training_config is None:
-        training_config = {}
-    num_labels = features_meta["num_labels"]
-    num_features =  features_meta["num_features"]
-    def onehot(i):
-        o = np.zeros(num_labels, dtype=np.float32)
-        o[i] = 1.0
-        return o
-    seq_len = features_meta.get("sequence_length", 0)
-    if seq_len:
-        feat_shape = [seq_len, num_features]
-    else:
-        feat_shape = [num_features]
-    def gauss_spikes():
-        separation = 100.0
-        centers = 100.0 * (np.arange(num_labels) - num_labels // 2)
-        onehot_labels = (onehot(i) for i in range(num_labels))
-        for onehot_label, center in itertools.cycle(zip(onehot_labels, centers)):
-            yield np.random.normal(center, 1, feat_shape), onehot_label
-    dataset = tf.data.Dataset.from_generator(
-        gauss_spikes,
-        (tf.float32, tf.float32),
-        (tf.TensorShape(feat_shape), tf.TensorShape([num_labels]))
-    )
-    dataset = dataset.take(N)
-    if "shuffle_buffer_size" in training_config:
-        dataset = dataset.shuffle(training_config["shuffle_buffer_size"])
-    if "batch_size" in training_config:
-        dataset = dataset.batch(training_config["batch_size"])
-    if "prefetch" in training_config:
-        dataset = dataset.prefetch(training_config["prefetch"])
-    return dataset
-
 def iter_log_events(tf_event_file):
     import tensorflow as tf
     from tensorflow.core.util.event_pb2 import Event
@@ -354,25 +149,6 @@ def iter_log_events(tf_event_file):
             assert len(event.summary.value) == 1, "Unexpected length for event summary"
             value = event.summary.value[0]
             yield value.tag, value.simple_value
-
-def remove_silence(wav, aggressiveness=0):
-    """
-    Perform voice activity detection with webrtcvad.
-    """
-    frame_length_ms = 10
-    expected_sample_rates = (8000, 16000, 32000, 48000)
-    data, fs = wav
-    assert fs in expected_sample_rates, "sample rate was {}, but webrtcvad supports only following samples rates: {}".format(fs, expected_sample_rates)
-    frame_width = int(fs * frame_length_ms * 1e-3)
-    # Do voice activity detection for each frame, creating an index filter containing True if frame is speech and False otherwise
-    vad = webrtcvad.Vad(aggressiveness)
-    speech_indexes = []
-    for frame_start in range(0, data.size - (data.size % frame_width), frame_width):
-        frame_bytes = bytes(data[frame_start:(frame_start + frame_width)])
-        speech_indexes.extend(frame_width*[vad.is_speech(frame_bytes, fs)])
-    # Always filter out the tail if it does not fit inside the frame
-    speech_indexes.extend((data.size % frame_width) * [False])
-    return data[speech_indexes], fs
 
 def apply_sox_transformer(src_paths, dst_paths, transform_steps):
     t = sox.Transformer()
