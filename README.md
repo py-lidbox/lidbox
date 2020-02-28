@@ -4,13 +4,12 @@ Command line toolbox for managing spoken language identification (LID) experimen
 
 ## Quickstart
 
+Clone the repo and install `lidbox` as a Python package in setuptools develop mode.
+This makes it easier to experiment with the code.
 ```
-git clone https://github.com/matiaslindgren/lidbox.git
-# install as editable if you want to experiment with the code directly
-pip install -e ./lidbox
+git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
+pip install --editable ./lidbox
 ```
-Then install TensorFlow 2.
-The `tensorflow` Python package is not specified in `./setup.py` because you might want to do some custom setup on your machine (e.g. to get the GPU working).
 
 See [this](./examples/common-voice) for a simple example to get started.
 

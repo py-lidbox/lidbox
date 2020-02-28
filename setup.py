@@ -12,13 +12,14 @@ setuptools.setup(
     author="Matias Lindgren",
     author_email="matias.lindgren@gmail.com",
     licence="MIT",
-    python_requires=">=3.7",
+    python_requires="== 3.7.*",
     install_requires=[
         "PyYAML ~= 5.1",
         "kaldiio ~= 2.13",
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
         "sox ~= 1.3.7",
+        "tensorflow ~= 2.1.0",
         "webrtcvad ~= 2.0.10",
     ],
     packages=[
