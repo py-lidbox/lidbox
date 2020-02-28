@@ -4,6 +4,8 @@ Command line toolbox for managing spoken language identification (LID) experimen
 
 ## Quickstart
 
+Install TensorFlow 2.
+
 Clone the repo and install `lidbox` as a Python package in setuptools develop mode.
 This makes it easier to experiment with the code.
 ```

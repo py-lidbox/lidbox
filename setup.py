@@ -19,7 +19,6 @@ setuptools.setup(
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
         "sox ~= 1.3.7",
-        "tensorflow ~= 2.1.0",
         "webrtcvad ~= 2.0.10",
     ],
     packages=[
