@@ -18,9 +18,11 @@ from .xvector import (
 )
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax"):
+def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
+    if channel_dropout_rate > 0:
+        x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
     x = FrameLayer(512, 5, 1, name="frame1")(x)
     x = FrameLayer(512, 1, 1, name="frame2")(x)
     x = FrameLayer(512, 3, 2, name="frame3")(x)
