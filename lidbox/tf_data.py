@@ -505,10 +505,10 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
                     buf.seek(0)
                     signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
-                new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
+                new_uttid = tf.strings.join((utt, "-speed{:.3f}".format(rate)))
                 yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
             elif conf["type"] == "additive_noise":
-                for noise_type, db_min, db_max in conf["snr-def"]:
+                for noise_type, db_min, db_max in conf["snr_def"]:
                     noise_signal = np.zeros(0, dtype=original_signal.dtype)
                     while noise_signal.size < original_signal.size:
                         rand_noise_path = random.choice(conf["noise_source"][noise_type])
@@ -518,7 +518,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     noise_signal = noise_signal[noise_begin:noise_begin+original_signal.size]
                     snr_db = random.randint(db_min, db_max)
                     clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
-                    new_uttid = "{:s}-{:s}_snr{:d}".format(utt, noise_type, snr_db)
+                    new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
                     yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
     if verbosity:
         tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
@@ -590,7 +590,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_au
             meta_t = tf.constant(meta, tf.string)
             wavs = (tf.data.Dataset
                     .from_tensor_slices((paths_t, meta_t))
-                    .interleave(ds_generator, num_parallel_calls=TF_AUTOTUNE))
+                    .interleave(ds_generator, block_length=100, num_parallel_calls=TF_AUTOTUNE))
         else:
             print("unknown, non-empty wav_config given:")
             yaml_pprint(wav_config)
