@@ -421,7 +421,7 @@ def snr_mixer(clean, noise, snr):
     noisyspeech = clean + noisenewlevel
     return clean, noisenewlevel, noisyspeech
 
-def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
+def get_chunk_loader(wav_config, verbosity, datagroup_key):
     chunks = wav_config["chunks"]
     target_sr = wav_config.get("target_sample_rate")
     augment_config = wav_config.get("augmentation", [])
@@ -483,43 +483,43 @@ def get_chunk_loader(paths, meta_list, wav_config, verbosity, datagroup_key):
         chunk_step = int(sr * 1e-3 * chunks["step_ms"])
         if signal.size >= chunk_len:
             for i, chunk in enumerate(librosa.util.frame(signal, chunk_len, chunk_step, axis=0)):
-                yield (chunk, sr), meta[0] + "-{:06d}".format(i), meta[1]
-    def chunk_loader():
-        for p, meta in zip(paths, meta_list):
-            utt, label, dataset = meta[:3]
-            original_signal, sr = librosa.core.load(p, sr=target_sr, mono=True)
-            if vad_config:
-                original_signal = drop_silence(original_signal, sr)
-            if original_signal.size < int(sr * 1e-3 * chunks["length_ms"]):
+                chunk_uttid = tf.strings.join((meta[0], "-{:06d}".format(i)))
+                yield (chunk, sr), chunk_uttid, meta[1]
+    def chunk_loader(wav_path, meta):
+        utt, label, dataset = meta[:3]
+        original_signal, sr = librosa.core.load(wav_path, sr=target_sr, mono=True)
+        if vad_config:
+            original_signal = drop_silence(original_signal, sr)
+        if original_signal.size < int(sr * 1e-3 * chunks["length_ms"]):
+            return
+        yield from chunker(original_signal, target_sr, meta)
+        for conf in augment_config:
+            if "datasets_include" in conf and dataset not in conf["datasets_include"]:
                 continue
-            yield from chunker(original_signal, target_sr, meta)
-            for conf in augment_config:
-                if "datasets_include" in conf and dataset not in conf["datasets_include"]:
-                    continue
-                if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
-                    continue
-                if conf["type"] == "random_resampling":
-                    # apply naive speed modification by resampling
-                    rate = np.random.uniform(conf["range"][0], conf["range"][1])
-                    with contextlib.closing(io.BytesIO()) as buf:
-                        soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
-                        buf.seek(0)
-                        signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
-                    new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
-                    yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
-                elif conf["type"] == "additive_noise":
-                    for noise_type, db_min, db_max in conf["snr-def"]:
-                        noise_signal = np.zeros(0, dtype=original_signal.dtype)
-                        while noise_signal.size < original_signal.size:
-                            rand_noise_path = random.choice(conf["noise_source"][noise_type])
-                            sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
-                            noise_signal = np.concatenate((noise_signal, sig))
-                        noise_begin = random.randint(0, noise_signal.size - original_signal.size)
-                        noise_signal = noise_signal[noise_begin:noise_begin+original_signal.size]
-                        snr_db = random.randint(db_min, db_max)
-                        clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
-                        new_uttid = "{:s}-{:s}_snr{:d}".format(utt, noise_type, snr_db)
-                        yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
+            if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
+                continue
+            if conf["type"] == "random_resampling":
+                # apply naive speed modification by resampling
+                rate = np.random.uniform(conf["range"][0], conf["range"][1])
+                with contextlib.closing(io.BytesIO()) as buf:
+                    soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
+                    buf.seek(0)
+                    signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
+                new_uttid = "{:s}-speed{:.3f}".format(utt, rate)
+                yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
+            elif conf["type"] == "additive_noise":
+                for noise_type, db_min, db_max in conf["snr-def"]:
+                    noise_signal = np.zeros(0, dtype=original_signal.dtype)
+                    while noise_signal.size < original_signal.size:
+                        rand_noise_path = random.choice(conf["noise_source"][noise_type])
+                        sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
+                        noise_signal = np.concatenate((noise_signal, sig))
+                    noise_begin = random.randint(0, noise_signal.size - original_signal.size)
+                    noise_signal = noise_signal[noise_begin:noise_begin+original_signal.size]
+                    snr_db = random.randint(db_min, db_max)
+                    clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
+                    new_uttid = "{:s}-{:s}_snr{:d}".format(utt, noise_type, snr_db)
+                    yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
     if verbosity:
         tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
     return chunk_loader
@@ -566,27 +566,35 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
 def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
-    paths, meta = list(paths), list(meta)
+    paths, meta = list(paths), [m[:3] for m in meta]
     assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
     wav_config = feat_config.get("wav_config")
     if wav_config:
-        dataset_types = (tf.float32, tf.int32), tf.string, tf.string
-        dataset_shapes = (tf.TensorShape([None]), tf.TensorShape([])), tf.TensorShape([]), tf.TensorShape([])
-        if "random_chunks" in wav_config:
-            # TODO interleave or without generator might improve performance
-            wavs = tf.data.Dataset.from_generator(
-                get_random_chunk_loader(paths, meta, wav_config, verbosity),
-                dataset_types,
-                dataset_shapes)
+        dataset_types = (
+            (tf.float32, tf.int32),
+            tf.string,
+            tf.string)
+        dataset_shapes = (
+            (tf.TensorShape([None]), tf.TensorShape([])),
+            tf.TensorShape([]),
+            tf.TensorShape([]))
         if "chunks" in wav_config:
-            wavs = tf.data.Dataset.from_generator(
-                get_chunk_loader(paths, meta, wav_config, verbosity, datagroup_key),
-                dataset_types,
-                dataset_shapes)
+            chunk_loader_fn = get_chunk_loader(wav_config, verbosity, datagroup_key)
+            def ds_generator(*args):
+                return tf.data.Dataset.from_generator(
+                    chunk_loader_fn,
+                    dataset_types,
+                    dataset_shapes,
+                    args=args)
+            paths_t = tf.constant(paths, tf.string)
+            meta_t = tf.constant(meta, tf.string)
+            wavs = (tf.data.Dataset
+                    .from_tensor_slices((paths_t, meta_t))
+                    .interleave(ds_generator, num_parallel_calls=TF_AUTOTUNE))
         else:
             print("unknown, non-empty wav_config given:")
             yaml_pprint(wav_config)
-            assert False
+            raise NotImplementedError
         wavs = wavs.map(lambda wav, *meta: (audio_feat.Wav(wav[0], wav[1]), *meta))
     else:
         wav_paths = tf.data.Dataset.from_tensor_slices((
