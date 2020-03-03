@@ -163,6 +163,8 @@ class E2EBase(Command):
                 if args.verbosity:
                     print("Reading durations from utt2dur file '{}'".format(utt2dur_path))
                 for utt, duration, *rest in parse_space_separated(utt2dur_path):
+                    if utt in skipped_utterances:
+                        continue
                     assert utt in utt2meta, "utterance id without label found when parsing durations: '{}'".format(utt)
                     utt2meta[utt]["duration_sec"] = float(duration)
             else:
