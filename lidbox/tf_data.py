@@ -492,10 +492,11 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
             original_signal = drop_silence(original_signal, sr)
         chunk_length = int(sr * 1e-3 * chunks["length_ms"])
         if original_signal.size < chunk_length:
-            print("skipping too short signal (min chunk length is {}): length {}, path '{}'"
-                  .format(chunk_length,
-                          original_signal.size,
-                          wav_path.decode("utf-8")), file=sys.stderr)
+            if verbosity:
+                print("skipping too short signal (min chunk length is {}): length {}, path '{}'"
+                      .format(chunk_length,
+                              original_signal.size,
+                              wav_path.decode("utf-8")), file=sys.stderr)
             return
         yield from chunker(original_signal, target_sr, meta)
         for conf in augment_config:
@@ -526,11 +527,12 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     snr_db = random.randint(db_min, db_max)
                     clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
                     new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
-                    if not np.all(np.isfinite(clean)):
-                        print("warning: snr_mixer failed, augmented signal '{}' has non-finite values and will be skipped. "
-                              "Utterance source was '{}', and chosen noise signals were\n  {}"
-                              .format(new_uttid.numpy().decode("utf-8"), wav_path.decode("utf-8"), '\n  '.join(noise_paths)),
-                              file=sys.stderr)
+                    if not np.all(np.isfinite(clean_and_noise)):
+                        if verbosity:
+                            print("warning: snr_mixer failed, augmented signal '{}' has non-finite values and will be skipped. "
+                                  "Utterance source was '{}', and chosen noise signals were\n  {}"
+                                  .format(new_uttid.numpy().decode("utf-8"), wav_path.decode("utf-8"), '\n  '.join(noise_paths)),
+                                  file=sys.stderr)
                         return
                     yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
     if verbosity:
