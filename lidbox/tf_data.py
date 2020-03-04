@@ -603,7 +603,12 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_au
             meta_t = tf.constant(meta, tf.string)
             wavs = (tf.data.Dataset
                     .from_tensor_slices((paths_t, meta_t))
-                    .interleave(ds_generator, block_length=100, num_parallel_calls=TF_AUTOTUNE))
+                    .interleave(
+                        ds_generator,
+                        # Hide IO latency from reading wav files by using several workers per CPU
+                        # The exact amount of workers is chosen by TensorFlow due to autotune, but this will be the maximum
+                        cycle_length=wav_config.get("workers_per_cpu", 16)*len(os.sched_getaffinity(0)),
+                        num_parallel_calls=TF_AUTOTUNE))
         else:
             print("unknown, non-empty wav_config given:")
             yaml_pprint(wav_config)
