@@ -412,7 +412,7 @@ def snr_mixer(clean, noise, snr):
     clean = clean * scalarclean
     rmsclean = np.sqrt((clean**2).mean())
     rmsnoise = np.sqrt((noise**2).mean())
-    scalarnoise = 10 ** (-25 / 20) /rmsnoise
+    scalarnoise = 10 ** (-25 / 20) / rmsnoise
     noise = noise * scalarnoise
     rmsnoise = np.sqrt((noise**2).mean())
     # Set the noise level for a given SNR
@@ -427,7 +427,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
     augment_config = wav_config.get("augmentation", [])
     if datagroup_key != "train":
         if verbosity:
-            print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key))
+            print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key), file=sys.stderr)
         augment_config = []
     vad_config = wav_config.get("webrtcvad")
     for conf in augment_config:
@@ -490,7 +490,12 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
         original_signal, sr = librosa.core.load(wav_path, sr=target_sr, mono=True)
         if vad_config:
             original_signal = drop_silence(original_signal, sr)
-        if original_signal.size < int(sr * 1e-3 * chunks["length_ms"]):
+        chunk_length = int(sr * 1e-3 * chunks["length_ms"])
+        if original_signal.size < chunk_length:
+            print("skipping too short signal (min chunk length is {}): length {}, path '{}'"
+                  .format(chunk_length,
+                          original_signal.size,
+                          wav_path.decode("utf-8")), file=sys.stderr)
             return
         yield from chunker(original_signal, target_sr, meta)
         for conf in augment_config:
@@ -510,8 +515,10 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
             elif conf["type"] == "additive_noise":
                 for noise_type, db_min, db_max in conf["snr_def"]:
                     noise_signal = np.zeros(0, dtype=original_signal.dtype)
+                    noise_paths = []
                     while noise_signal.size < original_signal.size:
                         rand_noise_path = random.choice(conf["noise_source"][noise_type])
+                        noise_paths.append(rand_noise_path)
                         sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
                         noise_signal = np.concatenate((noise_signal, sig))
                     noise_begin = random.randint(0, noise_signal.size - original_signal.size)
@@ -519,6 +526,12 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     snr_db = random.randint(db_min, db_max)
                     clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
                     new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
+                    if not np.all(np.isfinite(clean)):
+                        print("warning: snr_mixer failed, augmented signal '{}' has non-finite values and will be skipped. "
+                              "Utterance source was '{}', and chosen noise signals were\n  {}"
+                              .format(new_uttid.numpy().decode("utf-8"), wav_path.decode("utf-8"), '\n  '.join(noise_paths)),
+                              file=sys.stderr)
+                        return
                     yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
     if verbosity:
         tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
@@ -549,7 +562,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
             wav = load_wav(tf.constant(p, tf.string))
             if "filter_sample_rate" in wav_config and wav.sample_rate != wav_config["filter_sample_rate"]:
                 if verbosity:
-                    print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"])
+                    print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"], file=sys.stderr)
                 continue
             begin = 0
             rand_len = get_random_length()
