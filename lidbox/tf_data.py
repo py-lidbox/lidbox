@@ -7,8 +7,6 @@ import sys
 import time
 import wave
 
-from . import audio_feat
-from lidbox import yaml_pprint
 import kaldiio
 import librosa.core
 import matplotlib.cm
@@ -17,6 +15,10 @@ import soundfile
 import tensorflow as tf
 import webrtcvad
 
+from . import yaml_pprint
+from . import audio_feat
+from .tf_util import tf_print
+
 debug = False
 if debug:
     TF_AUTOTUNE = None
@@ -24,13 +26,6 @@ if debug:
 else:
     TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
 
-
-def tf_print(*args, **kwargs):
-    if "summarize" not in kwargs:
-        kwargs["summarize"] = -1
-    if "output_stream" not in kwargs:
-        kwargs["output_stream"] = sys.stdout
-    return tf.print(*args, **kwargs)
 
 @tf.function
 def feature_scaling(X, min, max, axis=None):
@@ -355,7 +350,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
     return ds
 
 #TODO histogram support (uses significantly less space than images+audio)
-def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="viridis", debug_squeeze_last_dim=False, num_batches=-1):
+def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs=None, colormap="viridis", num_batches=-1):
     """
     Write Tensorboard summary information for samples in the given tf.data.Dataset.
     """
@@ -370,8 +365,6 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
     @tf.function
     def inspect_batches(batch_idx, batch):
         samples, labels, uttids, wavs = batch[:4]
-        if debug_squeeze_last_dim:
-            samples = tf.squeeze(samples, -1)
         # Scale features between 0 and 1 to produce a grayscale image
         image = feature_scaling(samples, tf.constant(0.0), tf.constant(1.0))
         # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
@@ -580,7 +573,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
-def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_audio=None, debug_squeeze_last_dim=False, verbosity=0):
+def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosity=0):
     paths, meta = list(paths), [m[:3] for m in meta]
     assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
     wav_config = feat_config.get("wav_config")
@@ -594,6 +587,9 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_au
             tf.TensorShape([]),
             tf.TensorShape([]))
         if "chunks" in wav_config:
+            workers_per_cpu = wav_config.get("workers_per_cpu", 8)
+            if verbosity:
+                print("Loading samples from wavs as fixed sized chunks, using at most {} workers per cpu".format(workers_per_cpu))
             chunk_loader_fn = get_chunk_loader(wav_config, verbosity, datagroup_key)
             def ds_generator(*args):
                 return tf.data.Dataset.from_generator(
@@ -609,7 +605,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, trim_au
                         ds_generator,
                         # Hide IO latency from reading wav files by using several workers per CPU
                         # The exact amount of workers is chosen by TensorFlow due to autotune, but this will be the maximum
-                        cycle_length=wav_config.get("workers_per_cpu", 16)*len(os.sched_getaffinity(0)),
+                        cycle_length=workers_per_cpu*len(os.sched_getaffinity(0)),
                         num_parallel_calls=TF_AUTOTUNE))
         else:
             print("unknown, non-empty wav_config given:")

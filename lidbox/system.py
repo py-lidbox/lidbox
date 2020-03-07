@@ -192,3 +192,8 @@ def parse_path_list(path):
             paths.append(path)
             labels.append(label)
     return paths, labels
+
+def config_checksum(config, datagroup_key):
+    md5input = {k: config[k] for k in ("features", "datasets")}
+    json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
+    return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()

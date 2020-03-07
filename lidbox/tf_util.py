@@ -1,4 +1,20 @@
+import collections
+import os
+import random
+import sys
+
 import tensorflow as tf
+
+from . import yaml_pprint, parse_space_separated, tf_data, system
+
+
+def tf_print(*args, **kwargs):
+    if "summarize" not in kwargs:
+        kwargs["summarize"] = -1
+    if "output_stream" not in kwargs:
+        kwargs["output_stream"] = sys.stdout
+    return tf.print(*args, **kwargs)
+
 
 @tf.function
 def count_dim_sizes(ds, ds_element_index=0, ndims=1):
@@ -43,6 +59,7 @@ def count_dim_sizes(ds, ds_element_index=0, ndims=1):
          tf.ragged.boolean_mask(sorted_size_indices, is_nonzero)),
         axis=2)
 
+
 def make_label2onehot(labels):
     """
     >>> labels = tf.constant(["one", "two", "three"], tf.string)
@@ -65,3 +82,160 @@ def make_label2onehot(labels):
     )
     OH = tf.one_hot(labels_enum, len(labels))
     return label2int, OH
+
+
+def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle_utt2path=False, file_limit=None):
+    utt2path = collections.OrderedDict()
+    utt2meta = collections.OrderedDict()
+    if verbosity > 1:
+        print("Extracting features from datagroup '{}'".format(datagroup_key))
+        if verbosity > 2:
+            yaml_pprint(config)
+    num_utts_dropped = collections.Counter()
+    for ds_config in datasets:
+        if verbosity > 1:
+            print("Dataset '{}'".format(ds_config["key"]))
+        datagroup = ds_config["datagroups"][datagroup_key]
+        utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
+        utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
+        if verbosity:
+            print("Reading labels for utterances from utt2label file '{}'".format(utt2label_path))
+        if verbosity > 1:
+            print("Expected labels (utterances with other labels will be ignored):")
+            for l in ds_config["labels"]:
+                print("  {}".format(l))
+        enabled_labels = set(ds_config["labels"])
+        skipped_utterances = set()
+        for utt, label, *rest in parse_space_separated(utt2label_path):
+            if label not in enabled_labels:
+                skipped_utterances.add(utt)
+                continue
+            assert utt not in utt2meta, "duplicate utterance id found when parsing labels: '{}'".format(utt)
+            utt2meta[utt] = {"label": label, "dataset": ds_config["key"], "duration_sec": -1.0}
+        utt2dur_path = os.path.join(datagroup["path"], datagroup.get("utt2dur", "utt2dur"))
+        if os.path.exists(utt2dur_path):
+            if verbosity:
+                print("Reading durations from utt2dur file '{}'".format(utt2dur_path))
+            for utt, duration, *rest in parse_space_separated(utt2dur_path):
+                if utt in skipped_utterances:
+                    continue
+                assert utt in utt2meta, "utterance id without label found when parsing durations: '{}'".format(utt)
+                utt2meta[utt]["duration_sec"] = float(duration)
+        else:
+            if verbosity:
+                print("Skipping signal duration parse since utt2dur file '{}' does not exist".format(utt2dur_path))
+        if verbosity:
+            print("Reading paths of wav files from utt2path file '{}'".format(utt2path_path))
+        for utt, path, *rest in parse_space_separated(utt2path_path):
+            if utt in skipped_utterances:
+                continue
+            assert utt not in utt2path, "duplicate utterance id found when parsing paths: '{}'".format(utt)
+            utt2path[utt] = path
+    if verbosity > 1:
+        print("Total amount of non-empty lines read from utt2path {}, and utt2meta {}".format(len(utt2path), len(utt2meta)))
+        if skipped_utterances:
+            print("Utterances skipped due to unexpected labels: {}".format(len(skipped_utterances)))
+    # All utterance ids must be present in both files
+    assert set(utt2path) == set(utt2meta), "Mismatching sets of utterances in utt2path and utt2meta, the utterance ids must be exactly the same"
+    utterance_list = list(utt2path.keys())
+    if force_shuffle_utt2path or datagroup.get("shuffle_utt2path", False):
+        if verbosity > 1:
+            print("Shuffling utterance ids, all wavpaths in the utt2path list will be processed in random order.")
+        random.shuffle(utterance_list)
+    else:
+        if verbosity > 1:
+            print("Not shuffling utterance ids, all wavs will be processed in order of the utt2path list.")
+    if file_limit is not None:
+        if verbosity > 1:
+            print("--file-limit set at {0}, using at most {0} utterances from the utterance id list, starting at the beginning of utt2path".format(file_limit))
+        utterance_list = utterance_list[:file_limit]
+        if verbosity > 3:
+            print("Using utterance ids:")
+            yaml_pprint(utterance_list)
+    paths = []
+    paths_meta = []
+    for utt in utterance_list:
+        paths.append(utt2path[utt])
+        meta = utt2meta[utt]
+        paths_meta.append((utt, meta["label"], meta["dataset"], meta["duration_sec"]))
+    if verbosity:
+        print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
+        if verbosity > 3:
+            print("All utterances:")
+            for path, (utt, label, dataset, *rest) in zip(paths, paths_meta):
+                print(utt, label, dataset, sep='\t')
+    if config["type"] == "sparsespeech":
+        seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
+        if verbosity:
+            print("Parsing SparseSpeech features")
+            print("Reading utterance segmentation data from seg2utt file '{}'".format(seg2utt_path))
+        seg2utt = collections.OrderedDict(
+            row[:2] for row in parse_space_separated(seg2utt_path))
+        enc_path = config["sparsespeech_paths"]["output"][datagroup_key]
+        feat_path = config["sparsespeech_paths"]["input"][datagroup_key]
+        if verbosity:
+            print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
+        feat = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label)
+    elif config["type"] == "kaldi":
+        feat_conf = dict(config["datagroups"][datagroup_key])
+        kaldi_feats_scp = feat_conf.pop("features_path")
+        expected_shape = feat_conf.pop("shape")
+        if verbosity:
+            print("Parsing Kaldi features from '{}' with expected shape {}".format(kaldi_feats_scp, expected_shape))
+        feat = tf_data.parse_kaldi_features(utterance_list, kaldi_feats_scp, utt2label, expected_shape, feat_conf)
+    else:
+        feat = tf_data.extract_features_from_paths(
+            config,
+            paths,
+            paths_meta,
+            datagroup_key,
+            verbosity=verbosity)
+    return feat
+
+
+def extract_features_with_cache(config, experiment_config, datagroup_key, cache_dir, **kwargs):
+    verbosity = kwargs["verbosity"]
+    feat_config = experiment_config["features"]
+    conf_json, conf_checksum = system.config_checksum(experiment_config, datagroup_key)
+    if verbosity > 2:
+        print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
+        print(conf_json)
+    extractor_ds = extract_features(
+        experiment_config["datasets"],
+        feat_config,
+        datagroup_key,
+        **kwargs)
+    if "features_cache" not in config:
+        if verbosity:
+            print("features_cache not defined in config, will not cache extracted features")
+        return extractor_ds, conf_checksum
+    features_cache_dir = os.path.join(
+        cache_dir,
+        "features",
+        datagroup_key,
+        feat_config["type"],
+        conf_checksum)
+    num_shards = config["features_cache"]["num_shards"]
+    cache_exists = os.path.exists(features_cache_dir + ".md5sum-input")
+    if cache_exists:
+        if verbosity:
+            print("Loading features from existing cache: '{}'".format(features_cache_dir))
+    else:
+        if verbosity:
+            print("Writing features into new cache: '{}' using {} shards".format(features_cache_dir, num_shards))
+        os.makedirs(features_cache_dir, exist_ok=True)
+        with open(features_cache_dir + ".md5sum-input", "w") as f:
+            print(conf_json, file=f, end='')
+    shards = []
+    for shard_index in range(num_shards):
+        shard_cache_path = os.path.join(features_cache_dir, "{:06d}".format(shard_index + 1))
+        if verbosity > 1:
+            print("Creating shard {}, caching contents to '{}'".format(shard_index + 1, shard_cache_path))
+        shards.append(
+            extractor_ds
+            .shard(num_shards, shard_index)
+            .cache(filename=shard_cache_path))
+    cached_ds = shards[0]
+    for shard in shards[1:]:
+        cached_ds = cached_ds.concatenate(shard)
+    return cached_ds, conf_checksum

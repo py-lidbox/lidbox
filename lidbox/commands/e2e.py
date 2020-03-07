@@ -13,26 +13,16 @@ import kaldiio
 import numpy as np
 import tensorflow as tf
 
-from lidbox import yaml_pprint
-from lidbox.commands.base import BaseCommand, Command, ExpandAbspath
-# from lidbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
-import lidbox.models as models
-import lidbox.tf_data as tf_data
-import lidbox.tf_util as tf_util
-import lidbox.system as system
+from .. import (
+    models,
+    parse_space_separated,
+    system,
+    tf_data,
+    tf_util,
+    yaml_pprint,
+)
+from .base import BaseCommand, Command, ExpandAbspath
 
-
-def parse_space_separated(path):
-    with open(path) as f:
-        for l in f:
-            l = l.strip()
-            if l:
-                yield l.split(' ')
-
-def config_checksum(config, datagroup_key):
-    md5input = {k: config[k] for k in ("features", "datasets")}
-    json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
-    return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
 def now_str(date=False):
     return str(datetime.datetime.now() if date else int(time.time()))
@@ -51,7 +41,7 @@ class E2EBase(Command):
         optional = parser.add_argument_group("options")
         optional.add_argument("--file-limit",
             type=int,
-            help="Extract only up to this many files from the wavpath list (e.g. for debugging).")
+            help="Extract only up to this many files from the wavpath list (e.g. for debugging). Default is no limit.")
         return parser
 
     def get_checkpoint_dir(self):
@@ -90,119 +80,6 @@ class E2EBase(Command):
             yaml_pprint(callbacks_kwargs)
             print()
         return models.KerasWrapper(self.model_id, config["model_definition"], **callbacks_kwargs)
-
-    def extract_features(self, datasets, config, datagroup_key, trim_audio, debug_squeeze_last_dim):
-        args = self.args
-        utt2path = collections.OrderedDict()
-        utt2meta = collections.OrderedDict()
-        if args.verbosity > 1:
-            print("Extracting features from datagroup '{}'".format(datagroup_key))
-            if args.verbosity > 2:
-                yaml_pprint(config)
-        num_utts_dropped = collections.Counter()
-        for ds_config in datasets:
-            if args.verbosity > 1:
-                print("Dataset '{}'".format(ds_config["key"]))
-            datagroup = ds_config["datagroups"][datagroup_key]
-            utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
-            utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
-            if args.verbosity:
-                print("Reading labels for utterances from utt2label file '{}'".format(utt2label_path))
-            if args.verbosity > 1:
-                print("Expected labels (utterances with other labels will be ignored):")
-                for l in ds_config["labels"]:
-                    print("  {}".format(l))
-            enabled_labels = set(ds_config["labels"])
-            skipped_utterances = set()
-            for utt, label, *rest in parse_space_separated(utt2label_path):
-                if label not in enabled_labels:
-                    skipped_utterances.add(utt)
-                    continue
-                assert utt not in utt2meta, "duplicate utterance id found when parsing labels: '{}'".format(utt)
-                utt2meta[utt] = {"label": label, "dataset": ds_config["key"], "duration_sec": -1.0}
-            utt2dur_path = os.path.join(datagroup["path"], datagroup.get("utt2dur", "utt2dur"))
-            if os.path.exists(utt2dur_path):
-                if args.verbosity:
-                    print("Reading durations from utt2dur file '{}'".format(utt2dur_path))
-                for utt, duration, *rest in parse_space_separated(utt2dur_path):
-                    if utt in skipped_utterances:
-                        continue
-                    assert utt in utt2meta, "utterance id without label found when parsing durations: '{}'".format(utt)
-                    utt2meta[utt]["duration_sec"] = float(duration)
-            else:
-                if args.verbosity:
-                    print("Skipping signal duration parse since utt2dur file '{}' does not exist".format(utt2dur_path))
-            if args.verbosity:
-                print("Reading paths of wav files from utt2path file '{}'".format(utt2path_path))
-            for utt, path, *rest in parse_space_separated(utt2path_path):
-                if utt in skipped_utterances:
-                    continue
-                assert utt not in utt2path, "duplicate utterance id found when parsing paths: '{}'".format(utt)
-                utt2path[utt] = path
-        if args.verbosity > 1:
-            print("Total amount of non-empty lines read from utt2path {}, and utt2meta {}".format(len(utt2path), len(utt2meta)))
-            if skipped_utterances:
-                print("Utterances skipped due to unexpected labels: {}".format(len(skipped_utterances)))
-        # All utterance ids must be present in both files
-        assert set(utt2path) == set(utt2meta), "Mismatching sets of utterances in utt2path and utt2meta, the utterance ids must be exactly the same"
-        utterance_list = list(utt2path.keys())
-        if args.shuffle_utt2path or datagroup.get("shuffle_utt2path", False):
-            if args.verbosity > 1:
-                print("Shuffling utterance ids, all wavpaths in the utt2path list will be processed in random order.")
-            random.shuffle(utterance_list)
-        else:
-            if args.verbosity > 1:
-                print("Not shuffling utterance ids, all wavs will be processed in order of the utt2path list.")
-        if args.file_limit:
-            if args.verbosity > 1:
-                print("--file-limit set at {0}, using at most {0} utterances from the utterance id list, starting at the beginning of utt2path".format(args.file_limit))
-            utterance_list = utterance_list[:args.file_limit]
-            if args.verbosity > 3:
-                print("Using utterance ids:")
-                yaml_pprint(utterance_list)
-        paths = []
-        paths_meta = []
-        for utt in utterance_list:
-            paths.append(utt2path[utt])
-            meta = utt2meta[utt]
-            paths_meta.append((utt, meta["label"], meta["dataset"], meta["duration_sec"]))
-        if args.verbosity:
-            print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
-            if args.verbosity > 3:
-                print("All utterances:")
-                for path, (utt, label, dataset, *rest) in zip(paths, paths_meta):
-                    print(utt, label, dataset, sep='\t')
-        if config["type"] == "sparsespeech":
-            seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
-            if args.verbosity:
-                print("Parsing SparseSpeech features")
-                print("Reading utterance segmentation data from seg2utt file '{}'".format(seg2utt_path))
-            seg2utt = collections.OrderedDict(
-                row[:2] for row in parse_space_separated(seg2utt_path)
-            )
-            enc_path = config["sparsespeech_paths"]["output"][datagroup_key]
-            feat_path = config["sparsespeech_paths"]["input"][datagroup_key]
-            if args.verbosity:
-                print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
-            feat = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label)
-        elif config["type"] == "kaldi":
-            feat_conf = dict(config["datagroups"][datagroup_key])
-            kaldi_feats_scp = feat_conf.pop("features_path")
-            expected_shape = feat_conf.pop("shape")
-            if args.verbosity:
-                print("Parsing Kaldi features from '{}' with expected shape {}".format(kaldi_feats_scp, expected_shape))
-            feat = tf_data.parse_kaldi_features(utterance_list, kaldi_feats_scp, utt2label, expected_shape, feat_conf)
-        else:
-            feat = tf_data.extract_features_from_paths(
-                config,
-                paths,
-                paths_meta,
-                datagroup_key,
-                trim_audio=trim_audio,
-                debug_squeeze_last_dim=debug_squeeze_last_dim,
-                verbosity=args.verbosity,
-            )
-        return feat
 
 
 class Train(E2EBase):
@@ -257,7 +134,7 @@ class Train(E2EBase):
             print("Generated onehot encoding as tensors:")
             for l in labels:
                 l = tf.constant(l, dtype=tf.string)
-                tf_data.tf_print(l, "\t", label2onehot(l))
+                tf_util.tf_print(l, "\t", label2onehot(l))
         self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), args.skip_training)
         if args.verbosity > 1:
@@ -273,39 +150,15 @@ class Train(E2EBase):
             ds_config = dict(training_config, **training_config[ds])
             del ds_config["train"], ds_config["validation"]
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
-            debug_squeeze_last_dim = ds_config["input_shape"][-1] == 1
             datagroup_key = ds_config.pop("datagroup")
-            conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
-            if args.verbosity > 2:
-                print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
-                print(conf_json)
-            extractor_ds = self.extract_features(
-                self.experiment_config["datasets"],
-                json.loads(json.dumps(feat_config)),
-                datagroup_key,
-                summary_kwargs.pop("trim_audio", False),
-                debug_squeeze_last_dim,
-            )
-            if ds_config.get("persistent_features_cache", True):
-                features_cache_dir = os.path.join(self.cache_dir, "features")
-            else:
-                features_cache_dir = "/tmp/tensorflow-cache"
-            features_cache_path = os.path.join(
-                features_cache_dir,
-                datagroup_key,
-                feat_config["type"],
-                conf_checksum,
-            )
-            self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
-            if not os.path.exists(features_cache_path + ".md5sum-input"):
-                with open(features_cache_path + ".md5sum-input", "w") as f:
-                    print(conf_json, file=f, end='')
-                if args.verbosity:
-                    print("Writing features into new cache: '{}'".format(features_cache_path))
-            else:
-                if args.verbosity:
-                    print("Loading features from existing cache: '{}'".format(features_cache_path))
-            extractor_ds = extractor_ds.cache(filename=features_cache_path)
+            extractor_ds, conf_checksum = tf_util.extract_features_with_cache(
+                    ds_config,
+                    self.experiment_config,
+                    datagroup_key,
+                    self.cache_dir,
+                    verbosity=args.verbosity,
+                    force_shuffle_utt2path=args.shuffle_utt2path,
+                    file_limit=args.file_limit)
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")
@@ -317,7 +170,7 @@ class Train(E2EBase):
                     if args.verbosity > 1 and i % 10000 == 0:
                         print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
-                        tf_data.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", *meta)
+                        tf_util.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", *meta)
                 if args.verbosity > 1:
                     print(now_str(date=True), "- all", i, "samples done")
             dataset[ds] = tf_data.prepare_dataset_for_training(
@@ -336,7 +189,7 @@ class Train(E2EBase):
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
                 for axis, size_counts in enumerate(tf_util.count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
-                    tf_data.tf_print(size_counts, summarize=10)
+                    tf_util.tf_print(size_counts, summarize=10)
                 if summary_kwargs:
                     logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
                     if os.path.isdir(logdir):
@@ -347,7 +200,6 @@ class Train(E2EBase):
                             print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds, summary_kwargs.get("num_batches", "'all'"), logdir))
                         self.make_named_dir(logdir)
                         writer = tf.summary.create_file_writer(logdir)
-                        summary_kwargs["debug_squeeze_last_dim"] = debug_squeeze_last_dim
                         with writer.as_default():
                             logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
                             if args.verbosity:
@@ -358,7 +210,7 @@ class Train(E2EBase):
                                 if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                                     print(i, "batches done")
                                 if args.verbosity > 3:
-                                    tf_data.tf_print(
+                                    tf_util.tf_print(
                                             "batch:", i,
                                             "utts", meta[0][:max_outputs],
                                             "samples shape:", tf.shape(samples),
@@ -415,321 +267,6 @@ class Train(E2EBase):
         return self.train()
 
 
-class Predict(E2EBase):
-    """
-    Use a trained model to produce likelihoods for all target languages from all utterances in the test set.
-    Writes all predictions as scores and information about the target and non-target languages into the cache dir.
-    """
-
-    @classmethod
-    def create_argparser(cls, parent_parser):
-        parser = super().create_argparser(parent_parser)
-        optional = parser.add_argument_group("predict options")
-        optional.add_argument("--score-precision", type=int, default=6)
-        optional.add_argument("--score-separator", type=str, default=' ')
-        optional.add_argument("--trials", type=str)
-        optional.add_argument("--scores", type=str)
-        optional.add_argument("--checkpoint",
-            type=str,
-            help="Specify which Keras checkpoint to load model weights from, instead of using the most recent one.")
-        return parser
-
-    def predict(self):
-        args = self.args
-        if args.verbosity:
-            print("Preparing model for prediction")
-        self.model_id = self.experiment_config["experiment"]["name"]
-        if not args.trials:
-            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
-        if not args.scores:
-            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
-        self.make_named_dir(os.path.dirname(args.trials))
-        self.make_named_dir(os.path.dirname(args.scores))
-        training_config = self.experiment_config["experiment"]
-        feat_config = self.experiment_config["features"]
-        if args.verbosity > 1:
-            print("Using model parameters:")
-            yaml_pprint(training_config)
-            print()
-        if args.verbosity > 1:
-            print("Using feature extraction parameters:")
-            yaml_pprint(feat_config)
-            print()
-        model = self.create_model(dict(training_config), skip_training=True)
-        if args.verbosity > 1:
-            print("Preparing model")
-        labels = self.experiment_config["dataset"]["labels"]
-        model.prepare(labels, training_config)
-        checkpoint_dir = self.get_checkpoint_dir()
-        if args.checkpoint:
-            checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
-        elif "best_checkpoint" in self.experiment_config.get("prediction", {}):
-            checkpoint_path = os.path.join(checkpoint_dir, self.experiment_config["prediction"]["best_checkpoint"])
-        else:
-            checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
-            if not checkpoints:
-                print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
-                return 1
-            if "checkpoints" in training_config:
-                monitor_value = training_config["checkpoints"]["monitor"]
-                monitor_mode = training_config["checkpoints"].get("mode")
-            else:
-                monitor_value = "epoch"
-                monitor_mode = None
-            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value, mode=monitor_mode))
-        if args.verbosity:
-            print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
-        model.load_weights(checkpoint_path)
-        if args.verbosity:
-            print("\nEvaluating testset with model:")
-            print(str(model))
-            print()
-        ds = "test"
-        if args.verbosity > 2:
-            print("Dataset config for '{}'".format(ds))
-            yaml_pprint(training_config[ds])
-        ds_config = dict(training_config, **training_config[ds])
-        del ds_config["train"], ds_config["validation"]
-        if args.verbosity and "dataset_logger" in ds_config:
-            print("Warning: dataset_logger in the test datagroup has no effect.")
-        datagroup_key = ds_config.pop("datagroup")
-        datagroup = self.experiment_config["dataset"]["datagroups"][datagroup_key]
-        utt2path_path = os.path.join(datagroup["path"], datagroup.get("utt2path", "utt2path"))
-        utt2label_path = os.path.join(datagroup["path"], datagroup.get("utt2label", "utt2label"))
-        utt2path = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2path_path)
-        )
-        utt2label = collections.OrderedDict(
-            row[:2] for row in parse_space_separated(utt2label_path)
-        )
-        utterance_list = list(utt2path.keys())
-        if args.file_limit:
-            utterance_list = utterance_list[:args.file_limit]
-            if args.verbosity > 3:
-                print("Using utterance ids:")
-                yaml_pprint(utterance_list)
-        int2label = self.experiment_config["dataset"]["labels"]
-        label2int, OH = tf_util.make_label2onehot(int2label)
-        def label2onehot(label):
-            return OH[label2int.lookup(label)]
-        labels_set = set(int2label)
-        paths = []
-        paths_meta = []
-        for utt in utterance_list:
-            label = utt2label[utt]
-            if label not in labels_set:
-                continue
-            paths.append(utt2path[utt])
-            paths_meta.append((utt, label))
-        if args.verbosity:
-            print("Extracting test set features for prediction")
-        features = self.extract_features(
-            feat_config,
-            "test",
-            trim_audio=False,
-            debug_squeeze_last_dim=(ds_config["input_shape"][-1] == 1),
-        )
-        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
-        features = tf_data.prepare_dataset_for_training(
-            features,
-            ds_config,
-            feat_config,
-            label2onehot,
-            self.model_id,
-            verbosity=args.verbosity,
-            conf_checksum=conf_checksum,
-        )
-        # drop meta wavs required only for vad
-        features = features.map(lambda *t: t[:3])
-        if ds_config.get("persistent_features_cache", True):
-            features_cache_dir = os.path.join(self.cache_dir, "features")
-        else:
-            features_cache_dir = "/tmp/tensorflow-cache"
-        features_cache_path = os.path.join(
-            features_cache_dir,
-            self.experiment_config["dataset"]["key"],
-            ds,
-            feat_config["type"],
-            conf_checksum,
-        )
-        self.make_named_dir(os.path.dirname(features_cache_path), "features cache")
-        if not os.path.exists(features_cache_path + ".md5sum-input"):
-            with open(features_cache_path + ".md5sum-input", "w") as f:
-                print(conf_json, file=f, end='')
-            if args.verbosity:
-                print("Writing features into new cache: '{}'".format(features_cache_path))
-        else:
-            if args.verbosity:
-                print("Loading features from existing cache: '{}'".format(features_cache_path))
-        features = features.cache(filename=features_cache_path)
-        if args.verbosity:
-            print("Gathering all utterance ids from features dataset iterator")
-        # Gather utterance ids, this also causes the extraction pipeline to be evaluated
-        utterance_ids = []
-        i = 0
-        if args.verbosity > 1:
-            print(now_str(date=True), "- 0 samples done")
-        for _, _, uttids in features.as_numpy_iterator():
-            for uttid in uttids:
-                utterance_ids.append(uttid.decode("utf-8"))
-                i += 1
-                if args.verbosity > 1 and i % 10000 == 0:
-                    print(now_str(date=True), "-", i, "samples done")
-        if args.verbosity > 1:
-            print(now_str(date=True), "- all", i, "samples done")
-        if args.verbosity:
-            print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
-        with open(args.trials, "w") as trials_f:
-            for utt, target in utt2label.items():
-                for lang in int2label:
-                    print(lang, utt, "target" if target == lang else "nontarget", file=trials_f)
-        if args.verbosity:
-            print("Starting prediction with model")
-        predictions = model.predict(features.map(lambda *t: t[0]))
-        if args.verbosity > 1:
-            print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
-        num_predictions = 0
-        with open(args.scores, "w") as scores_f:
-            print(*int2label, file=scores_f)
-            for utt, pred in zip(utterance_ids, predictions):
-                pred_scores = [np.format_float_positional(x, precision=args.score_precision) for x in pred]
-                print(utt, *pred_scores, sep=args.score_separator, file=scores_f)
-                num_predictions += 1
-        if args.verbosity:
-            print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
-
-    def run(self):
-        super().run()
-        return self.predict()
-
-
-#class Evaluate(E2EBase):
-#    """Evaluate predicted scores by average detection cost (C_avg)."""
-
-#    @classmethod
-#    def create_argparser(cls, parent_parser):
-#        parser = super().create_argparser(parent_parser)
-#        optional = parser.add_argument_group("evaluate options")
-#        optional.add_argument("--trials", type=str)
-#        optional.add_argument("--scores", type=str)
-#        optional.add_argument("--threshold-bins", type=int, default=40)
-#        optional.add_argument("--convert-scores", choices=("softmax", "exp", "none"), default=None)
-#        return parser
-
-#    #TODO tf is very slow in the for loop, maybe numpy would be sufficient
-#    def evaluate(self):
-#        args = self.args
-#        self.model_id = self.experiment_config["experiment"]["name"]
-#        if not args.trials:
-#            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
-#        if not args.scores:
-#            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
-#        if args.verbosity > 1:
-#            print("Evaluating minimum average detection cost using trials '{}' and scores '{}'".format(args.trials, args.scores))
-#        score_lines = list(parse_space_separated(args.scores))
-#        langs = score_lines[0]
-#        lang2int = {l: i for i, l in enumerate(langs)}
-#        utt2scores = {utt: tf.constant([float(s) for s in scores], dtype=tf.float32) for utt, *scores in score_lines[1:]}
-#        if args.verbosity > 1:
-#            print("Parsed scores for {} utterances".format(len(utt2scores)))
-#        if args.convert_scores == "softmax":
-#            print("Applying softmax on logit scores")
-#            utt2scores = {utt: tf.keras.activations.softmax(tf.expand_dims(scores, 0))[0] for utt, scores in utt2scores.items()}
-#        elif args.convert_scores == "exp":
-#            print("Applying exp on log likelihood scores")
-#            utt2scores = {utt: tf.math.exp(scores) for utt, scores in utt2scores.items()}
-#        if args.verbosity > 2:
-#            print("Asserting all scores sum to 1")
-#            tolerance = 1e-3
-#            for utt, scores in utt2scores.items():
-#                one = tf.constant(1.0, dtype=tf.float32)
-#                tf.debugging.assert_near(
-#                    tf.reduce_sum(scores),
-#                    one,
-#                    rtol=tolerance,
-#                    atol=tolerance,
-#                    message="failed to convert log likelihoods to probabilities, the probabilities of predictions for utterance '{}' does not sum to 1".format(utt))
-#        if args.verbosity > 1:
-#            print("Generating {} threshold bins".format(args.threshold_bins))
-#        assert args.threshold_bins > 0
-#        from_logits = False
-#        max_score = tf.constant(-float("inf"), dtype=tf.float32)
-#        min_score = tf.constant(float("inf"), dtype=tf.float32)
-#        for utt, scores in utt2scores.items():
-#            max_score = tf.math.maximum(max_score, tf.math.reduce_max(scores))
-#            min_score = tf.math.minimum(min_score, tf.math.reduce_min(scores))
-#        if args.verbosity > 2:
-#            tf_data.tf_print("Max score", max_score, "min score", min_score)
-#        thresholds = tf.linspace(min_score, max_score, args.threshold_bins)
-#        if args.verbosity > 2:
-#            print("Score thresholds for language detection decisions:")
-#            tf_data.tf_print(thresholds, summarize=5)
-#        # First do C_avg to get the best threshold
-#        cavg = AverageDetectionCost(langs, theta_det=list(thresholds.numpy()))
-#        if args.verbosity > 1:
-#            print("Sorting trials")
-#        trials_by_utt = sorted(parse_space_separated(args.trials), key=lambda t: t[1])
-#        trials_by_utt = [
-#            (utt, tf.constant([float(t == "target") for _, _, t in sorted(group, key=lambda t: lang2int[t[0]])], dtype=tf.float32))
-#            for utt, group in itertools.groupby(trials_by_utt, key=lambda t: t[1])
-#        ]
-#        if args.verbosity:
-#            print("Computing minimum C_avg using {} score thresholds".format(len(thresholds)))
-#        # Collect labels and predictions for confusion matrix
-#        cm_labels = []
-#        cm_predictions = []
-#        for utt, y_true in trials_by_utt:
-#            if utt not in utt2scores:
-#                print("Warning: correct class for utterance '{}' listed in trials but it has no predicted scores, skipping".format(utt), file=sys.stderr)
-#                continue
-#            y_pred = utt2scores[utt]
-#            # Update using singleton batches
-#            cavg.update_state(
-#                tf.expand_dims(y_true, 0),
-#                tf.expand_dims(y_pred, 0)
-#            )
-#            cm_labels.append(tf.math.argmax(y_true))
-#            cm_predictions.append(tf.math.argmax(y_pred))
-#        # Evaluating the cavg result has a side effect of generating the argmin of the minimum cavg into cavg.min_index
-#        _ = cavg.result()
-#        min_threshold = thresholds[cavg.min_index].numpy()
-#        def print_metric(m):
-#            print("{:15s}\t{:.3f}".format(m.name + ":", m.result().numpy()))
-#        print("min C_avg at threshold {:.6f}".format(min_threshold))
-#        print_metric(cavg)
-#        # Now we know the threshold that minimizes C_avg and use the same threshold to compute all other metrics
-#        metrics = [
-#            M(langs, from_logits=from_logits, thresholds=min_threshold)
-#            for M in (AverageEqualErrorRate, AveragePrecision, AverageRecall)
-#        ]
-#        if args.verbosity:
-#            print("Computing rest of the metrics using threshold {:.6f}".format(min_threshold))
-#        for utt, y_true in trials_by_utt:
-#            if utt not in utt2scores:
-#                continue
-#            y_true_batch = tf.expand_dims(y_true, 0)
-#            y_pred = tf.expand_dims(utt2scores[utt], 0)
-#            for m in metrics:
-#                m.update_state(y_true_batch, y_pred)
-#        for avg_m in metrics:
-#            print_metric(avg_m)
-#        print("\nMetrics by target, using threshold {:.6f}".format(min_threshold))
-#        for avg_m in metrics:
-#            print(avg_m.name)
-#            for m in avg_m:
-#                print_metric(m)
-#        print("\nConfusion matrix")
-#        cm_labels = tf.cast(tf.stack(cm_labels), dtype=tf.int32)
-#        cm_predictions = tf.cast(tf.stack(cm_predictions), dtype=tf.int32)
-#        confusion_matrix = tf.math.confusion_matrix(cm_labels, cm_predictions, len(langs))
-#        print(langs)
-#        print(np.array_str(confusion_matrix.numpy()))
-
-#    def run(self):
-#        super().run()
-#        return self.evaluate()
-
-
 class Util(E2EBase):
     tasks = (
         "get_cache_checksum",
@@ -747,7 +284,7 @@ class Util(E2EBase):
 
     def get_cache_checksum(self):
         datagroup_key = self.args.get_cache_checksum
-        conf_json, conf_checksum = config_checksum(self.experiment_config, datagroup_key)
+        conf_json, conf_checksum = system.config_checksum(self.experiment_config, datagroup_key)
         if self.args.verbosity:
             print(10*'-' + " md5sum input begin " + 10*'-')
             print(conf_json, end='')
@@ -761,5 +298,5 @@ class Util(E2EBase):
 
 
 command_tree = [
-    (E2E, [Train, Predict, Util]),
+    (E2E, [Train, Util]),
 ]

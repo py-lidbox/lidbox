@@ -82,6 +82,8 @@ experiment:
     mode: min
   train:
     datagroup: train
+    features_cache:
+      num_shards: 4
     batch_size: 64
     shuffle_buffer:
       before_cache: 20000
@@ -92,6 +94,8 @@ experiment:
         size_multiplier: 3
   validation:
     datagroup: test
+    features_cache:
+      num_shards: 1
     batch_size: 1
     dataset_logger:
       num_batches: 20
