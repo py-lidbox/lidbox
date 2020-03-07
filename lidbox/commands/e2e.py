@@ -18,12 +18,8 @@ from lidbox.commands.base import BaseCommand, Command, ExpandAbspath
 # from lidbox.metrics import AverageDetectionCost, AverageEqualErrorRate, AveragePrecision, AverageRecall
 import lidbox.models as models
 import lidbox.tf_data as tf_data
+import lidbox.tf_util as tf_util
 import lidbox.system as system
-
-
-class E2E(BaseCommand):
-    """TensorFlow pipeline for wavfile preprocessing, feature extraction and sound classification model training"""
-    pass
 
 
 def parse_space_separated(path):
@@ -33,52 +29,18 @@ def parse_space_separated(path):
             if l:
                 yield l.split(' ')
 
-def make_label2onehot(labels):
-    labels_enum = tf.range(len(labels))
-    # Label to int or one past last one if not found
-    # TODO slice index out of bounds is probably not a very informative error message
-    label2int = tf.lookup.StaticHashTable(
-        tf.lookup.KeyValueTensorInitializer(
-            tf.constant(labels),
-            tf.constant(labels_enum)
-        ),
-        tf.constant(len(labels), dtype=tf.int32)
-    )
-    OH = tf.one_hot(labels_enum, len(labels))
-    return label2int, OH
-
 def config_checksum(config, datagroup_key):
     md5input = {k: config[k] for k in ("features", "datasets")}
     json_str = json.dumps(md5input, ensure_ascii=False, sort_keys=True) + '\n'
     return json_str, hashlib.md5(json_str.encode("utf-8")).hexdigest()
 
-def count_dim_sizes(ds, ds_element_index, ndims):
-    tf.debugging.assert_greater(ndims, 0)
-    get_shape_at_index = lambda *t: tf.shape(t[ds_element_index])
-    shapes_ds = ds.map(get_shape_at_index)
-    ones = tf.ones(ndims, dtype=tf.int32)
-    shape_indices = tf.range(ndims, dtype=tf.int32)
-    max_sizes = shapes_ds.reduce(
-        tf.zeros(ndims, dtype=tf.int32),
-        lambda acc, shape: tf.math.maximum(acc, shape))
-    max_max_size = tf.reduce_max(max_sizes)
-    @tf.function
-    def accumulate_dim_size_counts(counter, shape):
-        enumerated_shape = tf.stack((shape_indices, shape), axis=1)
-        return tf.tensor_scatter_nd_add(counter, enumerated_shape, ones)
-    size_counts = shapes_ds.reduce(
-        tf.zeros((ndims, max_max_size + 1), dtype=tf.int32),
-        accumulate_dim_size_counts)
-    sorted_size_indices = tf.argsort(size_counts, direction="DESCENDING")
-    sorted_size_counts = tf.gather(size_counts, sorted_size_indices, batch_dims=1)
-    is_nonzero = sorted_size_counts > 0
-    return tf.ragged.stack(
-        (tf.ragged.boolean_mask(sorted_size_counts, is_nonzero),
-         tf.ragged.boolean_mask(sorted_size_indices, is_nonzero)),
-        axis=2)
-
 def now_str(date=False):
     return str(datetime.datetime.now() if date else int(time.time()))
+
+
+class E2E(BaseCommand):
+    """TensorFlow pipeline for wavfile preprocessing, feature extraction and sound classification model training"""
+    pass
 
 
 class E2EBase(Command):
@@ -287,7 +249,7 @@ class Train(E2EBase):
             dataset_config = system.load_yaml(args.dataset_config)
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
         labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
-        label2int, OH = make_label2onehot(labels)
+        label2int, OH = tf_util.make_label2onehot(labels)
         def label2onehot(label):
             return OH[label2int.lookup(label)]
         if args.verbosity > 2:
@@ -372,7 +334,7 @@ class Train(E2EBase):
                     print("--debug-dataset given, iterating over the dataset to gather stats")
                 if args.verbosity > 1:
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
-                for axis, size_counts in enumerate(count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
+                for axis, size_counts in enumerate(tf_util.count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
                     tf_data.tf_print(size_counts, summarize=10)
                 if summary_kwargs:
@@ -547,7 +509,7 @@ class Predict(E2EBase):
                 print("Using utterance ids:")
                 yaml_pprint(utterance_list)
         int2label = self.experiment_config["dataset"]["labels"]
-        label2int, OH = make_label2onehot(int2label)
+        label2int, OH = tf_util.make_label2onehot(int2label)
         def label2onehot(label):
             return OH[label2int.lookup(label)]
         labels_set = set(int2label)
