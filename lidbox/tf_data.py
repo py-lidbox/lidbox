@@ -480,25 +480,30 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
             for i, chunk in enumerate(librosa.util.frame(signal, chunk_len, chunk_step, axis=0)):
                 chunk_uttid = tf.strings.join((meta[0], "-{:06d}".format(i)))
                 yield (chunk, sr), chunk_uttid, meta[1]
-    def chunk_loader(wav_path, meta):
+    def chunk_loader(original_signal, sr, wav_path, meta):
+        chunk_stats = []
         utt, label, dataset = meta[:3]
-        original_signal, sr = librosa.core.load(wav_path, sr=target_sr, mono=True)
+        # original_signal, sr = librosa.core.load(wav_path, sr=target_sr, mono=True)
         if vad_config:
             original_signal = drop_silence(original_signal, sr)
         chunk_length = int(sr * 1e-3 * chunks["length_ms"])
         if original_signal.size < chunk_length:
             if verbosity:
-                print("skipping too short signal (min chunk length is {}): length {}, path '{}'"
-                      .format(chunk_length,
-                              original_signal.size,
-                              wav_path.decode("utf-8")), file=sys.stderr)
+                tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", original_signal.size, ", path ", tf.constant(wav_path, tf.string), output_stream=sys.stderr, sep='')
             return
-        yield from chunker(original_signal, target_sr, meta)
+        num_chunks_produced = 0
+        time_begin = time.perf_counter()
+        for c in chunker(original_signal, target_sr, meta):
+            num_chunks_produced += 1
+            yield c
+        time_end = time.perf_counter()
+        chunk_stats.append(("original-signal", num_chunks_produced, time_end - time_begin))
         for conf in augment_config:
             if "datasets_include" in conf and dataset not in conf["datasets_include"]:
                 continue
             if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
                 continue
+            #TODO preload whole augmentation dataset into memory
             if conf["type"] == "random_resampling":
                 # apply naive speed modification by resampling
                 rate = np.random.uniform(conf["range"][0], conf["range"][1])
@@ -507,7 +512,13 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     buf.seek(0)
                     signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
                 new_uttid = tf.strings.join((utt, "-speed{:.3f}".format(rate)))
-                yield from chunker(signal, target_sr, (new_uttid, *meta[1:]))
+                num_chunks_produced = 0
+                time_begin = time.perf_counter()
+                for c in chunker(signal, target_sr, (new_uttid, *meta[1:])):
+                    num_chunks_produced += 1
+                    yield c
+                time_end = time.perf_counter()
+                chunk_stats.append(("resampling", num_chunks_produced, time_end - time_begin))
             elif conf["type"] == "additive_noise":
                 for noise_type, db_min, db_max in conf["snr_def"]:
                     noise_signal = np.zeros(0, dtype=original_signal.dtype)
@@ -524,12 +535,20 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
                     if not np.all(np.isfinite(clean_and_noise)):
                         if verbosity:
-                            print("warning: snr_mixer failed, augmented signal '{}' has non-finite values and will be skipped. "
-                                  "Utterance source was '{}', and chosen noise signals were\n  {}"
-                                  .format(new_uttid.numpy().decode("utf-8"), wav_path.decode("utf-8"), '\n  '.join(noise_paths)),
-                                  file=sys.stderr)
+                            tf_print("warning: snr_mixer failed, augmented signal ", new_uttid, " has non-finite values and will be skipped. Utterance source was ", wav_path, ", and chosen noise signals were\n  ", tf.strings.join(noise_paths, separator="\n  "), output_stream=sys.stderr, sep='')
                         return
-                    yield from chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:]))
+                    num_chunks_produced = 0
+                    time_begin = time.perf_counter()
+                    for c in chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:])):
+                        num_chunks_produced += 1
+                        yield c
+                    time_end = time.perf_counter()
+                    chunk_stats.append(("snr-mixer", num_chunks_produced, time_end - time_begin))
+        if verbosity > 3:
+            tf_print(
+                "chunk stats:\n{:>20s} {:>10s} {:>10s}\n".format("type", "chunks", "dur (s)"),
+                "\n".join("{:>20s} {:>10d} {:>10.3f}".format(*stat) for stat in chunk_stats))
+
     if verbosity:
         tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
     return chunk_loader
@@ -589,9 +608,9 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             tf.TensorShape([]),
             tf.TensorShape([]))
         if "chunks" in wav_config:
-            workers_per_cpu = wav_config.get("workers_per_cpu", 8)
+            expected_samples_per_file = wav_config.get("expected_samples_per_file", 1)
             if verbosity:
-                print("Loading samples from wavs as fixed sized chunks, using at most {} workers per cpu".format(workers_per_cpu))
+                print("Loading samples from wavs as fixed sized chunks, expecting up to {} consecutive elements from each file".format(expected_samples_per_file))
             chunk_loader_fn = get_chunk_loader(wav_config, verbosity, datagroup_key)
             def ds_generator(*args):
                 return tf.data.Dataset.from_generator(
@@ -599,15 +618,26 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                     dataset_types,
                     dataset_shapes,
                     args=args)
+            def load_wav_with_meta(path, meta):
+                wav = load_wav(path)
+                return wav.audio, wav.sample_rate, path, meta
+            target_sr = wav_config.get("filter_sample_rate", -1)
+            if verbosity:
+                if target_sr < 0:
+                    print("filter_sample_rate not defined in wav_config, wav files will not be filtered")
+                else:
+                    print("filter_sample_rate set to {}, wav files with mismatching sample rates will be ignored and no features will be extracted from those files".format(target_sr))
+            def has_target_sample_rate(audio, sample_rate, *rest):
+                return target_sr > -1 and sample_rate == target_sr
             paths_t = tf.constant(paths, tf.string)
             meta_t = tf.constant(meta, tf.string)
             wavs = (tf.data.Dataset
                     .from_tensor_slices((paths_t, meta_t))
+                    .map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
+                    .filter(has_target_sample_rate)
                     .interleave(
                         ds_generator,
-                        # Hide IO latency from reading wav files by using several workers per CPU
-                        # The exact amount of workers is chosen by TensorFlow due to autotune, but this will be the maximum
-                        cycle_length=workers_per_cpu*len(os.sched_getaffinity(0)),
+                        block_length=expected_samples_per_file,
                         num_parallel_calls=TF_AUTOTUNE))
         else:
             print("unknown, non-empty wav_config given:")
