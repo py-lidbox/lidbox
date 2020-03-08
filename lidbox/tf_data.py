@@ -615,8 +615,8 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
 # TODO: fix this mess
 def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosity=0):
-    paths, meta = list(paths), [m[:3] for m in meta]
-    assert len(paths) == len(meta), "Cannot extract features from paths when the amount of metadata {} does not match the amount of wavfile paths {}".format(len(meta), len(paths))
+    paths, meta, durations = list(paths), [m[:3] for m in meta], [m[3] for m in meta]
+    assert len(paths) == len(meta) == len(durations), "Cannot extract features from paths when the amount of metadata {} and durations {} does not match the amount of wavfile paths {}".format(len(meta), len(durations), len(paths))
     wav_config = feat_config.get("wav_config")
     if wav_config:
         dataset_types = (
@@ -638,7 +638,13 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                     dataset_types,
                     dataset_shapes,
                     args=args)
-            def load_wav_with_meta(path, meta):
+            min_duration = 1e-3 * wav_config["chunks"]["length_ms"]
+            def has_min_chunk_length(path, meta, duration):
+                ok = duration >= min_duration
+                if verbosity and not ok:
+                    tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) file ", path, sep='', output_stream=sys.stderr)
+                return ok
+            def load_wav_with_meta(path, meta, duration):
                 wav = load_wav(path)
                 return wav.audio, wav.sample_rate, path, meta
             target_sr = wav_config.get("filter_sample_rate", -1)
@@ -654,8 +660,10 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                 return ok
             paths_t = tf.constant(paths, tf.string)
             meta_t = tf.constant(meta, tf.string)
+            duration_t = tf.constant(durations, tf.float32)
             wavs = (tf.data.Dataset
-                    .from_tensor_slices((paths_t, meta_t))
+                    .from_tensor_slices((paths_t, meta_t, duration_t))
+                    .filter(has_min_chunk_length)
                     .map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
                     .filter(has_target_sample_rate)
                     .interleave(
