@@ -151,14 +151,41 @@ class Train(E2EBase):
             del ds_config["train"], ds_config["validation"]
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
             datagroup_key = ds_config.pop("datagroup")
-            extractor_ds, conf_checksum = tf_util.extract_features_with_cache(
-                    ds_config,
-                    self.experiment_config,
+            tf_util_kwargs = {
+                    "verbosity": args.verbosity,
+                    "force_shuffle_utt2path": args.shuffle_utt2path,
+                    "file_limit": args.file_limit}
+            if "features_cache" not in ds_config:
+                if args.verbosity:
+                    print("features_cache not defined in config, will not cache extracted features")
+                extractor_ds = tf_util.extract_features(
+                    self.experiment_config["datasets"],
+                    feat_config,
                     datagroup_key,
-                    self.cache_dir,
-                    verbosity=args.verbosity,
-                    force_shuffle_utt2path=args.shuffle_utt2path,
-                    file_limit=args.file_limit)
+                    **tf_util_kwargs)
+            else:
+                if args.verbosity:
+                    print("features_cache defined in config, extracted features will be cached or existing features will be loaded from cache")
+                conf_json, conf_checksum = system.config_checksum(self.experiment_config, datagroup_key)
+                if args.verbosity > 2:
+                    print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
+                    print(conf_json)
+                tf_util_args = ds_config, self.experiment_config, datagroup_key, self.cache_dir
+                tf_util_kwargs["conf_json"] = conf_json
+                tf_util_kwargs["conf_checksum"] = conf_checksum
+                cache_type = ds_config["features_cache"]["type"]
+                if cache_type == "tf_data_cache":
+                    extractor_ds = tf_util.extract_features_with_cache(
+                            *tf_util_args,
+                            **tf_util_kwargs)
+                elif cache_type == "tfrecords":
+                    extractor_ds = tf_util.extract_features_with_tfrecords(
+                            *tf_util_args,
+                            **tf_util_kwargs)
+                else:
+                    print("error: invalid features cache type '{}'".format(cache_type))
+                    return 1
+            extractor_ds = extractor_ds.unbatch()
             if args.exhaust_dataset_iterator:
                 if args.verbosity:
                     print("--exhaust-dataset-iterator given, now iterating once over the dataset iterator to fill the features cache.")

@@ -5,7 +5,13 @@ import sys
 
 import tensorflow as tf
 
-from . import yaml_pprint, parse_space_separated, tf_data, system
+from . import (
+    parse_space_separated,
+    system,
+    tf_data,
+    tf_serialization,
+    yaml_pprint,
+)
 
 
 def tf_print(*args, **kwargs):
@@ -84,7 +90,7 @@ def make_label2onehot(labels):
     return label2int, OH
 
 
-def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle_utt2path=False, file_limit=None):
+def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle_utt2path=False, file_limit=None, **kwargs):
     utt2path = collections.OrderedDict()
     utt2meta = collections.OrderedDict()
     if verbosity > 1:
@@ -196,19 +202,13 @@ def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle
 def extract_features_with_cache(config, experiment_config, datagroup_key, cache_dir, **kwargs):
     verbosity = kwargs["verbosity"]
     feat_config = experiment_config["features"]
-    conf_json, conf_checksum = system.config_checksum(experiment_config, datagroup_key)
-    if verbosity > 2:
-        print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
-        print(conf_json)
+    conf_checksum = kwargs["conf_checksum"]
+    conf_json = kwargs["conf_json"]
     extractor_ds = extract_features(
         experiment_config["datasets"],
         feat_config,
         datagroup_key,
         **kwargs)
-    if "features_cache" not in config:
-        if verbosity:
-            print("features_cache not defined in config, will not cache extracted features")
-        return extractor_ds, conf_checksum
     features_cache_dir = os.path.join(
         cache_dir,
         "features",
@@ -222,20 +222,53 @@ def extract_features_with_cache(config, experiment_config, datagroup_key, cache_
             print("Loading features from existing cache: '{}'".format(features_cache_dir))
     else:
         if verbosity:
-            print("Writing features into new cache: '{}' using {} shards".format(features_cache_dir, num_shards))
+            print("Writing features into new cache: '{}'".format(features_cache_dir)
+                    + '' if num_shards == 1 else " using {} shards".format(num_shards))
         os.makedirs(features_cache_dir, exist_ok=True)
         with open(features_cache_dir + ".md5sum-input", "w") as f:
             print(conf_json, file=f, end='')
-    shards = []
-    for shard_index in range(num_shards):
-        shard_cache_path = os.path.join(features_cache_dir, "{:06d}".format(shard_index + 1))
-        if verbosity > 1:
-            print("Creating shard {}, caching contents to '{}'".format(shard_index + 1, shard_cache_path))
-        shards.append(
-            extractor_ds
-            .shard(num_shards, shard_index)
-            .cache(filename=shard_cache_path))
+    if num_shards == 1:
+        return extractor_ds.cache(filename=os.path.join(features_cache_dir, "all_features"))
+    shards = [extractor_ds.shard(num_shards, i) for i in range(num_shards)]
     cached_ds = shards[0]
     for shard in shards[1:]:
         cached_ds = cached_ds.concatenate(shard)
-    return cached_ds, conf_checksum
+    return cached_ds
+
+
+def extract_features_with_tfrecords(config, experiment_config, datagroup_key, cache_dir, **kwargs):
+    verbosity = kwargs["verbosity"]
+    feat_config = experiment_config["features"]
+    conf_checksum = kwargs["conf_checksum"]
+    conf_json = kwargs["conf_json"]
+    features_cache_dir = os.path.join(
+        cache_dir,
+        "features",
+        datagroup_key,
+        feat_config["type"],
+        conf_checksum)
+    cache_exists = os.path.exists(features_cache_dir + ".md5sum-input")
+    if not cache_exists:
+        if verbosity:
+            print("Writing features into new cache: '{}'".format(features_cache_dir))
+        os.makedirs(features_cache_dir, exist_ok=True)
+        with open(features_cache_dir + ".md5sum-input", "w") as f:
+            print(conf_json, file=f, end='')
+        tmp_ds = extract_features(
+            experiment_config["datasets"],
+            feat_config,
+            datagroup_key,
+            **kwargs)
+        tfrecord_paths = tf_serialization.write_features(tmp_ds, features_cache_dir)
+        for i, path in tfrecord_paths.enumerate().as_numpy_iterator():
+            if verbosity:
+                print("Wrote TFRecord {} to '{}'".format(i, path))
+    else:
+        if verbosity:
+            print("Loading features from existing cache: '{}'".format(features_cache_dir))
+    #TODO load from metadata file
+    wav_length = 15680
+    return tf_serialization.load_features(
+            features_cache_dir,
+            experiment_config["experiment"]["input_shape"][1],
+            wav_length)

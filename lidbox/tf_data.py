@@ -653,7 +653,6 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             normalized.set_shape(feats.shape.as_list())
             return (normalized, *rest)
         features = features.map(apply_mean_var_norm_numpy, num_parallel_calls=TF_AUTOTUNE)
-    features = features.unbatch()
     return features
 
 def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):
