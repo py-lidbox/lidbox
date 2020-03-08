@@ -1,6 +1,7 @@
 import contextlib
 import collections
 import io
+import json
 import os
 import random
 import sys
@@ -417,7 +418,8 @@ def snr_mixer(clean, noise, snr):
 def get_chunk_loader(wav_config, verbosity, datagroup_key):
     chunks = wav_config["chunks"]
     target_sr = wav_config.get("target_sample_rate")
-    augment_config = wav_config.get("augmentation", [])
+    # Deep copy all augmentation config dicts because we will be mutating them soon
+    augment_config = json.loads(json.dumps(wav_config.get("augmentation", [])))
     if datagroup_key != "train":
         if verbosity:
             print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key), file=sys.stderr)
