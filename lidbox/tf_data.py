@@ -627,8 +627,11 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                     print("filter_sample_rate not defined in wav_config, wav files will not be filtered")
                 else:
                     print("filter_sample_rate set to {}, wav files with mismatching sample rates will be ignored and no features will be extracted from those files".format(target_sr))
-            def has_target_sample_rate(audio, sample_rate, *rest):
-                return target_sr > -1 and sample_rate == target_sr
+            def has_target_sample_rate(audio, sample_rate, path, meta):
+                ok = target_sr > -1 and sample_rate == target_sr
+                if verbosity and not ok:
+                    tf_print("dropping wav due to wrong sample rate ", sample_rate, ", expected is ", target_sr, " file is ", path, sep='', output_stream=sys.stderr)
+                return ok
             paths_t = tf.constant(paths, tf.string)
             meta_t = tf.constant(meta, tf.string)
             wavs = (tf.data.Dataset
