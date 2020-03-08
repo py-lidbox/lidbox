@@ -1,9 +1,10 @@
-import contextlib
 import collections
+import contextlib
 import io
 import json
 import os
 import random
+import shutil
 import sys
 import time
 import wave
@@ -434,10 +435,29 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                 id2label = dict(l.strip().split() for l in f)
             label2path = collections.defaultdict(list)
             with open(os.path.join(noise_source_dir, "id2path")) as f:
-                for id, path in (l.strip().split() for l in f):
-                    label2path[id2label[id]].append(path)
+                for noise_id, path in (l.strip().split() for l in f):
+                    label2path[id2label[noise_id]].append((noise_id, path))
+            tmpdir = conf.get("copy_to_tmpdir")
+            if tmpdir:
+                if os.path.isdir(tmpdir):
+                    if verbosity:
+                        print("tmpdir for noise source files given, but it already exists at '{}', so copying will be skipped".format(tmpdir))
+                else:
+                    if verbosity:
+                        print("copying all noise source wavs to '{}'".format(tmpdir))
+                    os.makedirs(tmpdir)
+                    tmp = collections.defaultdict(list)
+                    for noise_type, noise_paths in label2path.items():
+                        for noise_id, path in noise_paths:
+                            new_path = os.path.join(tmpdir, noise_id + ".wav")
+                            shutil.copy2(path, new_path)
+                            if verbosity > 3:
+                                print(" ", path, "->", new_path)
+                            tmp[noise_type].append((noise_id, new_path))
+                    label2path = tmp
             for noise_type, noise_paths in label2path.items():
-                conf["noise_source"][noise_type] = noise_paths
+                conf["noise_source"][noise_type] = [path for _, path in noise_paths]
+
     def drop_silence(signal, sr):
         vad_frame_ms = vad_config["frame_ms"]
         assert vad_frame_ms in (10, 20, 30)
