@@ -167,9 +167,10 @@ def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle
     if verbosity:
         print("Starting feature extraction for datagroup '{}' from {} files".format(datagroup_key, len(paths)))
         if verbosity > 3:
-            print("All utterances:")
+            print("Debug verbosity specified, dumping all utterances:")
+            print("{:>30s} {:>10s} {:>20s}".format("utt", "label", "dataset"))
             for path, (utt, label, dataset, *rest) in zip(paths, paths_meta):
-                print(utt, label, dataset, sep='\t')
+                print("{:>30s} {:>10s} {:>20s}".format(utt, label, dataset))
     if config["type"] == "sparsespeech":
         seg2utt_path = os.path.join(datagroup["path"], "segmented", datagroup.get("seg2utt", "seg2utt"))
         if verbosity:

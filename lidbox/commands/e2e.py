@@ -233,7 +233,7 @@ class Train(E2EBase):
                                 print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
                             i = 0
                             max_outputs = summary_kwargs.get("max_outputs", 10)
-                            for i, (samples, labels, *meta) in enumerate(logged_dataset.as_numpy_iterator()):
+                            for i, (samples, labels, *meta) in enumerate(logged_dataset.as_numpy_iterator(), start=1):
                                 if args.verbosity > 1 and i % (2000//ds_config.get("batch_size", 1)) == 0:
                                     print(i, "batches done")
                                 if args.verbosity > 3:
@@ -245,7 +245,7 @@ class Train(E2EBase):
                                             "wav.audio.shape", meta[1].audio.shape,
                                             "wav.sample_rate[0]", meta[1].sample_rate[0])
                             if args.verbosity > 1:
-                                print(i, "batches done")
+                                print(i, "batches done, deleting temporary dataset logger")
                             del logged_dataset
         checkpoint_dir = self.get_checkpoint_dir()
         checkpoints = [c.name for c in os.scandir(checkpoint_dir) if c.is_file()] if os.path.isdir(checkpoint_dir) else []
