@@ -5,7 +5,12 @@ import sys
 
 import tensorflow as tf
 
+import lidbox
+if lidbox.TF_DEBUG:
+    tf.autograph.set_verbosity(10, alsologtostdout=True)
+
 from . import (
+    audio_feat,
     parse_space_separated,
     system,
     tf_data,

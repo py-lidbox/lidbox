@@ -8,6 +8,11 @@ import tensorflow as tf
 import numpy as np
 import webrtcvad
 
+import lidbox
+if lidbox.TF_DEBUG:
+    tf.autograph.set_verbosity(10, alsologtostdout=True)
+
+from .tf_util import tf_print
 
 Wav = collections.namedtuple("Wav", ["audio", "sample_rate"])
 

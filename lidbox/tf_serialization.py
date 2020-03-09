@@ -1,8 +1,15 @@
 import os
-import tensorflow as tf
-from . import audio_feat
 
-TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
+import tensorflow as tf
+
+import lidbox
+if lidbox.TF_DEBUG:
+    tf.autograph.set_verbosity(10, alsologtostdout=True)
+    TF_AUTOTUNE = None
+else:
+    TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+from . import audio_feat
 
 
 def floats2floatlist(v):

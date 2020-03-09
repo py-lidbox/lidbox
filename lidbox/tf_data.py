@@ -17,17 +17,18 @@ import soundfile
 import tensorflow as tf
 import webrtcvad
 
-from . import yaml_pprint
-from . import audio_feat
-from .tf_util import tf_print
-
-debug = False
-if debug:
-    TF_AUTOTUNE = None
+import lidbox
+if lidbox.TF_DEBUG:
     tf.autograph.set_verbosity(10, alsologtostdout=True)
+    TF_AUTOTUNE = None
 else:
     TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
 
+from . import (
+    audio_feat,
+    tf_util,
+    yaml_pprint,
+)
 
 @tf.function
 def feature_scaling(X, min, max, axis=None):
@@ -202,7 +203,7 @@ def append_mfcc_energy_vad_decisions(ds, config):
     spec_kwargs = vad_kwargs.pop("spectrogram")
     melspec_kwargs = vad_kwargs.pop("melspectrogram")
     f = lambda wav, *rest: (
-        tf_print("mfcc vad", rest[0]) and wav,
+        tf_util.tf_print("mfcc vad", rest[0]) and wav,
         *rest,
         audio_feat.framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, **vad_kwargs))
     return ds.map(f, num_parallel_calls=TF_AUTOTUNE)
@@ -319,7 +320,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
     elif "group_by_sequence_length" in config:
         max_batch_size = tf.constant(config["group_by_sequence_length"]["max_batch_size"], tf.int64)
         if verbosity:
-            tf_print("Grouping samples by sequence length into batches of max size", max_batch_size)
+            tf_util.tf_print("Grouping samples by sequence length into batches of max size", max_batch_size)
         get_seq_len = lambda feat, meta: tf.cast(tf.shape(feat)[0], tf.int64)
         group_to_batch = lambda key, group: group.batch(max_batch_size)
         ds = ds.apply(tf.data.experimental.group_by_window(get_seq_len, group_to_batch, window_size=max_batch_size))
@@ -509,7 +510,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
         chunk_length = int(sr * 1e-3 * chunks["length_ms"])
         if original_signal.size < chunk_length:
             if verbosity:
-                tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", original_signal.size, ", path ", tf.constant(wav_path, tf.string), output_stream=sys.stderr, sep='')
+                tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", signal.size, ", path ", tf.constant(wav_path, tf.string), output_stream=sys.stderr, sep='')
             return
         num_chunks_produced = 0
         time_begin = time.perf_counter()
@@ -555,7 +556,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
                     if not np.all(np.isfinite(clean_and_noise)):
                         if verbosity:
-                            tf_print("warning: snr_mixer failed, augmented signal ", new_uttid, " has non-finite values and will be skipped. Utterance source was ", wav_path, ", and chosen noise signals were\n  ", tf.strings.join(noise_paths, separator="\n  "), output_stream=sys.stderr, sep='')
+                            tf_util.tf_print("warning: snr_mixer failed, augmented signal ", new_uttid, " has non-finite values and will be skipped. Utterance source was ", wav_path, ", and chosen noise signals were\n  ", tf.strings.join(noise_paths, separator="\n  "), output_stream=sys.stderr, sep='')
                         return
                     num_chunks_produced = 0
                     time_begin = time.perf_counter()
@@ -570,7 +571,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                 "\n".join("{:>20s} {:>10d} {:>10.3f}".format(*stat) for stat in chunk_stats))
 
     if verbosity:
-        tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunks["length_ms"], chunks["step_ms"]))
+        tf_util.tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunk_config["length_ms"], chunk_config["step_ms"]))
     return chunk_loader
 
 def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
@@ -609,7 +610,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
                 rand_len = get_random_length()
                 chunk = wav.audio[begin:begin+rand_len]
     if verbosity:
-        tf_print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length")
+        tf_util.tf_print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length")
     return random_chunk_loader
 
 # Use batch_size > 1 iff _every_ audio file in paths has the same amount of samples
@@ -642,7 +643,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             def has_min_chunk_length(path, meta, duration):
                 ok = duration >= min_duration
                 if verbosity and not ok:
-                    tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) file ", path, sep='', output_stream=sys.stderr)
+                    tf_util.tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) file ", path, sep='', output_stream=sys.stderr)
                 return ok
             def load_wav_with_meta(path, meta, duration):
                 wav = load_wav(path)
@@ -656,7 +657,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             def has_target_sample_rate(audio, sample_rate, path, meta):
                 ok = target_sr > -1 and sample_rate == target_sr
                 if verbosity and not ok:
-                    tf_print("dropping wav due to wrong sample rate ", sample_rate, ", expected is ", target_sr, " file is ", path, sep='', output_stream=sys.stderr)
+                    tf_util.tf_print("dropping wav due to wrong sample rate ", wav.sample_rate, ", expected is ", target_sr, " file is ", path, sep='', output_stream=sys.stderr)
                 return ok
             paths_t = tf.constant(paths, tf.string)
             meta_t = tf.constant(meta, tf.string)
@@ -707,7 +708,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
         window_len = tf.constant(feat_config["mean_var_norm_numpy"]["window_len"], tf.int32)
         normalize_variance = tf.constant(feat_config["mean_var_norm_numpy"].get("normalize_variance", True), tf.bool)
         if verbosity:
-            tf_print("Using numpy to apply mean_var_norm sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
+            tf_util.tf_print("Using numpy to apply mean_var_norm sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
         def apply_mean_var_norm_numpy(feats, *rest):
             normalized = tf.numpy_function(
                 mean_var_norm_nopad_slide_numpy,
@@ -750,8 +751,7 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
     return tf.data.Dataset.from_generator(
         datagen,
         (encodingtype, tf.string),
-        (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])),
-    )
+        (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])))
 
 def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape, feat_conf):
     utt2feats = kaldiio.load_scp(features_path)
@@ -780,5 +780,4 @@ def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shap
     return tf.data.Dataset.from_generator(
         datagen,
         (tf.float32, tf.string),
-        (tf.TensorShape(expected_shape), tf.TensorShape([2])),
-    )
+        (tf.TensorShape(expected_shape), tf.TensorShape([2])))

@@ -4,6 +4,8 @@ Toolbox containing various speech data analysis tools.
 import os
 import yaml
 
+TF_DEBUG = False
+
 def get_package_root():
     from . import __path__
     return os.path.abspath(os.path.dirname(__path__[0]))
