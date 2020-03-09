@@ -140,30 +140,6 @@ def feat_extraction_args_as_list(feat_config):
     # args.extend([tf_convert(d) for d in kwarg_dicts])
     return args + kwarg_dicts
 
-@tf.function
-def load_wav(path):
-    wav = tf.audio.decode_wav(tf.io.read_file(path))
-    # Merge channels by averaging, for mono this just drops the channel dim.
-    return audio_feat.Wav(tf.math.reduce_mean(wav.audio, axis=1, keepdims=False), wav.sample_rate)
-
-# Copied from
-# https://github.com/wiseman/py-webrtcvad/blob/fe9d953217932c319070a6aeeeb6860aeb1c474e/example.py
-def read_wave(path):
-    with contextlib.closing(wave.open(path, 'rb')) as wf:
-        num_channels = wf.getnchannels()
-        assert num_channels == 1
-        sample_width = wf.getsampwidth()
-        assert sample_width == 2
-        sample_rate = wf.getframerate()
-        assert sample_rate in (8000, 16000, 32000, 48000)
-        pcm_data = wf.readframes(wf.getnframes())
-        return pcm_data, sample_rate
-
-@tf.function
-def write_wav(path, wav):
-    tf.debugging.assert_rank(wav, 2, "write_wav expects signals with shape [N, c] where N is amount of samples and c channels.")
-    return tf.io.write_file(path, tf.audio.encode_wav(wav.audio, wav.sample_rate))
-
 def count_dataset(ds):
     return ds.reduce(tf.constant(0, tf.int64), lambda c, elem: c + 1)
 
@@ -172,31 +148,31 @@ def filter_with_min_shape(ds, min_shape, ds_index=0):
     at_least_min_shape = lambda *t: tf.math.reduce_all(tf.shape(t[ds_index]) >= min_shape)
     return ds.filter(at_least_min_shape)
 
-def append_webrtcvad_decisions(ds, config):
-    assert 0 <= config["aggressiveness"] <= 3, "webrtcvad aggressiveness values must be in range [0, 3]"
-    # TODO assert encoded frame lengths are in {10, 20, 30} ms since webrtcvad supports only those
-    aggressiveness = tf.constant(config["aggressiveness"], tf.int32)
-    vad_frame_length = tf.constant(config["vad_frame_length"], tf.int32)
-    vad_frame_step = tf.constant(config["vad_frame_step"], tf.int32)
-    feat_frame_length = tf.constant(config["feat_frame_length"], tf.int32)
-    feat_frame_step = tf.constant(config["feat_frame_step"], tf.int32)
-    wavs_to_bytes = lambda wav, *rest: (wav, audio_feat.wav_to_bytes(wav), *rest)
-    apply_webrtcvad = lambda wav, wav_bytes, *rest: (
-        wav,
-        *rest,
-        tf.numpy_function(
-            audio_feat.framewise_webrtcvad_decisions,
-            [tf.size(wav.audio),
-             wav_bytes,
-             wav.sample_rate,
-             vad_frame_length,
-             vad_frame_step,
-             feat_frame_length,
-             feat_frame_step,
-             aggressiveness],
-            tf.bool))
-    return (ds.map(wavs_to_bytes, num_parallel_calls=TF_AUTOTUNE)
-              .map(apply_webrtcvad, num_parallel_calls=TF_AUTOTUNE))
+# def append_webrtcvad_decisions(ds, config):
+#     assert 0 <= config["aggressiveness"] <= 3, "webrtcvad aggressiveness values must be in range [0, 3]"
+#     # TODO assert encoded frame lengths are in {10, 20, 30} ms since webrtcvad supports only those
+#     aggressiveness = tf.constant(config["aggressiveness"], tf.int32)
+#     vad_frame_length = tf.constant(config["vad_frame_length"], tf.int32)
+#     vad_frame_step = tf.constant(config["vad_frame_step"], tf.int32)
+#     feat_frame_length = tf.constant(config["feat_frame_length"], tf.int32)
+#     feat_frame_step = tf.constant(config["feat_frame_step"], tf.int32)
+#     wavs_to_pcm_data = lambda wav, *rest: (wav, audio_feat.wav_to_pcm_data(wav)[1], *rest)
+#     apply_webrtcvad = lambda wav, wav_bytes, *rest: (
+#         wav,
+#         *rest,
+#         tf.numpy_function(
+#             audio_feat.framewise_webrtcvad_decisions,
+#             [tf.size(wav.audio),
+#              wav_bytes,
+#              wav.sample_rate,
+#              vad_frame_length,
+#              vad_frame_step,
+#              feat_frame_length,
+#              feat_frame_step,
+#              aggressiveness],
+#             tf.bool))
+#     return (ds.map(wavs_to_pcm_data, num_parallel_calls=TF_AUTOTUNE)
+#               .map(apply_webrtcvad, num_parallel_calls=TF_AUTOTUNE))
 
 def append_mfcc_energy_vad_decisions(ds, config):
     vad_kwargs = dict(config)
@@ -399,34 +375,15 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
 def without_metadata(dataset):
     return dataset.map(lambda feats, inputs, *meta: (feats, inputs))
 
-# Copied from
-# https://github.com/microsoft/MS-SNSD/blob/e84aba38cac499a109c0d237a00dc600dcf9b7e7/audiolib.py
-def snr_mixer(clean, noise, snr):
-    # Normalizing to -25 dB FS
-    rmsclean = np.sqrt((clean**2).mean())
-    scalarclean = 10 ** (-25 / 20) / rmsclean
-    clean = clean * scalarclean
-    rmsclean = np.sqrt((clean**2).mean())
-    rmsnoise = np.sqrt((noise**2).mean())
-    scalarnoise = 10 ** (-25 / 20) / rmsnoise
-    noise = noise * scalarnoise
-    rmsnoise = np.sqrt((noise**2).mean())
-    # Set the noise level for a given SNR
-    noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
-    noisenewlevel = noise * noisescalar
-    noisyspeech = clean + noisenewlevel
-    return clean, noisenewlevel, noisyspeech
-
 def get_chunk_loader(wav_config, verbosity, datagroup_key):
-    chunks = wav_config["chunks"]
-    target_sr = wav_config.get("filter_sample_rate")
+    chunk_config = wav_config["chunks"]
+    target_sr = wav_config["filter_sample_rate"]
     # Deep copy all augmentation config dicts because we will be mutating them soon
     augment_config = json.loads(json.dumps(wav_config.get("augmentation", [])))
     if datagroup_key != "train":
         if verbosity:
             print("skipping augmentation due to non-training datagroup: '{}'".format(datagroup_key), file=sys.stderr)
         augment_config = []
-    vad_config = wav_config.get("webrtcvad")
     for conf in augment_config:
         # prepare noise augmentation
         if conf["type"] == "additive_noise":
@@ -458,121 +415,95 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                     label2path = tmp
             for noise_type, noise_paths in label2path.items():
                 conf["noise_source"][noise_type] = [path for _, path in noise_paths]
-
-    def drop_silence(signal, sr):
-        vad_frame_ms = vad_config["frame_ms"]
-        assert vad_frame_ms in (10, 20, 30)
-        assert sr == target_sr, "unexpected sample rate {}, cannot do vad_config because wav write would distort pitch".format(sr)
-        with contextlib.closing(io.BytesIO()) as buf:
-            soundfile.write(buf, signal, sr, format="WAV")
-            buf.seek(0)
-            pcm_data, sr = read_wave(buf)
-        assert sr == target_sr, "vad_config failed during WAV read"
-        step = int(sr * 1e-3 * vad_frame_ms * 2)
-        if signal.size < step//2:
-            return np.zeros(0, dtype=signal.dtype)
-        frames = librosa.util.frame(signal, step//2, step//2, axis=0)
-        vad_decisions = np.ones(frames.shape[0], dtype=np.bool)
-        min_non_speech_frames = vad_config["min_non_speech_length_ms"] // vad_frame_ms
-        vad = webrtcvad.Vad(vad_config["aggressiveness"])
-        non_speech_begin = -1
-        for f, i in enumerate(range(0, len(pcm_data) - len(pcm_data) % step, step)):
-            if not vad.is_speech(pcm_data[i:i+step], sr):
-                vad_decisions[f] = False
-                if non_speech_begin < 0:
-                    non_speech_begin = f
-            else:
-                if non_speech_begin >= 0 and f - non_speech_begin < min_non_speech_frames:
-                    # too short non-speech segment, revert all non-speech decisions up to f
-                    vad_decisions[np.arange(non_speech_begin, f)] = True
-                non_speech_begin = -1
-        voiced_frames = frames[vad_decisions]
-        if voiced_frames.size > 0:
-            voiced_signal = np.concatenate(voiced_frames, axis=0)
-        else:
-            voiced_signal = np.zeros(0, dtype=signal.dtype)
-        if verbosity > 3:
-            print("dropping {} frames due to vad, signal shape {} voiced_signal shape {}".format(int((~vad_decisions).sum()), signal.shape, voiced_signal.shape))
-        return voiced_signal
+    chunk_len_seconds = 1e-3 * chunk_config["length_ms"]
+    chunk_step_seconds = 1e-3 * chunk_config["step_ms"]
     def chunker(signal, sr, meta):
-        chunk_len = int(sr * 1e-3 * chunks["length_ms"])
-        chunk_step = int(sr * 1e-3 * chunks["step_ms"])
-        if signal.size >= chunk_len:
-            for i, chunk in enumerate(librosa.util.frame(signal, chunk_len, chunk_step, axis=0)):
-                chunk_uttid = tf.strings.join((meta[0], "-{:06d}".format(i)))
-                yield (chunk, sr), chunk_uttid, meta[1]
-    def chunk_loader(original_signal, sr, wav_path, meta):
-        chunk_stats = []
-        utt, label, dataset = meta[:3]
-        # original_signal, sr = librosa.core.load(wav_path, sr=target_sr, mono=True)
-        if vad_config:
-            original_signal = drop_silence(original_signal, sr)
-        chunk_length = int(sr * 1e-3 * chunks["length_ms"])
-        if original_signal.size < chunk_length:
+        chunk_len = int(sr * chunk_len_seconds)
+        if signal.size < chunk_len:
+            return
+        chunk_step = int(sr * chunk_step_seconds)
+        chunks = librosa.util.frame(signal, chunk_len, chunk_step, axis=0)
+        uttid, label = meta[:2]
+        for i, chunk in enumerate(chunks, start=1):
+            chunk_id = "{:s}-{:06d}".format(uttid, i)
+            yield (chunk, sr), chunk_id, label
+    def chunk_loader(signal, sr, wav_path, meta):
+        chunk_length = int(sr * chunk_len_seconds)
+        if signal.size < chunk_length:
             if verbosity:
                 tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", signal.size, ", path ", tf.constant(wav_path, tf.string), output_stream=sys.stderr, sep='')
             return
-        num_chunks_produced = 0
-        time_begin = time.perf_counter()
-        for c in chunker(original_signal, target_sr, meta):
-            num_chunks_produced += 1
-            yield c
-        time_end = time.perf_counter()
-        chunk_stats.append(("original-signal", num_chunks_produced, time_end - time_begin))
+        uttid = meta[0].decode("utf-8")
+        yield from chunker(signal, target_sr, (uttid, *meta[1:]))
+        rng = np.random.default_rng()
         for conf in augment_config:
-            if "datasets_include" in conf and dataset not in conf["datasets_include"]:
-                continue
-            if "datasets_exclude" in conf and dataset in conf["datasets_exclude"]:
-                continue
-            #TODO preload whole augmentation dataset into memory
             if conf["type"] == "random_resampling":
                 # apply naive speed modification by resampling
-                rate = np.random.uniform(conf["range"][0], conf["range"][1])
+                rate = rng.uniform(conf["range"][0], conf["range"][1])
                 with contextlib.closing(io.BytesIO()) as buf:
-                    soundfile.write(buf, original_signal, int(rate * target_sr), format="WAV")
+                    soundfile.write(buf, signal, int(rate * target_sr), format="WAV")
                     buf.seek(0)
-                    signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
-                new_uttid = tf.strings.join((utt, "-speed{:.3f}".format(rate)))
-                num_chunks_produced = 0
-                time_begin = time.perf_counter()
-                for c in chunker(signal, target_sr, (new_uttid, *meta[1:])):
-                    num_chunks_produced += 1
-                    yield c
-                time_end = time.perf_counter()
-                chunk_stats.append(("resampling", num_chunks_produced, time_end - time_begin))
+                    resampled_signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
+                new_uttid = "{:s}-speed{:.3f}".format(uttid, rate)
+                new_meta = (new_uttid, *meta[1:])
+                yield from chunker(resampled_signal, target_sr, new_meta)
             elif conf["type"] == "additive_noise":
                 for noise_type, db_min, db_max in conf["snr_def"]:
-                    noise_signal = np.zeros(0, dtype=original_signal.dtype)
+                    noise_signal = np.zeros(0, dtype=signal.dtype)
                     noise_paths = []
-                    while noise_signal.size < original_signal.size:
-                        rand_noise_path = random.choice(conf["noise_source"][noise_type])
+                    while noise_signal.size < signal.size:
+                        rand_noise_path = rng.choice(conf["noise_source"][noise_type])
                         noise_paths.append(rand_noise_path)
                         sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
                         noise_signal = np.concatenate((noise_signal, sig))
-                    noise_begin = random.randint(0, noise_signal.size - original_signal.size)
-                    noise_signal = noise_signal[noise_begin:noise_begin+original_signal.size]
-                    snr_db = random.randint(db_min, db_max)
-                    clean, noise, clean_and_noise = snr_mixer(original_signal, noise_signal, snr_db)
-                    new_uttid = tf.strings.join((utt, "-{:s}_snr{:d}".format(noise_type, snr_db)))
+                    noise_begin = rng.integers(0, noise_signal.size - signal.size)
+                    noise_signal = noise_signal[noise_begin:noise_begin+signal.size]
+                    snr_db = rng.integers(db_min, db_max, endpoint=True)
+                    clean_and_noise = audio_feat.numpy_snr_mixer(signal, noise_signal, snr_db)[2]
+                    new_uttid = "{:s}-{:s}_snr{:d}".format(uttid, noise_type, snr_db)
                     if not np.all(np.isfinite(clean_and_noise)):
                         if verbosity:
                             tf_util.tf_print("warning: snr_mixer failed, augmented signal ", new_uttid, " has non-finite values and will be skipped. Utterance source was ", wav_path, ", and chosen noise signals were\n  ", tf.strings.join(noise_paths, separator="\n  "), output_stream=sys.stderr, sep='')
                         return
-                    num_chunks_produced = 0
-                    time_begin = time.perf_counter()
-                    for c in chunker(clean_and_noise, target_sr, (new_uttid, *meta[1:])):
-                        num_chunks_produced += 1
-                        yield c
-                    time_end = time.perf_counter()
-                    chunk_stats.append(("snr-mixer", num_chunks_produced, time_end - time_begin))
-        if verbosity > 3:
-            tf_print(
-                "chunk stats:\n{:>20s} {:>10s} {:>10s}\n".format("type", "chunks", "dur (s)"),
-                "\n".join("{:>20s} {:>10d} {:>10.3f}".format(*stat) for stat in chunk_stats))
-
+                    new_meta = (new_uttid, *meta[1:])
+                    yield from chunker(clean_and_noise, target_sr, new_meta)
     if verbosity:
         tf_util.tf_print("Using wav chunk loader, generating chunks of length {} with step size {} (milliseconds)".format(chunk_config["length_ms"], chunk_config["step_ms"]))
     return chunk_loader
+
+def filter_wavs_with_webrtcvad(dataset, config, min_duration_sec, verbosity):
+    assert config["frame_ms"] in (10, 20, 30), "webrtcvad supports only vad frame lengths of 10, 20, or 30 ms"
+    assert 0 <= config["aggressiveness"] <= 3, "webrtcvad aggressiveness values must be in range [0, 3]"
+    aggressiveness = config["aggressiveness"]
+    frame_sec = tf.constant(1e-3 * config["frame_ms"], tf.float32)
+    min_non_speech_frames = config["min_non_speech_length_ms"] // config["frame_ms"]
+    def get_vad_decisions(wav, vad_frame_length):
+        _, pcm_data = audio_feat.wav_to_pcm_data(wav.audio, wav.sample_rate)
+        args = (wav.audio,
+                wav.sample_rate,
+                pcm_data,
+                vad_frame_length,
+                aggressiveness,
+                min_non_speech_frames)
+        return tf.numpy_function(audio_feat.numpy_fn_get_webrtcvad_decisions, args, tf.bool)
+    def drop_silent_frames(wav, *rest):
+        vad_frame_length = tf.cast(tf.cast(wav.sample_rate, tf.float32) * frame_sec, tf.int32)
+        frames = tf.signal.frame(wav.audio, vad_frame_length, vad_frame_length, axis=0)
+        vad_decisions = get_vad_decisions(wav, vad_frame_length)
+        vad_decisions = tf.reshape(vad_decisions, [tf.shape(frames)[0]])
+        voiced_signal = tf.reshape(frames[vad_decisions], [-1])
+        voiced_wav = audio_feat.Wav(voiced_signal, wav.sample_rate)
+        return (voiced_wav, *rest)
+    def has_min_chunk_length(wav, path, meta):
+        min_wav_length = tf.cast(tf.cast(wav.sample_rate, tf.float32) * min_duration_sec, tf.int32)
+        wav_length = tf.size(wav.audio)
+        ok = wav_length >= min_wav_length
+        if verbosity > 1 and not ok:
+            tf_util.tf_print("wav became too short (", wav_length, " < min chunk ", min_wav_length, ") after VAD, dropping utterance ", meta[0], sep='', output_stream=sys.stderr)
+        return ok
+    return (dataset
+            .map(drop_silent_frames, num_parallel_calls=TF_AUTOTUNE)
+            .filter(has_min_chunk_length))
 
 def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     raise NotImplementedError("todo")
@@ -596,7 +527,7 @@ def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
     assert min_chunk_length > 0, "invalid min chunk length"
     def random_chunk_loader():
         for p, *m in zip(paths, meta):
-            wav = load_wav(tf.constant(p, tf.string))
+            wav = audio_feat.read_wav(tf.constant(p, tf.string))
             if "filter_sample_rate" in wav_config and wav.sample_rate != wav_config["filter_sample_rate"]:
                 if verbosity:
                     print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"], file=sys.stderr)
@@ -633,7 +564,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             if verbosity:
                 print("Loading samples from wavs as fixed sized chunks, expecting up to {} consecutive elements from each file".format(expected_samples_per_file))
             chunk_loader_fn = get_chunk_loader(wav_config, verbosity, datagroup_key)
-            def ds_generator(*args):
+            def chunk_dataset_generator(*args):
                 return tf.data.Dataset.from_generator(
                     chunk_loader_fn,
                     dataset_types,
@@ -645,17 +576,16 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                 if verbosity and not ok:
                     tf_util.tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) file ", path, sep='', output_stream=sys.stderr)
                 return ok
-            def load_wav_with_meta(path, meta, duration):
-                wav = load_wav(path)
-                return wav.audio, wav.sample_rate, path, meta
+            def read_wav_with_meta(path, meta, duration):
+                return audio_feat.read_wav(path), path, meta
             target_sr = wav_config.get("filter_sample_rate", -1)
             if verbosity:
                 if target_sr < 0:
                     print("filter_sample_rate not defined in wav_config, wav files will not be filtered")
                 else:
                     print("filter_sample_rate set to {}, wav files with mismatching sample rates will be ignored and no features will be extracted from those files".format(target_sr))
-            def has_target_sample_rate(audio, sample_rate, path, meta):
-                ok = target_sr > -1 and sample_rate == target_sr
+            def has_target_sample_rate(wav, path, meta):
+                ok = target_sr > -1 and wav.sample_rate == target_sr
                 if verbosity and not ok:
                     tf_util.tf_print("dropping wav due to wrong sample rate ", wav.sample_rate, ", expected is ", target_sr, " file is ", path, sep='', output_stream=sys.stderr)
                 return ok
@@ -665,10 +595,21 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             wavs = (tf.data.Dataset
                     .from_tensor_slices((paths_t, meta_t, duration_t))
                     .filter(has_min_chunk_length)
-                    .map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
-                    .filter(has_target_sample_rate)
+                    .map(read_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
+                    .filter(has_target_sample_rate))
+            webrtcvad_config = wav_config.get("webrtcvad")
+            if webrtcvad_config:
+                if verbosity:
+                    print("WebRTC VAD config defined in wav_config, all valid signals will be filtered to remove silent segments of at least {} ms".format(webrtcvad_config["min_non_speech_length_ms"]))
+                wavs = filter_wavs_with_webrtcvad(wavs, webrtcvad_config, min_duration, verbosity)
+            def unpack_wav_tuples(wav, path, meta):
+                return wav.audio, wav.sample_rate, path, meta
+            if verbosity:
+                print("begin generating chunks to build dataset")
+            wavs = (wavs
+                    .map(unpack_wav_tuples)
                     .interleave(
-                        ds_generator,
+                        chunk_dataset_generator,
                         block_length=expected_samples_per_file,
                         num_parallel_calls=TF_AUTOTUNE))
         else:
@@ -680,8 +621,8 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
         wav_paths = tf.data.Dataset.from_tensor_slices((
             tf.constant(paths, dtype=tf.string),
             tf.constant(meta, dtype=tf.string)))
-        load_wav_with_meta = lambda path, *meta: (load_wav(path), *meta)
-        wavs = wav_paths.map(load_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
+        read_wav_with_meta = lambda path, *meta: (audio_feat.read_wav(path), *meta)
+        wavs = wav_paths.map(read_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
     if "batch_wavs_by_length" in feat_config:
         window_size = feat_config["batch_wavs_by_length"]["max_batch_size"]
         if verbosity:

@@ -3,6 +3,7 @@ Audio feature extraction.
 Some functions are simply one-to-one TensorFlow math conversions from https://github.com/librosa.
 """
 import collections
+import sys
 
 import tensorflow as tf
 import numpy as np
@@ -15,6 +16,7 @@ if lidbox.TF_DEBUG:
 from .tf_util import tf_print
 
 Wav = collections.namedtuple("Wav", ["audio", "sample_rate"])
+
 
 @tf.function
 def fft_frequencies(sample_rate, n_fft):
@@ -64,6 +66,13 @@ def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     return tf.matmul(S, mel_weights)
 
 @tf.function
+def root_mean_square(x, axis=-1):
+    return tf.math.sqrt(
+            tf.math.reduce_mean(
+                tf.math.square(tf.math.abs(x)),
+                axis=axis))
+
+@tf.function
 def framewise_rms_energy_vad_decisions(signals, frame_length_ms=25, frame_step_ms=10, strength=0.5, min_rms_threshold=1e-3):
     """
     For a batch of 1D-signals, compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal (separately for each signal), such that True means the frame is voiced and False unvoiced.
@@ -74,7 +83,7 @@ def framewise_rms_energy_vad_decisions(signals, frame_length_ms=25, frame_step_m
     frame_length = ms_to_frames(sample_rate, frame_length_ms)
     frame_step = ms_to_frames(sample_rate, frame_step_ms)
     frames = tf.signal.frame(signals, frame_length, frame_step, axis=1)
-    rms = tf.math.sqrt(tf.math.reduce_mean(tf.math.square(tf.math.abs(frames)), axis=2))
+    rms = root_mean_square(frames, axis=2)
     mean_rms = tf.math.reduce_mean(rms, axis=1, keepdims=True)
     threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
     return rms > threshold
@@ -97,14 +106,28 @@ def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy
     return vad_decisions
 
 @tf.function
-def wav_to_bytes(wav):
-    tf.debugging.assert_rank(wav.audio, 1, message="Expected a single 1D signal (i.e. one mono audio tensor without explicit channels)")
-    wav_bytes = tf.audio.encode_wav(tf.expand_dims(wav.audio, -1), wav.sample_rate)
+def read_wav(path):
+    wav = tf.audio.decode_wav(tf.io.read_file(path))
+    # Merge channels by averaging, for mono this just drops the channel dim.
+    signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
+    return Wav(signal, wav.sample_rate)
+
+@tf.function
+def write_wav(path, wav):
+    tf.debugging.assert_rank(wav, 2, "write_wav expects signals with shape [N, c] where N is amount of samples and c channels.")
+    return tf.io.write_file(path, tf.audio.encode_wav(wav.audio, wav.sample_rate))
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
+def wav_to_pcm_data(signal, sample_rate):
+    tf.debugging.assert_rank(signal, 1, message="Expected a single 1D signal (i.e. one mono audio tensor without explicit channels)")
+    pcm_data = tf.audio.encode_wav(tf.expand_dims(signal, -1), sample_rate)
     # expecting one wav pcm header and sample width of 2
-    tf.debugging.assert_equal(tf.strings.length(wav_bytes) - 44, 2 * tf.size(wav.audio), message="wav encoding failed")
-    # drop wav header
-    wav_bytes = tf.strings.substr(wav_bytes, 44, -1)
-    return wav_bytes
+    tf.debugging.assert_equal(tf.strings.length(pcm_data) - 44, 2 * tf.size(signal), message="wav encoding failed")
+    header = tf.strings.substr(pcm_data, 0, 44)
+    content = tf.strings.substr(pcm_data, 44, -1)
+    return header, content
 
 #TODO cleanup and/or webrtcvad in tf graph (might be nontrivial)
 def framewise_webrtcvad_decisions(wav_length, wav_bytes, sample_rate, vad_frame_length, vad_frame_step, feat_frame_length, feat_frame_step, aggressiveness):
@@ -121,3 +144,60 @@ def framewise_webrtcvad_decisions(wav_length, wav_bytes, sample_rate, vad_frame_
             vad_frame = feat_frame_bytes[j:j + 2 * vad_frame_length]
             vad_decisions[i] |= (len(vad_frame) < 2 * vad_frame_length or vad.is_speech(vad_frame, sample_rate))
     return vad_decisions
+
+# Should be wrapped into a tf.numpy_function due to external python object webrtcvad.Vad
+def numpy_fn_get_webrtcvad_decisions(signal, sample_rate, pcm_data, vad_step, aggressiveness, min_non_speech_frames):
+    assert 2 * signal.size == len(pcm_data), "signal length was {}, but pcm_data length was {}, when {} was expected (sample width 2)".format(signal.size, len(pcm_data), 2 * signal.size)
+    vad_decisions = np.ones(signal.size // vad_step, dtype=np.bool)
+    vad_step_bytes = 2 * vad_step
+    vad = webrtcvad.Vad(aggressiveness)
+    non_speech_begin = -1
+    for f, i in enumerate(range(0, len(pcm_data) - len(pcm_data) % vad_step_bytes, vad_step_bytes)):
+        if not vad.is_speech(pcm_data[i:i+vad_step_bytes], sample_rate):
+            vad_decisions[f] = False
+            if non_speech_begin < 0:
+                non_speech_begin = f
+        else:
+            if non_speech_begin >= 0 and f - non_speech_begin < min_non_speech_frames:
+                # too short non-speech segment, revert all non-speech decisions up to f
+                vad_decisions[np.arange(non_speech_begin, f)] = True
+            non_speech_begin = -1
+    return vad_decisions
+
+def numpy_snr_mixer(clean, noise, snr):
+    """
+    Mix signal 'noise' into signal 'clean' at given SNR.
+    From
+    https://github.com/microsoft/MS-SNSD/blob/e84aba38cac499a109c0d237a00dc600dcf9b7e7/audiolib.py
+    """
+    # Normalizing to -25 dB FS
+    rmsclean = (clean**2).mean()**0.5
+    scalarclean = 10 ** (-25 / 20) / rmsclean
+    clean = clean * scalarclean
+    rmsclean = (clean**2).mean()**0.5
+    rmsnoise = (noise**2).mean()**0.5
+    scalarnoise = 10 ** (-25 / 20) /rmsnoise
+    noise = noise * scalarnoise
+    rmsnoise = (noise**2).mean()**0.5
+    # Set the noise level for a given SNR
+    noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
+    noisenewlevel = noise * noisescalar
+    noisyspeech = clean + noisenewlevel
+    return clean, noisenewlevel, noisyspeech
+
+@tf.function
+def snr_mixer(clean, noise, snr):
+    tf.debugging.assert_equal(tf.size(clean), tf.size(noise), message="mismatching length for signals clean and noise given to snr mixer")
+    # Normalizing to -25 dB FS
+    scalarclean = tf.math.pow(10.0, -25.0/20.0) / root_mean_square(clean)
+    clean_norm = scalarclean * clean
+    rmsclean = root_mean_square(clean_norm)
+    scalarnoise = tf.math.pow(10.0, -25.0/20.0) / root_mean_square(noise)
+    noise_norm = scalarnoise * noise
+    rmsnoise = root_mean_square(noise_norm)
+    # Set the noise level for a given SNR
+    level = tf.math.pow(10.0, snr / 20.0)
+    noisescalar = tf.math.sqrt(rmsclean / level / rmsnoise)
+    noisenewlevel = noisescalar * noise_norm
+    noisyspeech = clean_norm + noisenewlevel
+    return clean_norm, noisenewlevel, noisyspeech
