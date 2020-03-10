@@ -107,7 +107,11 @@ def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy
 
 @tf.function
 def read_wav(path):
-    wav = tf.audio.decode_wav(tf.io.read_file(path))
+    try:
+        wav = tf.audio.decode_wav(tf.io.read_file(path))
+    except tf.errors.InvalidArgumentError as e:
+        tf_print("warning: failed to read wav from path", path, "due to InvalidArgumentError, which was:", tf.constant(str(e)), output_stream=sys.stderr)
+        return Wav(tf.zeros([0], tf.float32), 0)
     # Merge channels by averaging, for mono this just drops the channel dim.
     signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
     return Wav(signal, wav.sample_rate)

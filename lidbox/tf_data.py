@@ -584,6 +584,11 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                     print("filter_sample_rate not defined in wav_config, wav files will not be filtered")
                 else:
                     print("filter_sample_rate set to {}, wav files with mismatching sample rates will be ignored and no features will be extracted from those files".format(target_sr))
+            def is_not_empty(wav, path, meta):
+                ok = tf.size(wav.audio) > 0
+                if verbosity and not ok:
+                    tf_util.tf_print("dropping utterance ", meta[0], ", reason: empty signal", sep='', output_stream=sys.stderr)
+                return ok
             def has_target_sample_rate(wav, path, meta):
                 ok = target_sr > -1 and wav.sample_rate == target_sr
                 if verbosity and not ok:
@@ -596,6 +601,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                     .from_tensor_slices((paths_t, meta_t, duration_t))
                     .filter(has_min_chunk_length)
                     .map(read_wav_with_meta, num_parallel_calls=TF_AUTOTUNE)
+                    .filter(is_not_empty)
                     .filter(has_target_sample_rate))
             webrtcvad_config = wav_config.get("webrtcvad")
             if webrtcvad_config:
