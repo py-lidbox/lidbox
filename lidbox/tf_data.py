@@ -431,7 +431,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
         chunk_length = int(sr * chunk_len_seconds)
         if signal.size < chunk_length:
             if verbosity:
-                tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", signal.size, ", path ", tf.constant(wav_path, tf.string), output_stream=sys.stderr, sep='')
+                tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", signal.size, ", utt ", meta[0], output_stream=sys.stderr, sep='')
             return
         uttid = meta[0].decode("utf-8")
         yield from chunker(signal, target_sr, (uttid, *meta[1:]))
@@ -574,7 +574,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             def has_min_chunk_length(path, meta, duration):
                 ok = duration >= min_duration
                 if verbosity and not ok:
-                    tf_util.tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) file ", path, sep='', output_stream=sys.stderr)
+                    tf_util.tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) utterance ", meta[0], sep='', output_stream=sys.stderr)
                 return ok
             def read_wav_with_meta(path, meta, duration):
                 return audio_feat.read_wav(path), path, meta
