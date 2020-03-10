@@ -439,12 +439,12 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
         for conf in augment_config:
             if conf["type"] == "random_resampling":
                 # apply naive speed modification by resampling
-                rate = rng.uniform(conf["range"][0], conf["range"][1])
+                ratio = rng.uniform(conf["range"][0], conf["range"][1])
                 with contextlib.closing(io.BytesIO()) as buf:
-                    soundfile.write(buf, signal, int(rate * target_sr), format="WAV")
+                    soundfile.write(buf, signal, int(ratio * target_sr), format="WAV")
                     buf.seek(0)
                     resampled_signal, _ = librosa.core.load(buf, sr=target_sr, mono=True)
-                new_uttid = "{:s}-speed{:.3f}".format(uttid, rate)
+                new_uttid = "{:s}-speed{:.3f}".format(uttid, ratio)
                 new_meta = (new_uttid, *meta[1:])
                 yield from chunker(resampled_signal, target_sr, new_meta)
             elif conf["type"] == "additive_noise":
@@ -456,7 +456,7 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                         noise_paths.append(rand_noise_path)
                         sig, _ = librosa.core.load(rand_noise_path, sr=target_sr, mono=True)
                         noise_signal = np.concatenate((noise_signal, sig))
-                    noise_begin = rng.integers(0, noise_signal.size - signal.size)
+                    noise_begin = rng.integers(0, noise_signal.size - signal.size, endpoint=True)
                     noise_signal = noise_signal[noise_begin:noise_begin+signal.size]
                     snr_db = rng.integers(db_min, db_max, endpoint=True)
                     clean_and_noise = audio_feat.numpy_snr_mixer(signal, noise_signal, snr_db)[2]
