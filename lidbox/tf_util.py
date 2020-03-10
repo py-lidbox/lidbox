@@ -230,9 +230,16 @@ def extract_features_with_cache(config, experiment_config, datagroup_key, cache_
         if verbosity:
             print("Writing features into new cache: '{}'".format(features_cache_dir)
                     + '' if num_shards == 1 else " using {} shards".format(num_shards))
-        os.makedirs(features_cache_dir, exist_ok=True)
+        os.makedirs(features_cache_dir)
         with open(features_cache_dir + ".md5sum-input", "w") as f:
             print(conf_json, file=f, end='')
+    if config["features_cache"].get("include_signals", True):
+        if verbosity:
+            print("Original signals will be included in the features cache")
+    else:
+        if verbosity:
+            print("Original signals will be dropped before saving features into cache")
+        extractor_ds = extractor_ds.map(lambda features, meta: (features, meta[:-1]))
     if num_shards == 1:
         return extractor_ds.cache(filename=os.path.join(features_cache_dir, "all_features"))
     shards = [extractor_ds.shard(num_shards, i) for i in range(num_shards)]
