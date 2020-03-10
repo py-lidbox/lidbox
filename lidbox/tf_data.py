@@ -499,7 +499,7 @@ def filter_wavs_with_webrtcvad(dataset, config, min_duration_sec, verbosity):
         wav_length = tf.size(wav.audio)
         ok = wav_length >= min_wav_length
         if verbosity > 1 and not ok:
-            tf_util.tf_print("wav became too short (", wav_length, " < min chunk ", min_wav_length, ") after VAD, dropping utterance ", meta[0], sep='', output_stream=sys.stderr)
+            tf_util.tf_print("dropping utterance ", meta[0], ", reason: after VAD, signal samples ", wav_length, " < ", min_wav_length, " min chunk samples", sep='', output_stream=sys.stderr)
         return ok
     return (dataset
             .map(drop_silent_frames, num_parallel_calls=TF_AUTOTUNE)
@@ -574,7 +574,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             def has_min_chunk_length(path, meta, duration):
                 ok = duration >= min_duration
                 if verbosity and not ok:
-                    tf_util.tf_print("dropping too short (", duration, " sec < chunk len ", min_duration, " sec) utterance ", meta[0], sep='', output_stream=sys.stderr)
+                    tf_util.tf_print("dropping utterance ", meta[0], ", reason: signal length ", duration, " < ", min_duration, " min chunk length (seconds)", sep='', output_stream=sys.stderr)
                 return ok
             def read_wav_with_meta(path, meta, duration):
                 return audio_feat.read_wav(path), path, meta
@@ -592,7 +592,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
             def has_target_sample_rate(wav, path, meta):
                 ok = target_sr > -1 and wav.sample_rate == target_sr
                 if verbosity and not ok:
-                    tf_util.tf_print("dropping wav due to wrong sample rate ", wav.sample_rate, ", expected is ", target_sr, " file is ", path, sep='', output_stream=sys.stderr)
+                    tf_util.tf_print("dropping utterance ", meta[0], ", reason: sample rate ", wav.sample_rate, " != ", target_sr, " target sample rate", sep='', output_stream=sys.stderr)
                 return ok
             paths_t = tf.constant(paths, tf.string)
             meta_t = tf.constant(meta, tf.string)
