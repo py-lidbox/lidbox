@@ -18,12 +18,11 @@ import tensorflow as tf
 import numpy as np
 
 
-def loader(input_shape, num_outputs, core="resnet50_v2", output_activation="softmax"):
-    # Normalize and regularize by adding Gaussian noise to input (during training only)
+def loader(input_shape, num_outputs, core="resnet50_v2", output_activation="log_softmax", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
-    x = GaussianNoise(stddev=0.01, name="input_noise")(x)
-    x = Dropout(0.2, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
+    if channel_dropout_rate > 0:
+        x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
     x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
     # Connect untrained Resnet50 or MobileNet architecture without inputs and outputs
     if core == "mobilenet_v2":
