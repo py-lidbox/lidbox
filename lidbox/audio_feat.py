@@ -5,8 +5,9 @@ Some functions are simply one-to-one TensorFlow math conversions from https://gi
 import collections
 import sys
 
-import tensorflow as tf
+import librosa.core
 import numpy as np
+import tensorflow as tf
 import webrtcvad
 
 import lidbox
@@ -107,14 +108,18 @@ def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy
 
 @tf.function
 def read_wav(path):
-    try:
-        wav = tf.audio.decode_wav(tf.io.read_file(path))
-    except tf.errors.InvalidArgumentError as e:
-        tf_print("warning: failed to read wav from path", path, "due to InvalidArgumentError, which was:", tf.constant(str(e)), output_stream=sys.stderr)
-        return Wav(tf.zeros([0], tf.float32), 0)
+    wav = tf.audio.decode_wav(tf.io.read_file(path))
     # Merge channels by averaging, for mono this just drops the channel dim.
     signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
     return Wav(signal, wav.sample_rate)
+
+def py_read_wav(path):
+    try:
+        signal, sr = librosa.core.load(path, sr=None, mono=True)
+    except Exception as err:
+        tf_print("error: failed to read wav file from", tf.constant(path), "due to exception:", tf.constant(str(err)), output_stream=sys.stderr)
+        signal, sr = tf.zeros([0], tf.float32), 0
+    return signal, tf.cast(sr, tf.int32)
 
 @tf.function
 def write_wav(path, wav):
