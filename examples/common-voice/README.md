@@ -64,5 +64,6 @@ After downloading, the directory should contain the following files:
 
 ## Notes
 
-* If you are using a small GPU (less than 4G memory), it might help to prefix the commands that do training with `env TF_FORCE_GPU_ALLOW_GROWTH=true`.
+* Keep an eye on the memory (RAM, not GPU) usage, I have been running out of memory from time to time during the training phase.
+* If you are using a small GPU (less than 4G memory), it might help to prefix the commands that do training with `env TF_FORCE_GPU_ALLOW_GROWTH=true`, in case TF throws errors about being unable to initialize cuDNN.
 * When extracting features, `lidbox` currently includes original waveforms of each utterance into the features cache in order to make the audio available in TensorBoard. This might create very large caches for large datasets. E.g. I extracted features for approx. 8000 hours of data and it created a 3.2 TiB cache.
