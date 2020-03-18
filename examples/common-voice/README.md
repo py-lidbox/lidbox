@@ -8,6 +8,8 @@ This example shows how to create a language identification dataset from four [Mo
 
 These datasets were chosen for this example because they do not contain too much data for a simple example (2-10 hours each), yet there should be enough data for applying deep learning.
 
+If you want to experiment with other Common Voice datasets, update variable `datasets` in `scripts/prepare.bash` and key `labels` in `config.xvector.yaml`.
+
 ## Requirements
 
 * [`bc`](https://www.gnu.org/software/bc)
