@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 1. Unpacks the downloaded tar.gz files.
-# 2. Converts at most 50 hours of randomly chosen Common Voice mp3-clips to 16 kHz mono wav-files, normalized to -3 dBFS.
-# 3. Creates a training-test set split such that no speaker is in both sets, with approximately 1 hour of test data.
+# 2. Converts at most 5 hours of randomly chosen Common Voice mp3-clips to 16 kHz mono wav-files, normalized to -3 dBFS.
+# 3. Creates a training-test set split such that no speaker is in both sets, with approximately 30 minutes of test data.
+
+# Expanding empty variables is an error
 set -u
 
 function print_progress {
@@ -55,6 +57,7 @@ for language in ${datasets[*]}; do
 done
 echo
 
+# Exit at first error after this
 set -e
 
 for language in ${datasets[*]}; do

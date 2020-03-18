@@ -1,10 +1,15 @@
 # lidbox
 
-Command line toolbox for managing spoken language identification (LID) experiments.
+* Command line toolbox for managing spoken language identification (LID) experiments.
+* Parallel feature extraction using TensorFlow `tf.data.Dataset`.
+* Model training with `tf.keras`, some model examples are available [here][./lidbox/models].
+
+**Note** that `lidbox` is still quite rough around the edges so you might need to do some debugging if stuff does not work.
+Or feel free to just copy paste useful parts into your own program if you want.
 
 ## Quickstart
 
-Install TensorFlow 2.
+Install TensorFlow 2.1 (or newer).
 
 Clone the repo and install `lidbox` as a Python package in setuptools develop mode (`pip install --editable`).
 This makes it easier to experiment with the code.

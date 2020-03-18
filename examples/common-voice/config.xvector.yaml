@@ -22,15 +22,15 @@ features:
   wav_config:
     # Apply voice activity detection with WebRTC using maximum aggressiveness level
     webrtcvad:
-      aggressiveness: 3
+      aggressiveness: 2
       frame_ms: 10
-      # Do not drop non-speech segments that are shorter than 200 ms
-      min_non_speech_length_ms: 200
+      # Do not drop non-speech segments that are shorter than 500 ms
+      min_non_speech_length_ms: 500
     # Divide all wav-files into non-overlapping chunks of 980 ms
     chunks:
       length_ms: 980
       step_ms: 980
-    target_sample_rate: 16000
+    filter_sample_rate: 16000
     # Create new audio samples by resampling randomly between a given range [a, b)
     # augmentation:
       # - type: random_resampling
@@ -53,7 +53,7 @@ features:
     window_len: 300
     normalize_variance: false
 
-# Directory to use as a persistent cache for e.g. trained model checkpoints and TensorBoard data
+# Directory to use as a persistent cache for e.g. extracted features, trained model checkpoints and TensorBoard data
 cache: ./lidbox-cache
 
 # Experiment configuration for training a model
@@ -83,6 +83,9 @@ experiment:
   train:
     datagroup: train
     batch_size: 64
+    features_cache:
+      type: tf_data_cache
+      num_shards: 1
     shuffle_buffer:
       before_cache: 20000
     dataset_logger:
@@ -93,6 +96,9 @@ experiment:
   validation:
     datagroup: test
     batch_size: 1
+    features_cache:
+      type: tf_data_cache
+      num_shards: 1
     dataset_logger:
       num_batches: 20
       max_outputs: 1
