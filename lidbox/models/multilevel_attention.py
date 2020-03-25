@@ -7,8 +7,10 @@ See also https://github.com/ChangsongYu/Eusipco2018_Google_AudioSet.git
 """
 from tensorflow.keras.layers import (
     Activation,
+    BatchNormalization,
     Concatenate,
     Dense,
+    Dropout,
     Input,
     Layer,
 )
@@ -62,7 +64,7 @@ class DenseBlock(Layer):
         return cls(**config)
 
 
-def loader(input_shape, num_outputs, output_activation="softmax", L=2, H=512):
+def loader(input_shape, num_outputs, output_activation="log_softmax", L=2, H=512):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     attention_outputs = []

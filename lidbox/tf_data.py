@@ -667,6 +667,7 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
     return features
 
 def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):
+    utt2label = {u: d["label"] for u, d in utt2meta.items()}
     ss_input = kaldiio.load_scp(feat_path)
     with open(enc_path, "rb") as f:
         ss_encoding = np.load(f, fix_imports=False, allow_pickle=True).item()
@@ -700,8 +701,10 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
         (encodingtype, tf.string),
         (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])))
 
-def parse_kaldi_features(utterance_list, features_path, utt2label, expected_shape, feat_conf):
+def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape, feat_conf):
+    utt2label = {u: d["label"] for u, d in utt2meta.items()}
     utt2feats = kaldiio.load_scp(features_path)
+    feat_conf = dict(feat_conf)
     normalize_mean_axis = feat_conf.pop("normalize_mean_axis", None)
     normalize_stddev_axis = feat_conf.pop("normalize_stddev_axis", None)
     assert not feat_conf, "feat_conf contains unrecognized keys: {}".format(','.join(str(k) for k in feat_conf))

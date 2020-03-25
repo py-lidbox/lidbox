@@ -187,14 +187,14 @@ def extract_features(datasets, config, datagroup_key, verbosity=1, force_shuffle
         feat_path = config["sparsespeech_paths"]["input"][datagroup_key]
         if verbosity:
             print("SparseSpeech input: '{}' and encoding: '{}'".format(feat_path, enc_path))
-        feat = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2label)
+        feat = tf_data.parse_sparsespeech_features(config, enc_path, feat_path, seg2utt, utt2meta)
     elif config["type"] == "kaldi":
         feat_conf = dict(config["datagroups"][datagroup_key])
         kaldi_feats_scp = feat_conf.pop("features_path")
         expected_shape = feat_conf.pop("shape")
         if verbosity:
             print("Parsing Kaldi features from '{}' with expected shape {}".format(kaldi_feats_scp, expected_shape))
-        feat = tf_data.parse_kaldi_features(utterance_list, kaldi_feats_scp, utt2label, expected_shape, feat_conf)
+        feat = tf_data.parse_kaldi_features(utterance_list, kaldi_feats_scp, utt2meta, expected_shape, feat_conf)
     else:
         feat = tf_data.extract_features_from_paths(
             config,
