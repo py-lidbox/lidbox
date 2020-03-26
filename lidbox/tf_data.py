@@ -213,31 +213,21 @@ def make_random_frame_chunker_fn(len_config):
 
 def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id, conf_checksum='', verbosity=0):
     if "frames" in config:
-        raise NotImplementedError("todo")
         if verbosity:
-            print("Dividing features time dimension into frames")
-        assert "convert_to_images" not in config, "todo, time dim random chunks for image data"
-        # frame_axis = 1 if "convert_to_images" in config else 0
-        # if frame_axis == 1:
-            # ds = ds.map(lambda f, *meta: (tf.transpose(f, perm=(1, 0, 2, 3)), *meta))
-        if config["frames"].get("random", False):
-            if verbosity:
-                print("Dividing features time dimension randomly")
-            assert isinstance(config["frames"]["length"], dict), "key 'frames.length' must map to a dict type when doing random chunking of frames"
-            frame_chunker_fn = make_random_frame_chunker_fn(config["frames"]["length"])
-            chunk_timedim_randomly = lambda f, *meta: (frame_chunker_fn(f), *meta)
-            ds = ds.map(chunk_timedim_randomly, num_parallel_calls=TF_AUTOTUNE)
-        else:
-            if verbosity:
-                print("Dividing features time dimension into fixed length chunks")
-            # Extract frames from all features, using the same metadata for each frame of one sample of features
-            seq_len = config["frames"]["length"]
-            seq_step = config["frames"]["step"]
-            pad_zeros = config["frames"].get("pad_zeros", False)
-            to_frames = lambda feats, *meta: (
-                tf.signal.frame(feats, seq_len, seq_step, pad_end=pad_zeros, axis=0),
-                *meta)
-            ds = ds.map(to_frames)
+            print("Dividing features time dimension into fixed length chunks")
+        # Extract frames from all features, using the same metadata for each frame of one sample of features
+        seq_len = config["frames"]["length"]
+        seq_step = config["frames"]["step"]
+        pad_zeros = config["frames"].get("pad_zeros", False)
+        def to_frames(feats, *meta):
+            feats_in_frames = tf.signal.frame(
+                    feats,
+                    seq_len,
+                    seq_step,
+                    pad_end=pad_zeros,
+                    axis=0)
+            return (feats_in_frames, *meta)
+        ds = ds.map(to_frames, num_parallel_calls=TF_AUTOTUNE)
         if config["frames"].get("flatten", True):
             def _unbatch_ragged_frames(frames, *meta):
                 frames_ds = tf.data.Dataset.from_tensor_slices(frames)
@@ -245,15 +235,9 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
                 return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
             ds = ds.flat_map(_unbatch_ragged_frames)
         ds = ds.filter(lambda frames, *meta: tf.shape(frames)[0] > 0)
-        if "normalize" in config["frames"]:
-            axis = config["frames"]["normalize"]["axis"]
-            if verbosity:
-                print("Normalizing means frame-wise over axis {}".format(axis))
-            def normalize_frames(frames, *meta):
-                return (frames - tf.math.reduce_mean(frames, axis=axis, keepdims=True), *meta)
-            ds = ds.map(normalize_frames)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
-    to_model_input = lambda feats, meta: (feats, label2onehot(meta[1]), meta[0], *meta[2:])
+    def to_model_input(feats, meta):
+        return (feats, label2onehot(meta[1]), meta[0], *meta[2:])
     ds = ds.map(to_model_input)
     if "min_shape" in config:
         if verbosity:
@@ -695,11 +679,14 @@ def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2l
             else:
                 # Stack input and output features
                 out = tf.concat((input_feat, output_feat), 1)
-            yield out, (seg_id, label)
+            yield out, seg_id, label
+    #FIXME metadata into tuple and add dummy signals
     return tf.data.Dataset.from_generator(
         datagen,
-        (encodingtype, tf.string),
-        (tf.TensorShape(feat_config["shape_after_concat"]), tf.TensorShape([2])))
+        (encodingtype, tf.string, tf.string),
+        (tf.TensorShape(feat_config["shape_after_concat"]),
+         tf.TensorShape([]),
+         tf.TensorShape([])))
 
 def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape, feat_conf):
     utt2label = {u: d["label"] for u, d in utt2meta.items()}
@@ -718,16 +705,20 @@ def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape
                 print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
                 continue
             feats = utt2feats[utt]
-            assert_shape(feats.shape)
-            normalized = np.array(feats)
+            #assert_shape(feats.shape)
+            normalized = tf.constant(feats, tf.float32)
             if normalize_mean_axis is not None:
                 mean = tf.math.reduce_mean(feats, axis=normalize_mean_axis, keepdims=True)
                 normalized = feats - mean
             if normalize_stddev_axis is not None:
                 stddev = tf.math.reduce_std(feats, axis=normalize_stddev_axis, keepdims=True)
                 normalized = tf.math.divide_no_nan(normalized, stddev)
-            yield normalized, (utt, utt2label[utt])
-    return tf.data.Dataset.from_generator(
+            yield normalized, utt, utt2label[utt]
+    ds = tf.data.Dataset.from_generator(
         datagen,
-        (tf.float32, tf.string),
-        (tf.TensorShape(expected_shape), tf.TensorShape([2])))
+        (tf.float32, tf.string, tf.string),
+        (tf.TensorShape(expected_shape), tf.TensorShape([]), tf.TensorShape([])))
+    # Group metadata into tuple, note that this is not the same as using a 2-element tf.string tensor for metadata
+    # Also add empty signals (since we don't know the origin of these features)
+    ds = ds.map(lambda feats, utt, label: (feats, (utt, label, audio_feat.Wav(tf.zeros([1]), 16000))))
+    return ds.batch(1)

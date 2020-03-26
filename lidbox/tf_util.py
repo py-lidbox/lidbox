@@ -221,7 +221,7 @@ def extract_features_with_cache(config, experiment_config, datagroup_key, cache_
         datagroup_key,
         feat_config["type"],
         conf_checksum)
-    num_shards = config["features_cache"]["num_shards"]
+    num_shards = config["features_cache"].get("num_shards", 1)
     cache_exists = os.path.exists(features_cache_dir + ".md5sum-input")
     if cache_exists:
         if verbosity:
