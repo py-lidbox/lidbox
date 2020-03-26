@@ -155,6 +155,7 @@ class Train(E2EBase):
                     "verbosity": args.verbosity,
                     "force_shuffle_utt2path": args.shuffle_utt2path,
                     "file_limit": args.file_limit}
+            conf_json, conf_checksum = system.config_checksum(self.experiment_config, datagroup_key)
             if "features_cache" not in ds_config:
                 if args.verbosity:
                     print("features_cache not defined in config, will not cache extracted features")
@@ -166,7 +167,6 @@ class Train(E2EBase):
             else:
                 if args.verbosity:
                     print("features_cache defined in config, extracted features will be cached or existing features will be loaded from cache")
-                conf_json, conf_checksum = system.config_checksum(self.experiment_config, datagroup_key)
                 if args.verbosity > 2:
                     print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
                     print(conf_json)

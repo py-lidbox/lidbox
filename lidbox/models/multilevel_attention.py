@@ -33,8 +33,9 @@ class Attention(Layer):
         return attention
 
     def get_config(self):
-        config = [("num_units", self.fc.units)]
-        return dict(list(super().get_config()) + config)
+        config = super().get_config()
+        config.update({"num_units": self.fc.units})
+        return config
 
     @classmethod
     def from_config(cls, config):
@@ -56,8 +57,9 @@ class DenseBlock(Layer):
         return self.dropout(x, training=training)
 
     def get_config(self):
-        config = [("H", self.fc.units), ("dropout_rate", self.dropout.rate)]
-        return dict(list(super().get_config()) + config)
+        config = super().get_config()
+        config.update({"H": self.fc.units, "dropout_rate": self.dropout.rate})
+        return config
 
     @classmethod
     def from_config(cls, config):
