@@ -401,11 +401,17 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
                 conf["noise_source"][noise_type] = [path for _, path in noise_paths]
     chunk_len_seconds = 1e-3 * chunk_config["length_ms"]
     chunk_step_seconds = 1e-3 * chunk_config["step_ms"]
+    max_pad_seconds = 1e-3 * chunk_config.get("max_pad_ms", 0)
     def chunker(signal, sr, meta):
         chunk_len = int(sr * chunk_len_seconds)
-        if signal.size < chunk_len:
+        max_pad = int(sr * max_pad_seconds)
+        if signal.size + max_pad < chunk_len:
             return
         chunk_step = int(sr * chunk_step_seconds)
+        num_full_chunks = max(0, 1 + (signal.size - chunk_len) // chunk_step)
+        last_chunk_len = signal.size - num_full_chunks * chunk_step
+        if last_chunk_len < chunk_len <= last_chunk_len + max_pad:
+            signal = np.pad(signal, [0, chunk_len - last_chunk_len])
         chunks = librosa.util.frame(signal, chunk_len, chunk_step, axis=0)
         uttid, label = meta[:2]
         for i, chunk in enumerate(chunks, start=1):
@@ -413,9 +419,10 @@ def get_chunk_loader(wav_config, verbosity, datagroup_key):
             yield (chunk, sr), chunk_id, label
     def chunk_loader(signal, sr, wav_path, meta):
         chunk_length = int(sr * chunk_len_seconds)
-        if signal.size < chunk_length:
+        max_pad = int(sr * max_pad_seconds)
+        if signal.size + max_pad < chunk_length:
             if verbosity:
-                tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, "): length ", signal.size, ", utt ", meta[0], output_stream=sys.stderr, sep='')
+                tf_util.tf_print("skipping too short signal (min chunk length is ", chunk_length, " + ", max_pad, " max_pad): length ", signal.size, ", utt ", meta[0], output_stream=sys.stderr, sep='')
             return
         uttid = meta[0].decode("utf-8")
         yield from chunker(signal, target_sr, (uttid, *meta[1:]))

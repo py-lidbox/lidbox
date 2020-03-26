@@ -27,6 +27,13 @@ from .base import BaseCommand, Command, ExpandAbspath
 def now_str(date=False):
     return str(datetime.datetime.now() if date else int(time.time()))
 
+def dump_onehot_encoding(labels, label2onehot):
+    print("Generated a onehot encoding from labels:", ', '.join(labels))
+    max_len_pad = "<{:d}s".format(max(len(l) for l in labels))
+    for label in labels:
+        l = tf.constant(label, dtype=tf.string)
+        tf_util.tf_print(format(label, max_len_pad), " ", label2onehot(l))
+
 
 class E2E(BaseCommand):
     """TensorFlow pipeline for wavfile preprocessing, feature extraction and sound classification model training"""
@@ -42,6 +49,10 @@ class E2EBase(Command):
         optional.add_argument("--file-limit",
             type=int,
             help="Extract only up to this many files from the wavpath list (e.g. for debugging). Default is no limit.")
+        optional.add_argument("--dataset-config",
+            type=str,
+            action=ExpandAbspath,
+            help="Path to a yaml-file containing a list of datasets. By default it is assumed all datasets are defined inline in each experiment config file, but --dataset-config can be used to define a shared dataset config file.")
         return parser
 
     def get_checkpoint_dir(self):
@@ -102,10 +113,6 @@ class Train(E2EBase):
             action="store_true",
             default=False,
             help="Explictly iterate once over the feature extractor tf.data.Dataset object in order to evaluate the feature extraction pipeline and fill the feature cache on disk. Using this with --skip-training allows you to extract features on multiple CPUs without needing a GPU.")
-        optional.add_argument("--dataset-config",
-            type=str,
-            action=ExpandAbspath,
-            help="Path to a yaml-file containing a list of datasets.")
         return parser
 
     def train(self):
@@ -130,11 +137,7 @@ class Train(E2EBase):
         def label2onehot(label):
             return OH[label2int.lookup(label)]
         if args.verbosity > 2:
-            print("Generating onehot encoding from labels:", ', '.join(labels))
-            print("Generated onehot encoding as tensors:")
-            for l in labels:
-                l = tf.constant(l, dtype=tf.string)
-                tf_util.tf_print(l, "\t", label2onehot(l))
+            dump_onehot_encoding(labels, label2onehot)
         self.model_id = training_config["name"]
         model = self.create_model(dict(training_config), args.skip_training)
         if args.verbosity > 1:
@@ -143,11 +146,11 @@ class Train(E2EBase):
         if args.verbosity:
             print("Using model:\n{}".format(str(model)))
         dataset = {}
-        for ds in ("train", "validation"):
+        for ds_key in ("train", "validation"):
             if args.verbosity > 2:
-                print("Dataset config for '{}'".format(ds))
-                yaml_pprint(training_config[ds])
-            ds_config = dict(training_config, **training_config[ds])
+                print("Dataset config for '{}'".format(ds_key))
+                yaml_pprint(training_config[ds_key])
+            ds_config = dict(training_config, **training_config[ds_key])
             del ds_config["train"], ds_config["validation"]
             summary_kwargs = dict(ds_config.get("dataset_logger", {}))
             datagroup_key = ds_config.pop("datagroup")
@@ -200,7 +203,7 @@ class Train(E2EBase):
                         tf_util.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", *meta)
                 if args.verbosity > 1:
                     print(now_str(date=True), "- all", i, "samples done")
-            dataset[ds] = tf_data.prepare_dataset_for_training(
+            dataset[ds_key] = tf_data.prepare_dataset_for_training(
                 extractor_ds,
                 ds_config,
                 feat_config,
@@ -214,23 +217,23 @@ class Train(E2EBase):
                     print("--debug-dataset given, iterating over the dataset to gather stats")
                 if args.verbosity > 1:
                     print("Counting all unique dim sizes of elements at index 0 in dataset")
-                for axis, size_counts in enumerate(tf_util.count_dim_sizes(dataset[ds], 0, len(ds_config["input_shape"]) + 1)):
+                for axis, size_counts in enumerate(tf_util.count_dim_sizes(dataset[ds_key], 0, len(ds_config["input_shape"]) + 1)):
                     print("axis {}\n[count size]:".format(axis))
                     tf_util.tf_print(size_counts, summarize=10)
                 if summary_kwargs:
-                    logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds)
+                    logdir = os.path.join(os.path.dirname(model.tensorboard.log_dir), "dataset", ds_key)
                     if os.path.isdir(logdir):
                         if args.verbosity:
                             print("summary_kwargs available, but '{}' already exists, not iterating over dataset again".format(logdir))
                     else:
                         if args.verbosity:
-                            print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds, summary_kwargs.get("num_batches", "'all'"), logdir))
+                            print("Datagroup '{}' has a dataset logger defined. We will iterate over {} batches of samples from the dataset to create TensorBoard summaries of the input data into '{}'.".format(ds_key, summary_kwargs.get("num_batches", "'all'"), logdir))
                         self.make_named_dir(logdir)
                         writer = tf.summary.create_file_writer(logdir)
                         with writer.as_default():
-                            logged_dataset = tf_data.attach_dataset_logger(dataset[ds], feat_config["type"], **summary_kwargs)
+                            logged_dataset = tf_data.attach_dataset_logger(dataset[ds_key], feat_config["type"], **summary_kwargs)
                             if args.verbosity:
-                                print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds))
+                                print("Dataset logger attached to '{0}' dataset iterator, now exhausting the '{0}' dataset logger iterator once to write TensorBoard summaries of model input data".format(ds_key))
                             i = 0
                             max_outputs = summary_kwargs.get("max_outputs", 10)
                             for i, (samples, labels, *meta) in enumerate(logged_dataset.as_numpy_iterator(), start=1):
@@ -294,6 +297,188 @@ class Train(E2EBase):
         return self.train()
 
 
+class Predict(E2EBase):
+    """
+    Use a trained model to produce likelihoods for all target languages from all utterances in the test set.
+    Writes all predictions as scores and information about the target and non-target languages into the cache dir.
+    """
+
+    @classmethod
+    def create_argparser(cls, parent_parser):
+        parser = super().create_argparser(parent_parser)
+        optional = parser.add_argument_group("predict options")
+        optional.add_argument("--score-precision", type=int, default=6)
+        optional.add_argument("--score-separator", type=str, default=' ')
+        optional.add_argument("--trials", type=str)
+        optional.add_argument("--scores", type=str)
+        optional.add_argument("--checkpoint",
+            type=str,
+            help="Specify which Keras checkpoint to load model weights from, instead of using the most recent one.")
+        return parser
+
+    # TODO not enough DRY, a lot of repeated stuff in the Train command
+    def predict(self):
+        args = self.args
+        if args.verbosity:
+            print("Preparing model for prediction")
+        self.model_id = self.experiment_config["experiment"]["name"]
+        if not args.trials:
+            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
+        if not args.scores:
+            args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
+        self.make_named_dir(os.path.dirname(args.trials))
+        self.make_named_dir(os.path.dirname(args.scores))
+        training_config = self.experiment_config["experiment"]
+        feat_config = self.experiment_config["features"]
+        if args.verbosity > 1:
+            print("Using model parameters:")
+            yaml_pprint(training_config)
+            print()
+        if args.verbosity > 1:
+            print("Using feature extraction parameters:")
+            yaml_pprint(feat_config)
+            print()
+        if args.dataset_config:
+            dataset_config = system.load_yaml(args.dataset_config)
+            self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
+        if "dataset" in self.experiment_config:
+            assert "datasets" not in self.experiment_config, "cannot have both 'dataset' and 'datasets' keys in the experiment config, only one"
+            self.experiment_config["datasets"] = [self.experiment_config.pop("dataset")]
+        labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
+        label2int, OH = tf_util.make_label2onehot(labels)
+        def label2onehot(label):
+            return OH[label2int.lookup(label)]
+        if args.verbosity > 2:
+            dump_onehot_encoding(labels, label2onehot)
+        model = self.create_model(dict(training_config))
+        if args.verbosity > 1:
+            print("Preparing model")
+        model.prepare(labels, training_config)
+        checkpoint_dir = self.get_checkpoint_dir()
+        if args.checkpoint:
+            checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
+        elif "best_checkpoint" in self.experiment_config.get("prediction", {}):
+            checkpoint_path = os.path.join(checkpoint_dir, self.experiment_config["prediction"]["best_checkpoint"])
+        else:
+            checkpoints = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
+            if not checkpoints:
+                print("Error: Cannot evaluate with a model that has no checkpoints, i.e. is not trained.")
+                return 1
+            if "checkpoints" in training_config:
+                monitor_value = training_config["checkpoints"]["monitor"]
+                monitor_mode = training_config["checkpoints"].get("mode")
+            else:
+                monitor_value = "epoch"
+                monitor_mode = None
+            checkpoint_path = os.path.join(checkpoint_dir, models.get_best_checkpoint(checkpoints, key=monitor_value, mode=monitor_mode))
+        if args.verbosity:
+            print("Loading model weights from checkpoint file '{}'".format(checkpoint_path))
+        model.load_weights(checkpoint_path)
+        if args.verbosity:
+            print("\nEvaluating testset with model:")
+            print(str(model))
+            print()
+        ds_key = "test"
+        if args.verbosity > 2:
+            print("Dataset config for '{}'".format(ds_key))
+            yaml_pprint(training_config[ds_key])
+        ds_config = dict(training_config, **training_config[ds_key])
+        del ds_config["train"], ds_config["validation"]
+        datagroup_key = ds_config.pop("datagroup")
+        tf_util_kwargs = {
+                "verbosity": args.verbosity,
+                "force_shuffle_utt2path": False,
+                "file_limit": args.file_limit}
+        conf_json, conf_checksum = system.config_checksum(self.experiment_config, datagroup_key)
+        if "features_cache" not in ds_config:
+            if args.verbosity:
+                print("features_cache not defined in config, will not cache extracted features")
+            extractor_ds = tf_util.extract_features(
+                self.experiment_config["datasets"],
+                feat_config,
+                datagroup_key,
+                **tf_util_kwargs)
+        else:
+            if args.verbosity:
+                print("features_cache defined in config, extracted features will be cached or existing features will be loaded from cache")
+            if args.verbosity > 2:
+                print("Config md5 checksum '{}' computed from json string:".format(conf_checksum))
+                print(conf_json)
+            tf_util_args = ds_config, self.experiment_config, datagroup_key, self.cache_dir
+            tf_util_kwargs["conf_json"] = conf_json
+            tf_util_kwargs["conf_checksum"] = conf_checksum
+            cache_type = ds_config["features_cache"]["type"]
+            if cache_type == "tf_data_cache":
+                extractor_ds = tf_util.extract_features_with_cache(
+                        *tf_util_args,
+                        **tf_util_kwargs)
+            elif cache_type == "tfrecords":
+                extractor_ds = tf_util.extract_features_with_tfrecords(
+                        *tf_util_args,
+                        **tf_util_kwargs)
+            else:
+                print("error: invalid features cache type '{}'".format(cache_type))
+                return 1
+        features = tf_data.prepare_dataset_for_training(
+            extractor_ds.unbatch(),
+            ds_config,
+            feat_config,
+            label2onehot,
+            self.model_id,
+            conf_checksum=conf_checksum,
+            verbosity=args.verbosity,
+        )
+        if args.verbosity:
+            print("Gathering all correct labels from utt2label")
+        utt2label = collections.OrderedDict()
+        for ds in self.experiment_config["datasets"]:
+            utt2label_path = os.path.join(
+                    ds["datagroups"][datagroup_key]["path"],
+                    ds["datagroups"][datagroup_key].get("utt2label", "utt2label"))
+            for utt, label, *rest in parse_space_separated(utt2label_path):
+                assert utt not in utt2label, "duplicate utterance id found when parsing labels: '{}'".format(utt)
+                utt2label[utt] = label
+        if args.verbosity:
+            print("Gathering all utterance ids from features dataset iterator")
+        # Gather utterance ids, this also causes the extraction pipeline to be evaluated
+        utterance_ids = []
+        i = 0
+        if args.verbosity > 1:
+            print(now_str(date=True), "- 0 samples done")
+        for _, _, uttids, *rest in features.as_numpy_iterator():
+            for uttid in uttids:
+                utterance_ids.append(uttid.decode("utf-8"))
+                i += 1
+                if args.verbosity > 1 and i % 10000 == 0:
+                    print(now_str(date=True), "-", i, "samples done")
+        if args.verbosity > 1:
+            print(now_str(date=True), "- all", i, "samples done")
+        if args.verbosity:
+            print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
+        with open(args.trials, "w") as trials_f:
+            for utt, target in utt2label.items():
+                for label in labels:
+                    print(label, utt, "target" if target == label else "nontarget", file=trials_f)
+        if args.verbosity:
+            print("Starting prediction with model")
+        predictions = model.predict(features.map(lambda feat, *rest: feat))
+        if args.verbosity > 1:
+            print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
+        num_predictions = 0
+        with open(args.scores, "w") as scores_f:
+            print(*labels, file=scores_f)
+            for utt, pred in zip(utterance_ids, predictions):
+                pred_scores = [np.format_float_positional(x, precision=args.score_precision) for x in pred]
+                print(utt, *pred_scores, sep=args.score_separator, file=scores_f)
+                num_predictions += 1
+        if args.verbosity:
+            print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
+
+    def run(self):
+        super().run()
+        return self.predict()
+
+
 class Util(E2EBase):
     tasks = (
         "get_cache_checksum",
@@ -325,5 +510,5 @@ class Util(E2EBase):
 
 
 command_tree = [
-    (E2E, [Train, Util]),
+    (E2E, [Train, Predict, Util]),
 ]
