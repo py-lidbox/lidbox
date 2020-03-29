@@ -65,7 +65,11 @@ After downloading, the directory should contain the following files:
         lidbox e2e train -vvv config.xvector.yaml --debug-dataset
     Early stopping has been set to 5 epochs, which probably happens within about 10 first epochs.
 
-8. *TODO: predict test set, compute average detection cost and F1 score*
+8. When training finishes, you should see some information about the epochs when validation loss was at its lowest value.
+    We will use the model checkpoint at that epoch to predict language log-likelihoods for all test set utterances by running:
+
+        lidbox e2e predict -vvv config.xvector.yaml
+    The scores are written to `./lidbox-cache/xvector/predictions/scores`
 
 ## Notes
 

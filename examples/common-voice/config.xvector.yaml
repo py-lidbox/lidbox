@@ -106,3 +106,8 @@ experiment:
       max_outputs: 1
       image_resize_kwargs:
         size_multiplier: 3
+  test:
+    datagroup: test
+    features_cache:
+      type: tf_data_cache
+    batch_size: 1

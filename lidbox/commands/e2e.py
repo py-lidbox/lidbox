@@ -338,6 +338,7 @@ class Predict(E2EBase):
             print("Using feature extraction parameters:")
             yaml_pprint(feat_config)
             print()
+        assert "shuffle_buffer" not in training_config, "'shuffle_buffer' key used in training config: shuffling of the test set is not supported, the order of utterances must be deterministic"
         if args.dataset_config:
             dataset_config = system.load_yaml(args.dataset_config)
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
@@ -464,15 +465,30 @@ class Predict(E2EBase):
         predictions = model.predict(features.map(lambda feat, *rest: feat))
         if args.verbosity > 1:
             print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
-        num_predictions = 0
+        utt2prediction = sorted(zip(utterance_ids, predictions), key=lambda t: t[0])
+        del utterance_ids, predictions
+        predicted_utterances = set()
         with open(args.scores, "w") as scores_f:
             print(*labels, file=scores_f)
-            for utt, pred in zip(utterance_ids, predictions):
+            if "chunks" in feat_config.get("wav_config", {}):
+                if args.verbosity:
+                    print("Features were extracted from fixed length chunks, language scores for each utterance will be produced by averaging over each chunk in the utterance")
+                # group chunk predictions by parent utterance id
+                utt2prediction = [
+                        (utt, np.stack([pred for _, pred in chunk2pred]).mean(axis=0))
+                        for utt, chunk2pred in
+                        itertools.groupby(utt2prediction, key=lambda t: t[0].rsplit('-', 1)[0])]
+            for utt, pred in utt2prediction:
                 pred_scores = [np.format_float_positional(x, precision=args.score_precision) for x in pred]
+                predicted_utterances.add(utt)
                 print(utt, *pred_scores, sep=args.score_separator, file=scores_f)
-                num_predictions += 1
+            missed_utterances = set(utt2label) - predicted_utterances
+            for missed_utt in missed_utterances:
+                print(missed_utt, *[-float('inf') for _ in labels], sep=args.score_separator, file=scores_f)
         if args.verbosity:
-            print("Wrote {} prediction scores to '{}'.".format(num_predictions, args.scores))
+            if missed_utterances:
+                print("Warning: {} utterances had no predictions and -inf was generated for all labels instead".format(len(missed_utterances)))
+            print("Wrote {} prediction scores to '{}'.".format(len(predicted_utterances), args.scores))
 
     def run(self):
         super().run()
