@@ -21,9 +21,9 @@ Check that the entry point is working
 ```
 lidbox -h
 ```
-If not, make sure the directory `setuptools` uses for entry point scripts (e.g. `$HOME/.local/bin`) is on your path.
+If not, make sure the `setuptools` entry point scripts (e.g. directory `$HOME/.local/bin`) are on your path.
 
-See [this](./examples/common-voice) for a simple example to get started.
+If everything is working, see [this](./examples/common-voice) for a simple example to get started.
 
 ## Todo
 
