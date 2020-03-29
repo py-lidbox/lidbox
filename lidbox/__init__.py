@@ -4,7 +4,7 @@ Toolbox containing various speech data analysis tools.
 import os
 import yaml
 
-TF_DEBUG = False
+TF_DEBUG = bool(os.environ.get("LIDBOX_TF_DEBUG", False))
 
 def get_package_root():
     from . import __path__

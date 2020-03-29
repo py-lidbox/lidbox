@@ -17,6 +17,11 @@ This makes it easier to experiment with the code.
 git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
 pip install --editable ./lidbox
 ```
+Check that the entry point is working
+```
+lidbox -h
+```
+If not, make sure the directory `setuptools` uses for entry point scripts (e.g. `$HOME/.local/bin`) is on your path.
 
 See [this](./examples/common-voice) for a simple example to get started.
 

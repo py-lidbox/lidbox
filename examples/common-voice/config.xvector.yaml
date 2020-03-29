@@ -74,6 +74,10 @@ experiment:
     cls: CategoricalCrossentropy
     kwargs:
       from_logits: true
+  early_stopping:
+    monitor: val_loss
+    patience: 5
+    mode: min
   metrics:
     - cls: CategoricalAccuracy
   checkpoints:
@@ -85,7 +89,6 @@ experiment:
     batch_size: 64
     features_cache:
       type: tf_data_cache
-      num_shards: 1
     shuffle_buffer:
       before_cache: 20000
     dataset_logger:
@@ -98,7 +101,6 @@ experiment:
     batch_size: 1
     features_cache:
       type: tf_data_cache
-      num_shards: 1
     dataset_logger:
       num_batches: 20
       max_outputs: 1

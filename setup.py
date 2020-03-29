@@ -11,8 +11,8 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     author="Matias Lindgren",
     author_email="matias.lindgren@gmail.com",
-    licence="MIT",
-    python_requires="== 3.7.*",
+    license="MIT",
+    python_requires=">= 3.7.*",
     install_requires=[
         "PyYAML ~= 5.1",
         "kaldiio ~= 2.13",

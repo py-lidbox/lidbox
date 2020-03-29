@@ -19,6 +19,8 @@ If you want to experiment with other Common Voice datasets, update variable `dat
 * [`tar`](https://www.gnu.org/software/tar)
 * [`tensorflow`](https://www.tensorflow.org/install) 2.1 or newer
 
+Python 3.8.2 with TensorFlow 2.2.0-rc2 should work also.
+
 ## Steps
 
 1. Download the datasets from the [Common Voice](https://voice.mozilla.org/en/datasets) website into `./downloads`.
@@ -61,6 +63,7 @@ After downloading, the directory should contain the following files:
 7. Generate TensorBoard data (`--debug-dataset`) and start the training using the extracted features:
 
         lidbox e2e train -vvv config.xvector.yaml --debug-dataset
+    Early stopping has been set to 5 epochs, which probably happens within about 10 first epochs.
 
 8. *TODO: predict test set, compute average detection cost and F1 score*
 
