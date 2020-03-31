@@ -320,6 +320,7 @@ class Predict(E2EBase):
         optional = parser.add_argument_group("predict options")
         optional.add_argument("--score-precision", type=int, default=6)
         optional.add_argument("--score-separator", type=str, default=' ')
+        optional.add_argument("--trials", type=str)
         optional.add_argument("--scores", type=str)
         optional.add_argument("--checkpoint",
             type=str,
@@ -560,6 +561,13 @@ class Predict(E2EBase):
                 json.dump(metric_results, metrics_f, sort_keys=True, indent=2)
             if args.verbosity > 1:
                 yaml_pprint({d["name"]: d["result"] for d in metric_results})
+            if args.trials:
+                if args.verbosity:
+                    print("Writing target and non-target language information for each utterance to '{}'.".format(args.trials))
+                with open(args.trials, "w") as trials_f:
+                    for utt, target in utt2label.items():
+                        for label in labels:
+                            print(label, utt, "target" if target == label else "nontarget", file=trials_f)
 
     def run(self):
         super().run()

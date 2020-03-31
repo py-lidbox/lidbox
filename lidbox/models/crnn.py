@@ -54,4 +54,4 @@ def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0
 
 
 def predict(model, utterances):
-    return np.stack([model.predict(frames).mean(axis=0) for frames in utterances.unbatch()])
+    return model.predict(utterances)
