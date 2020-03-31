@@ -15,6 +15,7 @@ setuptools.setup(
     python_requires=">= 3.7.*",
     install_requires=[
         "PyYAML ~= 5.1",
+        "jsonschema",
         "kaldiio ~= 2.13",
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",

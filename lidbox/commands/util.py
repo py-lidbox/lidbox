@@ -5,9 +5,11 @@ import shutil
 import sys
 import time
 
+import jsonschema
 import numpy as np
 
 from lidbox.commands.base import Command, BaseCommand, ExpandAbspath
+import lidbox
 import lidbox.system as system
 import lidbox.visualization as visualization
 
@@ -20,6 +22,7 @@ class Util(BaseCommand):
         "plot_melspectrogram",
         "watch",
         "assert_disjoint",
+        "validate_config_files",
     )
 
     @classmethod
@@ -41,6 +44,9 @@ class Util(BaseCommand):
         optional.add_argument("--plot-melspectrogram",
             action="store_true",
             help="Plot mel spectrograms for all given files. Blocks control until all figures are manually closed.")
+        optional.add_argument("--validate-config-files",
+            action="store_true",
+            help="Validate one or more config files against the config file JSON schema.")
         optional.add_argument("--watch",
             action="store_true")
         optional.add_argument("--transform",
@@ -151,6 +157,27 @@ class Util(BaseCommand):
             else:
                 print("ok")
 
+    def validate_config_files(self):
+        args = self.args
+        if args.verbosity:
+            print("Validating configuration files against JSON schema from '{}'.".format(lidbox.CONFIG_FILE_SCHEMA_PATH))
+        schema = system.load_yaml(lidbox.CONFIG_FILE_SCHEMA_PATH)
+        for infile in args.infile:
+            config = system.load_yaml(infile)
+            try:
+                jsonschema.validate(instance=config, schema=schema)
+                print("File '{}' ok".format(infile))
+            except jsonschema.ValidationError as error:
+                print("File '{}' validation failed, error is:\n  {}".format(infile, error.message))
+                if error.context:
+                    print("context:")
+                    for context in error.context:
+                        print(context)
+                if error.cause:
+                    print("cause:\n", error.cause)
+                if args.verbosity > 1:
+                    print("Instance was:")
+                    lidbox.yaml_pprint(error.instance, left_pad=2)
 
     def run(self):
         return self.run_tasks()

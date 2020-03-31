@@ -144,6 +144,9 @@ class Train(E2EBase):
         if args.dataset_config:
             dataset_config = system.load_yaml(args.dataset_config)
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
+        #FIXME
+        for ds in self.experiment_config["datasets"]:
+            ds["datagroups"] = {d.pop("key"): d for d in ds["datagroups"]}
         labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         label2int, OH = tf_util.make_label2onehot(labels)
         def label2onehot(label):

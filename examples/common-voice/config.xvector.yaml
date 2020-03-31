@@ -11,11 +11,11 @@ datasets:
     datagroups:
         # Root directories for the training and test set metadata
         # Note that the wav-files do not need to be in these directories, since the wav-paths are defined in the utt2path files
-        train:
-            path: ./common-voice-data/train
-            shuffle_utt2path: true
-        test:
-            path: ./common-voice-data/test
+      - key: train
+        path: ./common-voice-data/train
+        shuffle_utt2path: true
+      - key: test
+        path: ./common-voice-data/test
 
 # Feature extraction pipeline configuration
 features:

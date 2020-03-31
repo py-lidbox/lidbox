@@ -1,0 +1,305 @@
+$schema: 'http://json-schema.org/draft-07/schema#'
+type: object
+description: 'lidbox experiment configuration file'
+required:
+  - cache
+  - datasets
+  - experiment
+  - features
+definitions:
+  datagroup:
+    type: object
+    required:
+      - batch_size
+      - datagroup
+    properties:
+      batch_size:
+        type: integer
+        exclusiveMinimum: 0
+      datagroup:
+        type: string
+      features_cache:
+        type: object
+        required:
+          - type
+        properties:
+          type:
+            type: string
+      shuffle_buffer:
+        type: object
+        properties:
+          before_cache:
+            type: integer
+            exclusiveMinimum: 0
+          after_cache:
+            type: integer
+            exclusiveMinimum: 0
+      dataset_logger:
+        type: object
+        properties:
+          num_batches:
+            type: integer
+            exclusiveMinimum: 0
+          max_outputs:
+            type: integer
+            exclusiveMinimum: 0
+          image_resize_kwargs:
+            type: object
+            properties:
+              size_multiplier:
+                type: integer
+                exclusiveMinimum: 0
+properties:
+  datasets:
+    type: array
+    contains:
+      type: object
+      description: 'Metadata for one dataset'
+      required:
+        - key
+        - labels
+        - datagroups
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          description: 'Unique identifier for a dataset'
+        labels:
+          type: array
+          description: 'One or more unique labels present in the dataset'
+          contains:
+            type: string
+        datagroups:
+          type: array
+          contains:
+            type: object
+            description: 'Metadata for one datagroup (e.g. train or test)'
+            required:
+              - key
+              - path
+            additionalProperties: false
+            properties:
+              key:
+                type: string
+              path:
+                type: string
+              shuffle_utt2path:
+                type: boolean
+              utt2label:
+                type: string
+              utt2dur:
+                type: string
+  features:
+    type: object
+    description: 'Feature extraction pipeline configuration for all datagroups'
+    required:
+      - type
+    additionalProperties: false
+    properties:
+      wav_config:
+        type: object
+        description: 'Signal pre-processing before STFT'
+        additionalProperties: false
+        properties:
+          webrtcvad:
+            type: object
+            description: 'Voice activity detection with WebRTC'
+            required:
+              - aggressiveness
+              - frame_ms
+              - min_non_speech_length_ms
+            additionalProperties: false
+            properties:
+              aggressiveness:
+                type: integer
+                minimum: 0
+                maximum: 3
+              frame_ms:
+                type: integer
+                description: 'WebRTC VAD frame length in milliseconds'
+                minimum: 10
+                maximum: 30
+                multipleOf: 10
+              min_non_speech_length_ms:
+                type: integer
+                description: 'Minimum non-speech length in milliseconds that can be dropped'
+                minimum: 0
+          chunks:
+            type: object
+            description: 'Signal chunk configuration, all utterances will be divided into sub-utterances of specific size'
+            required:
+              - length_ms
+              - step_ms
+            additionalProperties: false
+            properties:
+              length_ms:
+                type: integer
+                description: 'Chunk length in milliseconds'
+                exclusiveMinimum: 0
+              step_ms:
+                type: integer
+                description: 'Chunk step/offset in milliseconds'
+                exclusiveMinimum: 0
+              max_pad_ms:
+                type: integer
+                description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
+                minimum: 0
+          filter_sample_rate:
+            type: integer
+            description: 'Sample rate expected for all read files. Files with different rates are ignored'
+            exclusiveMinimum: 0
+      type:
+        type: string
+        description: 'Feature extraction type'
+      batch_size:
+        type: integer
+        exclusiveMinimum: 0
+      spectrogram:
+        type: object
+        additionalProperties: false
+        properties:
+          fft_length:
+            type: integer
+            exclusiveMinimum: 0
+          frame_length_ms:
+            type: integer
+            exclusiveMinimum: 0
+          frame_step_ms:
+            type: integer
+            exclusiveMinimum: 0
+          power:
+            type: number
+          fmin:
+            type: number
+            minimum: 0
+          fmax:
+            type: number
+            minimum: 0
+      melspectrogram:
+        type: object
+        additionalProperties: false
+        properties:
+          num_mel_bins:
+            type: integer
+            exclusiveMinimum: 0
+          fmin:
+            type: number
+            minimum: 0
+          fmax:
+            type: number
+            minimum: 0
+      db_spectrogram:
+        type: object
+        additionalProperties: false
+        properties:
+          amin:
+            type: number
+            description: 'Positive lower bound for clamping logarithm input'
+            exclusiveMinimum: 0
+          top_db:
+            type: number
+            description: 'Upper dB limit'
+      sample_minmax_scaling:
+        type: object
+        additionalProperties: false
+        properties:
+          axis:
+            type: integer
+      mean_var_norm_slide:
+        type: object
+        additionalProperties: false
+        properties:
+          window_len:
+            type: integer
+            exclusiveMinimum: 0
+          normalize_variance:
+            type: boolean
+  cache:
+    type: string
+    description: 'Persistent cache directory e.g. for extracted features, trained model checkpoints and TensorBoard data'
+  experiment:
+    type: object
+    description: 'Model training pipeline configuration'
+    required:
+      - epochs
+      - input_shape
+      - loss
+      - model_definition
+      - name
+      - optimizer
+      - test
+      - train
+      - validation
+    additionalProperties: false
+    properties:
+      epochs:
+        type: integer
+        minimum: 0
+      input_shape:
+        type: array
+        contains:
+          anyOf:
+            - type: integer
+              minimum: 0
+            # - type: null
+      loss:
+        type: object
+        description: 'Keras loss function'
+        required:
+          - cls
+        additionalProperties: false
+        properties:
+          cls:
+            type: string
+          kwargs:
+            type: object
+      model_definition:
+        type: object
+        description: 'lidbox model definition, e.g. keyword arguments to the loader'
+        required:
+          - name
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+          kwargs:
+            type: object
+      name:
+        type: string
+      optimizer:
+        type: object
+        description: 'Keras optimizer arguments'
+        required:
+          - cls
+        additionalProperties: false
+        properties:
+          cls:
+            type: string
+          kwargs:
+            type: object
+      early_stopping:
+        type: object
+      other_callbacks:
+        type: array
+        contains:
+          type: object
+          properties:
+            cls:
+              type: string
+      metrics:
+        type: array
+        contains:
+          type: object
+          required:
+            - cls
+      checkpoints:
+        type: object
+      test:
+        $ref: '#/definitions/datagroup'
+        description: 'Test/evaluation set configuration'
+      train:
+        $ref: '#/definitions/datagroup'
+        description: 'Training set configuration'
+      validation:
+        $ref: '#/definitions/datagroup'
+        description: 'Validation/development set configuration'
