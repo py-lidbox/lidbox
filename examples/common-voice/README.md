@@ -58,7 +58,6 @@ After downloading, the directory should contain the following files:
 6. Evaluate only the feature extraction pipeline to fill the features cache:
 
         lidbox e2e train -vvv config.xvector.yaml --exhaust-dataset-iterator --skip-training
-    This step is not really required, since all features could also be extracted during the first epoch during training.
 
 7. Generate TensorBoard data (`--debug-dataset`) and start the training using the extracted features:
 
@@ -71,6 +70,10 @@ After downloading, the directory should contain the following files:
         lidbox e2e predict -vvv config.xvector.yaml
     The scores are written to `./lidbox-cache/xvector/predictions/scores`
     In addition, you will see some metrics computed from the scores using correct labels from the `./common-voice-data/test/utt2label` file.
+
+It is also possible to skip step 6, since all features could also be extracted during the first epoch during training.
+When the first epoch ends, all features have been cached and next epochs will use the cached features.
+However, if you want to extract features on several CPUs without the need for a GPU, then step 6 is useful.
 
 ## Notes
 

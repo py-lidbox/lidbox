@@ -356,6 +356,9 @@ class Predict(E2EBase):
         if "dataset" in self.experiment_config:
             assert "datasets" not in self.experiment_config, "cannot have both 'dataset' and 'datasets' keys in the experiment config, only one"
             self.experiment_config["datasets"] = [self.experiment_config.pop("dataset")]
+        #FIXME
+        for ds in self.experiment_config["datasets"]:
+            ds["datagroups"] = {d.pop("key"): d for d in ds["datagroups"]}
         labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         label2int, OH = tf_util.make_label2onehot(labels)
         def label2onehot(label):
@@ -460,7 +463,7 @@ class Predict(E2EBase):
             print(now_str(date=True), "- all", i, "samples done")
         if args.verbosity:
             print("Features extracted")
-            print("Starting prediction with model")
+            print("Starting prediction with model '{}'".format(model.model.name))
         predictions = model.predict(features.map(lambda feat, *rest: feat))
         if args.verbosity > 1:
             print("Done predicting, model returned predictions of shape {}. Writing them to '{}'.".format(predictions.shape, args.scores))
