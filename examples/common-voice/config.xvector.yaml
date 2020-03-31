@@ -111,3 +111,7 @@ experiment:
     features_cache:
       type: tf_data_cache
     batch_size: 1
+    evaluate_metrics:
+      - name: average_detection_cost
+      - name: average_equal_error_rate
+      - name: average_f1_score

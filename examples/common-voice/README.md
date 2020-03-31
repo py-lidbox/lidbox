@@ -70,6 +70,7 @@ After downloading, the directory should contain the following files:
 
         lidbox e2e predict -vvv config.xvector.yaml
     The scores are written to `./lidbox-cache/xvector/predictions/scores`
+    In addition, you will see some metrics computed from the scores using correct labels from the `./common-voice-data/test/utt2label` file.
 
 ## Notes
 

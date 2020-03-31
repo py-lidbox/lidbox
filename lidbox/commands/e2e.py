@@ -11,6 +11,7 @@ import time
 
 import kaldiio
 import numpy as np
+import sklearn
 import tensorflow as tf
 
 from .. import (
@@ -20,6 +21,7 @@ from .. import (
     tf_data,
     tf_util,
     yaml_pprint,
+    metrics,
 )
 from .base import BaseCommand, Command, ExpandAbspath
 
@@ -34,6 +36,16 @@ def dump_onehot_encoding(labels, label2onehot):
         l = tf.constant(label, dtype=tf.string)
         tf_util.tf_print(format(label, max_len_pad), " ", label2onehot(l))
 
+def parse_utt2meta(datasets, datagroup_key, meta_key):
+    utt2meta = {}
+    for ds in datasets:
+        utt2meta_path = os.path.join(
+                ds["datagroups"][datagroup_key]["path"],
+                ds["datagroups"][datagroup_key].get(meta_key, meta_key))
+        for utt, meta, *rest in parse_space_separated(utt2meta_path):
+            assert utt not in utt2meta, "duplicate utterance id '{}' found when parsing '{}'".format(utt, utt2meta_path)
+            utt2meta[utt] = meta
+    return utt2meta
 
 class E2E(BaseCommand):
     """TensorFlow pipeline for wavfile preprocessing, feature extraction and sound classification model training"""
@@ -299,8 +311,7 @@ class Train(E2EBase):
 
 class Predict(E2EBase):
     """
-    Use a trained model to produce likelihoods for all target languages from all utterances in the test set.
-    Writes all predictions as scores and information about the target and non-target languages into the cache dir.
+    Use a trained model to produce likelihood scores for all target languages from all utterances in the test set.
     """
 
     @classmethod
@@ -309,7 +320,6 @@ class Predict(E2EBase):
         optional = parser.add_argument_group("predict options")
         optional.add_argument("--score-precision", type=int, default=6)
         optional.add_argument("--score-separator", type=str, default=' ')
-        optional.add_argument("--trials", type=str)
         optional.add_argument("--scores", type=str)
         optional.add_argument("--checkpoint",
             type=str,
@@ -322,11 +332,8 @@ class Predict(E2EBase):
         if args.verbosity:
             print("Preparing model for prediction")
         self.model_id = self.experiment_config["experiment"]["name"]
-        if not args.trials:
-            args.trials = os.path.join(self.cache_dir, self.model_id, "predictions", "trials")
         if not args.scores:
             args.scores = os.path.join(self.cache_dir, self.model_id, "predictions", "scores")
-        self.make_named_dir(os.path.dirname(args.trials))
         self.make_named_dir(os.path.dirname(args.scores))
         training_config = self.experiment_config["experiment"]
         feat_config = self.experiment_config["features"]
@@ -430,15 +437,8 @@ class Predict(E2EBase):
             verbosity=args.verbosity,
         )
         if args.verbosity:
-            print("Gathering all correct labels from utt2label")
-        utt2label = collections.OrderedDict()
-        for ds in self.experiment_config["datasets"]:
-            utt2label_path = os.path.join(
-                    ds["datagroups"][datagroup_key]["path"],
-                    ds["datagroups"][datagroup_key].get("utt2label", "utt2label"))
-            for utt, label, *rest in parse_space_separated(utt2label_path):
-                assert utt not in utt2label, "duplicate utterance id found when parsing labels: '{}'".format(utt)
-                utt2label[utt] = label
+            print("Gathering all expected utterance ids labels from datagroup config")
+        all_utterance_ids = set(parse_utt2meta(self.experiment_config["datasets"], datagroup_key, "utt2path"))
         if args.verbosity:
             print("Gathering all utterance ids from features dataset iterator")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
@@ -455,12 +455,7 @@ class Predict(E2EBase):
         if args.verbosity > 1:
             print(now_str(date=True), "- all", i, "samples done")
         if args.verbosity:
-            print("Features extracted, writing target and non-target language information for each utterance to '{}'.".format(args.trials))
-        with open(args.trials, "w") as trials_f:
-            for utt, target in utt2label.items():
-                for label in labels:
-                    print(label, utt, "target" if target == label else "nontarget", file=trials_f)
-        if args.verbosity:
+            print("Features extracted")
             print("Starting prediction with model")
         predictions = model.predict(features.map(lambda feat, *rest: feat))
         if args.verbosity > 1:
@@ -468,6 +463,8 @@ class Predict(E2EBase):
         utt2prediction = sorted(zip(utterance_ids, predictions), key=lambda t: t[0])
         del utterance_ids, predictions
         predicted_utterances = set()
+        min_score = np.inf
+        max_score = -np.inf
         with open(args.scores, "w") as scores_f:
             print(*labels, file=scores_f)
             if "chunks" in feat_config.get("wav_config", {}):
@@ -482,13 +479,71 @@ class Predict(E2EBase):
                 pred_scores = [np.format_float_positional(x, precision=args.score_precision) for x in pred]
                 predicted_utterances.add(utt)
                 print(utt, *pred_scores, sep=args.score_separator, file=scores_f)
-            missed_utterances = set(utt2label) - predicted_utterances
+                min_score = np.amin(pred, initial=min_score)
+                max_score = np.amax(pred, initial=max_score)
+            missed_utterances = all_utterance_ids - predicted_utterances
             for missed_utt in missed_utterances:
-                print(missed_utt, *[-float('inf') for _ in labels], sep=args.score_separator, file=scores_f)
+                print(missed_utt, *[min_score for _ in labels], sep=args.score_separator, file=scores_f)
         if args.verbosity:
             if missed_utterances:
-                print("Warning: {} utterances had no predictions and -inf was generated for all labels instead".format(len(missed_utterances)))
+                print("Warning: {} utterances had no predictions and minimum score {} was used for all labels instead".format(len(missed_utterances), min_score))
             print("Wrote {} prediction scores to '{}'.".format(len(predicted_utterances), args.scores))
+            if args.verbosity > 1:
+                print("Min score {:.6f}, max score {:.6f}".format(min_score, max_score))
+        if "evaluate_metrics" in ds_config:
+            if args.verbosity:
+                print("'evaluate_metrics' given in datagroup config, it is assumed that correct labels are available")
+            utt2label = parse_utt2meta(self.experiment_config["datasets"], datagroup_key, "utt2label")
+            # add worst case scores for all missed utterances
+            utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
+            true_labels = tf.stack([label2onehot(tf.constant(utt2label[utt], tf.string)) for utt, _ in utt2prediction], 0)
+            predictions = tf.stack([pred for _, pred in utt2prediction], 0)
+            if args.verbosity > 1:
+                print("Evaluating results using:")
+                tf_util.tf_print("'true_labels' shape", tf.shape(true_labels))
+                tf_util.tf_print("'predictions' shape", tf.shape(predictions))
+            metric_results = []
+            for metric in ds_config["evaluate_metrics"]:
+                result = None
+                if metric["name"] == "average_detection_cost":
+                    if args.verbosity:
+                        print("Evaluating minimum average detection cost")
+                    thresholds = np.linspace(min_score, max_score, metric.get("num_thresholds", 200))
+                    cavg = metrics.AverageDetectionCost(len(labels), thresholds)
+                    cavg.update_state(true_labels, predictions)
+                    result = float(cavg.result().numpy())
+                elif metric["name"] == "average_equal_error_rate":
+                    if args.verbosity:
+                        print("Evaluating average equal error rate")
+                    eer = np.zeros(len(labels))
+                    for l, label in enumerate(labels):
+                        # https://stackoverflow.com/a/46026962
+                        fpr, tpr, _ = sklearn.metrics.roc_curve(
+                                true_labels[:,l].numpy(),
+                                predictions[:,l].numpy())
+                        fnr = 1 - tpr
+                        eer[l] = fpr[np.nanargmin(np.absolute(fnr - fpr))]
+                    result = {"avg": float(eer.mean()),
+                              "by_label": {label: float(eer[l]) for l, label in enumerate(labels)}}
+                elif metric["name"] == "average_f1_score":
+                    if args.verbosity:
+                        print("Evaluating average F1 score")
+                    f1 = sklearn.metrics.f1_score(
+                            tf.math.argmax(true_labels, axis=1).numpy(),
+                            tf.math.argmax(predictions, axis=1).numpy(),
+                            labels=list(range(len(labels))),
+                            average="weighted")
+                    result = {"avg": float(f1)}
+                else:
+                    print("Error: cannot evaluate datagroup '{}' using unimplemented metric '{}'".format(datagroup_key, metric["name"]))
+                metric_results.append({"name": metric["name"], "result": result})
+            metrics_results_path = os.path.join(os.path.dirname(args.scores), "metrics.json")
+            if args.verbosity:
+                print("Writing metrics to '{}'".format(metrics_results_path))
+            with open(metrics_results_path, "w") as metrics_f:
+                json.dump(metric_results, metrics_f, sort_keys=True, indent=2)
+            if args.verbosity > 1:
+                yaml_pprint({d["name"]: d["result"] for d in metric_results})
 
     def run(self):
         super().run()
