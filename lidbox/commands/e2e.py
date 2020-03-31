@@ -503,6 +503,8 @@ class Predict(E2EBase):
                 tf_util.tf_print("'true_labels' shape", tf.shape(true_labels))
                 tf_util.tf_print("'predictions' shape", tf.shape(predictions))
             metric_results = []
+            true_labels_sparse = tf.math.argmax(true_labels, axis=1).numpy()
+            pred_labels_sparse = tf.math.argmax(predictions, axis=1).numpy()
             for metric in ds_config["evaluate_metrics"]:
                 result = None
                 if metric["name"] == "average_detection_cost":
@@ -529,11 +531,25 @@ class Predict(E2EBase):
                     if args.verbosity:
                         print("Evaluating average F1 score")
                     f1 = sklearn.metrics.f1_score(
-                            tf.math.argmax(true_labels, axis=1).numpy(),
-                            tf.math.argmax(predictions, axis=1).numpy(),
+                            true_labels_sparse,
+                            pred_labels_sparse,
                             labels=list(range(len(labels))),
                             average="weighted")
                     result = {"avg": float(f1)}
+                elif metric["name"] == "sklearn_classification_report":
+                    if args.verbosity:
+                        print("Generating full sklearn classification report")
+                    result = sklearn.metrics.classification_report(
+                            true_labels_sparse,
+                            pred_labels_sparse,
+                            labels=list(range(len(labels))),
+                            target_names=labels,
+                            output_dict=True,
+                            zero_division=0)
+                elif metric["name"] == "confusion_matrix":
+                    if args.verbosity:
+                        print("Generating confusion matrix")
+                    result = sklearn.metrics.confusion_matrix(true_labels_sparse, pred_labels_sparse).tolist()
                 else:
                     print("Error: cannot evaluate datagroup '{}' using unimplemented metric '{}'".format(datagroup_key, metric["name"]))
                 metric_results.append({"name": metric["name"], "result": result})
