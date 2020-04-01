@@ -73,7 +73,7 @@ After downloading, the directory should contain the following files:
 
 It is also possible to skip step 6, since all features could also be extracted during the first epoch during training.
 When the first epoch ends, all features have been cached and next epochs will use the cached features.
-However, if you want to extract features on several CPUs without the need for a GPU, then step 6 is useful.
+However, if you want to extract features and train on separate machines, then step 6 might be useful.
 
 ## Notes
 
@@ -81,3 +81,4 @@ However, if you want to extract features on several CPUs without the need for a 
 * If you are using a small GPU (less than 4G memory), it might help to prefix the commands that do training with `env TF_FORCE_GPU_ALLOW_GROWTH=true`, in case TF throws errors about being unable to initialize cuDNN.
 This might also happen if you have a Python REPL open with TensorFlow imported, since by default it allocates all GPU memory.
 * When extracting features, `lidbox` currently includes original waveforms of each utterance into the features cache in order to make the audio available in TensorBoard. This might create very large caches for large datasets. E.g. I extracted features for approx. 8000 hours of data and it created a 3.2 TiB cache.
+* If you don't want to use a GPU, you can e.g. prefix all commands with `env CUDA_VISIBLE_DEVICES=-1`.
