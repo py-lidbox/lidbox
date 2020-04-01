@@ -212,29 +212,43 @@ def make_random_frame_chunker_fn(len_config):
     return chunk_timedim_randomly
 
 def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id, conf_checksum='', verbosity=0):
-    if "frames" in config:
-        if verbosity:
-            print("Dividing features time dimension into fixed length chunks")
-        # Extract frames from all features, using the same metadata for each frame of one sample of features
-        seq_len = config["frames"]["length"]
-        seq_step = config["frames"]["step"]
-        pad_zeros = config["frames"].get("pad_zeros", False)
-        def to_frames(feats, *meta):
-            feats_in_frames = tf.signal.frame(
-                    feats,
-                    seq_len,
-                    seq_step,
-                    pad_end=pad_zeros,
-                    axis=0)
-            return (feats_in_frames, *meta)
-        ds = ds.map(to_frames, num_parallel_calls=TF_AUTOTUNE)
-        if config["frames"].get("flatten", True):
+    if "frames" in config or "random_frames" in config:
+        if "frames" in config:
+            frame_config = config["frames"]
+            if verbosity:
+                print("Dividing the time axis of features into fixed length chunks")
+                if verbosity > 1:
+                    print("Using fixed length config:")
+                    yaml_pprint(frame_config)
+            # Extract frames from all features, using the same metadata for each frame of one sample of features
+            def to_frames(feats, *meta):
+                feats_in_frames = tf.signal.frame(
+                        feats,
+                        frame_config["length"],
+                        frame_config["step"],
+                        pad_end=frame_config.get("pad_zeros", False),
+                        axis=0)
+                return (feats_in_frames, *meta)
+            ds = ds.map(to_frames, num_parallel_calls=TF_AUTOTUNE)
+        elif "random_frames" in config:
+            frame_config = config["random_frames"]
+            if verbosity:
+                print("Dividing the time axis of features into random length chunks")
+                if verbosity > 1:
+                    print("Using random chunk config:")
+                    yaml_pprint(frame_config)
+            frame_chunker_fn = make_random_frame_chunker_fn(frame_config["length"])
+            chunk_timedim_randomly = lambda f, *meta: (frame_chunker_fn(f), *meta)
+            ds = ds.map(chunk_timedim_randomly, num_parallel_calls=TF_AUTOTUNE)
+        if frame_config.get("flatten", True):
+            if verbosity:
+                print("Flattening all utterance chunks into independent utterances")
             def _unbatch_ragged_frames(frames, *meta):
                 frames_ds = tf.data.Dataset.from_tensor_slices(frames)
                 inf_repeated_meta_ds = [tf.data.Dataset.from_tensors(m).repeat() for m in meta]
                 return tf.data.Dataset.zip((frames_ds, *inf_repeated_meta_ds))
             ds = ds.flat_map(_unbatch_ragged_frames)
-        ds = ds.filter(lambda frames, *meta: tf.shape(frames)[0] > 0)
+    ds = ds.filter(lambda frames, *meta: tf.shape(frames)[0] > 0)
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
     def to_model_input(feats, meta):
         return (feats, label2onehot(meta[1]), meta[0], *meta[2:])

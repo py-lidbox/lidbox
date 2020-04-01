@@ -9,7 +9,6 @@ import random
 import sys
 import time
 
-import kaldiio
 import numpy as np
 import sklearn
 import tensorflow as tf

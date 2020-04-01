@@ -1,23 +1,62 @@
 $schema: 'http://json-schema.org/draft-07/schema#'
 type: object
 description: 'lidbox experiment configuration file'
+
 required:
   - cache
   - datasets
   - experiment
   - features
+
 definitions:
+  dataset:
+    type: object
+    description: 'Metadata for one dataset'
+    required:
+      - key
+      - labels
+      - datagroups
+    additionalProperties: false
+    properties:
+      key:
+        type: string
+        description: 'Unique identifier for a dataset'
+      labels:
+        type: array
+        description: 'One or more unique labels present in the dataset'
+        contains:
+          type: string
+      datagroups:
+        type: array
+        contains:
+          type: object
+          description: 'Metadata for one datagroup (e.g. train or test)'
+          required:
+            - key
+            - path
+          additionalProperties: false
+          properties:
+            key:
+              type: string
+            path:
+              type: string
+            shuffle_utt2path:
+              type: boolean
+            utt2label:
+              type: string
+            utt2dur:
+              type: string
   datagroup:
     type: object
     required:
-      - batch_size
       - datagroup
+    additionalProperties: false
     properties:
+      datagroup:
+        type: string
       batch_size:
         type: integer
         exclusiveMinimum: 0
-      datagroup:
-        type: string
       features_cache:
         type: object
         required:
@@ -49,46 +88,66 @@ definitions:
               size_multiplier:
                 type: integer
                 exclusiveMinimum: 0
+      copy_cache_to_tmp:
+        type: boolean
+      group_by_sequence_length:
+        type: object
+        additionalProperties: false
+        properties:
+          min_batch_size:
+            type: integer
+            exclusiveMinimum: 0
+          max_batch_size:
+            type: integer
+            exclusiveMinimum: 0
+      min_shape:
+        type: array
+        contains:
+          anyOf:
+            - type: integer
+              minimum: 0
+            - type: 'null'
+      frames:
+        type: object
+        additionalProperties: false
+        properties:
+          flatten:
+            type: boolean
+          pad_zeros:
+            type: boolean
+          length:
+            type: integer
+            exclusiveMinimum: 0
+          step:
+            type: integer
+            exclusiveMinimum: 0
+      random_frames:
+        type: object
+        additionalProperties: false
+        properties:
+          pad_zeros:
+            type: boolean
+          flatten:
+            type: boolean
+          length:
+            type: object
+            additionalProperties: false
+            properties:
+              min:
+                type: integer
+                minimum: 0
+              max:
+                type: integer
+                exclusiveMinimum: 0
+              num_bins:
+                type: integer
+                exclusiveMinimum: 0
+
 properties:
   datasets:
     type: array
     contains:
-      type: object
-      description: 'Metadata for one dataset'
-      required:
-        - key
-        - labels
-        - datagroups
-      additionalProperties: false
-      properties:
-        key:
-          type: string
-          description: 'Unique identifier for a dataset'
-        labels:
-          type: array
-          description: 'One or more unique labels present in the dataset'
-          contains:
-            type: string
-        datagroups:
-          type: array
-          contains:
-            type: object
-            description: 'Metadata for one datagroup (e.g. train or test)'
-            required:
-              - key
-              - path
-            additionalProperties: false
-            properties:
-              key:
-                type: string
-              path:
-                type: string
-              shuffle_utt2path:
-                type: boolean
-              utt2label:
-                type: string
-              utt2dur:
-                type: string
+      $ref: '#/definitions/dataset'
   features:
     type: object
     description: 'Feature extraction pipeline configuration for all datagroups'
@@ -205,6 +264,27 @@ properties:
         properties:
           axis:
             type: integer
+      datagroups:
+        # Embeddings, bottleneck-features, Kaldi-features etc. pre-extracted for every datagroup
+        type: array
+        contains:
+          type: object
+          required:
+            - features_path
+            - key
+            - shape
+          properties:
+            features_path:
+              type: string
+            key:
+              type: string
+            shape:
+              type: array
+              contains:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                  - type: 'null'
       mean_var_norm_slide:
         type: object
         additionalProperties: false
@@ -241,7 +321,7 @@ properties:
           anyOf:
             - type: integer
               minimum: 0
-            # - type: null
+            - type: 'null'
       loss:
         type: object
         description: 'Keras loss function'
