@@ -108,11 +108,21 @@ def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy
 
 @tf.function
 def read_wav(path):
-    wav = tf.audio.decode_wav(tf.io.read_file(path))
-    # Merge channels by averaging, for mono this just drops the channel dim.
-    signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
-    return Wav(signal, wav.sample_rate)
+    file_contents = tf.io.read_file(path)
+    if tf.strings.length(file_contents) < 44:
+        # No PCM header, this cannot be a wav file
+        signal = tf.zeros([0])
+        sample_rate = 0
+    else:
+        wav = tf.audio.decode_wav(file_contents)
+        # Merge channels by averaging, for mono this just drops the channel dim.
+        signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
+        sample_rate = wav.sample_rate
+    return Wav(signal, sample_rate)
 
+# Usage:
+# path = /home/it_me/acoustic_data/signal.wav
+# signal, sr = tf.numpy_function(audio_feat.py_read_wav, (path,), (tf.float32, tf.int32))
 def py_read_wav(path):
     try:
         signal, sr = librosa.core.load(path, sr=None, mono=True)

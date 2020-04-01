@@ -581,9 +581,11 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                 if verbosity and not ok:
                     tf_util.tf_print("dropping utterance ", meta[0], ", reason: signal length ", duration, " < ", min_duration, " min chunk length (seconds)", sep='', output_stream=sys.stderr)
                 return ok
+            # def read_wav_with_meta(path, meta, duration):
+                # signal, sr = tf.numpy_function(audio_feat.py_read_wav, (path,), (tf.float32, tf.int32))
+                # return audio_feat.Wav(signal, sr), path, meta
             def read_wav_with_meta(path, meta, duration):
-                signal, sr = tf.numpy_function(audio_feat.py_read_wav, (path,), (tf.float32, tf.int32))
-                return audio_feat.Wav(signal, sr), path, meta
+                return audio_feat.read_wav(path), path, meta
             target_sr = wav_config.get("filter_sample_rate", -1)
             if verbosity:
                 if target_sr < 0:
