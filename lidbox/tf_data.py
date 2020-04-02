@@ -288,9 +288,9 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
     else:
         ds = ds.map(lambda feats, meta: (feats, *meta))
     # Transform dataset such that 2 first elements will always be (sample, onehot_label) and rest will be metadata that can be safely dropped when training starts
-    def to_model_input(feats, str_meta, *rest):
-        uttid, label = str_meta[0], str_meta[1]
-        return (feats, label2onehot(label), uttid, *rest)
+    def to_model_input(feats, *meta):
+        uttid, label = meta[0], meta[1]
+        return (feats, label2onehot(label), uttid, *meta[2:])
     ds = ds.map(to_model_input, num_parallel_calls=TF_AUTOTUNE)
     if "min_shape" in config:
         if verbosity:
@@ -647,10 +647,10 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
                 dataset_types,
                 dataset_shapes,
                 args=args)
-        def unpack_wav_tuples(wav, meta):
-            return wav.audio, wav.sample_rate, meta
-        def pack_wav_tuples(signal, sample_rate, meta):
-            return audio_feat.Wav(signal, sample_rate), meta
+        def unpack_wav_tuples(wav, *meta):
+            return (wav.audio, wav.sample_rate, *meta)
+        def pack_wav_tuples(wav, *meta):
+            return (audio_feat.Wav(*wav), *meta)
         if verbosity:
             print("Generating chunks from all source audio files")
         wavs_ds = (wavs_ds

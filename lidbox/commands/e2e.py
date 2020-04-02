@@ -214,7 +214,7 @@ class Train(E2EBase):
                 i = 0
                 if args.verbosity > 1:
                     print(now_str(date=True), "- 0 samples done")
-                for i, (feats, (str_meta, wav)) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
+                for i, (feats, (str_meta, wav, *rest)) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
                     if args.verbosity > 1 and i % 10000 == 0:
                         print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
