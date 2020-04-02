@@ -93,6 +93,8 @@ definitions:
       group_by_sequence_length:
         type: object
         additionalProperties: false
+        required:
+          - max_batch_size
         properties:
           min_batch_size:
             type: integer

@@ -162,12 +162,14 @@ class Util(BaseCommand):
         if args.verbosity:
             print("Validating configuration files against JSON schema from '{}'.".format(lidbox.CONFIG_FILE_SCHEMA_PATH))
         schema = system.load_yaml(lidbox.CONFIG_FILE_SCHEMA_PATH)
+        exit_code = 0
         for infile in args.infile:
             config = system.load_yaml(infile)
             try:
                 jsonschema.validate(instance=config, schema=schema)
                 print("File '{}' ok".format(infile))
             except jsonschema.ValidationError as error:
+                exit_code = 1
                 print("File '{}' validation failed, error is:\n  {}".format(infile, error.message))
                 if error.context:
                     print("context:")
@@ -178,6 +180,7 @@ class Util(BaseCommand):
                 if args.verbosity > 1:
                     print("Instance was:")
                     lidbox.yaml_pprint(error.instance, left_pad=2)
+        return exit_code
 
     def run(self):
         return self.run_tasks()

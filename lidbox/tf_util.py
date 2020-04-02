@@ -27,7 +27,6 @@ def tf_print(*args, **kwargs):
     return tf.print(*args, **kwargs)
 
 
-@tf.function
 def count_dim_sizes(ds, ds_element_index=0, ndims=1):
     """
     Given a dataset 'ds' of 'ndims' dimensional tensors at element index 'ds_element_index', accumulate the shape counts of all tensors.
@@ -51,14 +50,13 @@ def count_dim_sizes(ds, ds_element_index=0, ndims=1):
     shapes_ds = ds.map(get_shape_at_index)
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)
-    max_sizes = shapes_ds.reduce(
-        tf.zeros(ndims, dtype=tf.int32),
-        lambda acc, shape: tf.math.maximum(acc, shape))
-    max_max_size = tf.reduce_max(max_sizes)
-    @tf.function
     def accumulate_dim_size_counts(counter, shape):
         enumerated_shape = tf.stack((shape_indices, shape), axis=1)
         return tf.tensor_scatter_nd_add(counter, enumerated_shape, ones)
+    max_sizes = shapes_ds.reduce(
+        tf.zeros(ndims, dtype=tf.int32),
+        lambda acc, shape: tf.math.maximum(acc, shape))
+    max_max_size = tf.math.reduce_max(max_sizes)
     size_counts = shapes_ds.reduce(
         tf.zeros((ndims, max_max_size + 1), dtype=tf.int32),
         accumulate_dim_size_counts)

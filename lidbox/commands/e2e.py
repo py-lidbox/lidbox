@@ -145,7 +145,11 @@ class Train(E2EBase):
             self.experiment_config["datasets"] = [d for d in dataset_config if d["key"] in self.experiment_config["datasets"]]
         #FIXME
         for ds in self.experiment_config["datasets"]:
-            ds["datagroups"] = {d.pop("key"): d for d in ds["datagroups"]}
+            datagroups_dict = {}
+            for d in ds["datagroups"]:
+                assert d["key"] not in datagroups_dict, "Duplicate dataset key '{}'".format(d["key"])
+                datagroups_dict[d.pop("key")] = d
+            ds["datagroups"] = datagroups_dict
         labels = sorted(set(l for d in self.experiment_config["datasets"] for l in d["labels"]))
         label2int, OH = tf_util.make_label2onehot(labels)
         def label2onehot(label):
@@ -210,11 +214,11 @@ class Train(E2EBase):
                 i = 0
                 if args.verbosity > 1:
                     print(now_str(date=True), "- 0 samples done")
-                for i, (feats, *meta) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
+                for i, (feats, (str_meta, wav)) in enumerate(extractor_ds.as_numpy_iterator(), start=1):
                     if args.verbosity > 1 and i % 10000 == 0:
                         print(now_str(date=True), "-", i, "samples done")
                     if args.verbosity > 3:
-                        tf_util.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", *meta)
+                        tf_util.tf_print("sample:", i, "features shape:", tf.shape(feats), "metadata:", str_meta, "signal shape", tf.shape(wav.audio), "sample rate", wav.sample_rate)
                 if args.verbosity > 1:
                     print(now_str(date=True), "- all", i, "samples done")
             dataset[ds_key] = tf_data.prepare_dataset_for_training(
@@ -443,8 +447,16 @@ class Predict(E2EBase):
             verbosity=args.verbosity,
         )
         if args.verbosity:
-            print("Gathering all expected utterance ids labels from datagroup config")
-        all_utterance_ids = set(parse_utt2meta(self.experiment_config["datasets"], datagroup_key, "utt2path"))
+            print("Gathering all expected utterance ids and labels from test set datagroup config")
+        all_utterance_ids = set()
+        all_testset_labels = set()
+        for utt, label in parse_utt2meta(self.experiment_config["datasets"], datagroup_key, "utt2label").items():
+            all_utterance_ids.add(utt)
+            all_testset_labels.add(label)
+        if args.verbosity > 1:
+            print("Test set is expected to contain {} unique labels:".format(len(all_testset_labels)))
+            for l in sorted(all_testset_labels):
+                print(" ", l)
         if args.verbosity:
             print("Gathering all utterance ids from features dataset iterator")
         # Gather utterance ids, this also causes the extraction pipeline to be evaluated
@@ -473,9 +485,9 @@ class Predict(E2EBase):
         max_score = -np.inf
         with open(args.scores, "w") as scores_f:
             print(*labels, file=scores_f)
-            if "chunks" in feat_config.get("wav_config", {}):
+            if "chunks" in feat_config.get("wav_config", {}) or "frames" in ds_config:
                 if args.verbosity:
-                    print("Features were extracted from fixed length chunks, language scores for each utterance will be produced by averaging over each chunk in the utterance")
+                    print("Utterances have been divided into chunks, language scores for each utterance will be produced by averaging over each chunk in the utterance")
                 # group chunk predictions by parent utterance id
                 utt2prediction = [
                         (utt, np.stack([pred for _, pred in chunk2pred]).mean(axis=0))
@@ -500,8 +512,9 @@ class Predict(E2EBase):
             if args.verbosity:
                 print("'evaluate_metrics' given in datagroup config, it is assumed that correct labels are available")
             utt2label = parse_utt2meta(self.experiment_config["datasets"], datagroup_key, "utt2label")
-            # add worst case scores for all missed utterances
-            utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
+            if missed_utterances:
+                # Add worst case scores for all missed utterances
+                utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
             true_labels = tf.stack([label2onehot(tf.constant(utt2label[utt], tf.string)) for utt, _ in utt2prediction], 0)
             predictions = tf.stack([pred for _, pred in utt2prediction], 0)
             if args.verbosity > 1:
@@ -511,6 +524,10 @@ class Predict(E2EBase):
             metric_results = []
             true_labels_sparse = tf.math.argmax(true_labels, axis=1).numpy()
             pred_labels_sparse = tf.math.argmax(predictions, axis=1).numpy()
+            if args.verbosity > 3:
+                print("Dumping all true labels and predictions (by argmax)")
+                for (uttid, _), true_index, pred_index in zip(utt2prediction, true_labels_sparse, pred_labels_sparse):
+                    print("utt: {}, true: {}, pred: {}".format(uttid, true_index, pred_index))
             for metric in ds_config["evaluate_metrics"]:
                 result = None
                 if metric["name"] == "average_detection_cost":
@@ -525,6 +542,11 @@ class Predict(E2EBase):
                         print("Evaluating average equal error rate")
                     eer = np.zeros(len(labels))
                     for l, label in enumerate(labels):
+                        if label not in all_testset_labels:
+                            if args.verbosity > 1:
+                                print("  label '{}' not in the test set, setting EER = 0".format(label))
+                            eer[l] = 0
+                            continue
                         # https://stackoverflow.com/a/46026962
                         fpr, tpr, _ = sklearn.metrics.roc_curve(
                                 true_labels[:,l].numpy(),

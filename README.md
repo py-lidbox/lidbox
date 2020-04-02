@@ -9,7 +9,7 @@ Or feel free to just copy paste useful parts into your own program if you want.
 
 ## Quickstart
 
-Install TensorFlow 2.1 (or newer).
+Install TensorFlow 2.1 or 2.2 (tested with both).
 
 Clone the repo and install `lidbox` as a Python package in setuptools develop mode (`pip install --editable`).
 This makes it easier to experiment with the code.
@@ -30,5 +30,4 @@ If everything is working, see [this](./examples/common-voice) for a simple examp
 * move as much logic as possible from the CLI code into `lidbox/api.py`
 * reduce repetition in the `predict` and `train` commands
 * more mutex locks when updating the caches
-* simplify `tf.data.Dataset` pipelines, no spaghetti leaks
-* efficient metric implementations, must run in tf graph
+* simplify the `tf.data.Dataset` e2e pipeline, e.g. always use dicts for iterator elements
