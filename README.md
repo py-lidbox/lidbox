@@ -12,12 +12,12 @@ Or feel free to just copy paste useful parts into your own program if you want.
 Install TensorFlow 2.1 or 2.2 (tested with both).
 
 Clone the repo and install `lidbox` as a Python package in setuptools develop mode (`pip install --editable`).
-This makes it easier to experiment with the code.
+This makes it easier to experiment with the code since there's no need to reinstall the package after making changes.
 ```
 git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
 pip install --editable ./lidbox
 ```
-Check that the entry point is working
+Check that the command line entry point is working
 ```
 lidbox -h
 ```

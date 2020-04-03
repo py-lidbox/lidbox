@@ -88,7 +88,7 @@ definitions:
               size_multiplier:
                 type: integer
                 exclusiveMinimum: 0
-      copy_cache_to_tmp:
+      cache_prepared_dataset_to_tmpdir:
         type: boolean
       group_by_sequence_length:
         type: object
@@ -143,16 +143,23 @@ definitions:
           length:
             type: object
             additionalProperties: false
+            required:
+              - max
+              - min
+              - num_bins
             properties:
-              min:
-                type: integer
-                minimum: 0
               max:
                 type: integer
                 exclusiveMinimum: 0
+              min:
+                type: integer
+                minimum: 0
               num_bins:
                 type: integer
                 exclusiveMinimum: 0
+              min_overlap:
+                type: number
+                exclusiveMaximum: 1.0
 
 properties:
   datasets:
