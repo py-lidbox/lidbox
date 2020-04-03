@@ -207,6 +207,7 @@ def make_random_frame_chunker_fn(len_config):
         begin = tf.boolean_mask(begin, begin < num_total_frames)
         end = begin + tf.boolean_mask(rand_chunk_lengths, begin < num_total_frames)
         end = tf.math.minimum(num_total_frames, end)
+        # TODO gather is overkill here since we only want several slices
         chunk_indices = tf.ragged.range(begin, end)
         return tf.gather(features, chunk_indices)
     return chunk_timedim_randomly
@@ -253,6 +254,8 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
                 if verbosity > 1:
                     print("Using random chunk config:")
                     yaml_pprint(frame_config)
+            if "cache_prepared_dataset_to_tmpdir" not in config:
+                print("Warning: 'cache_prepared_dataset_to_tmpdir' not given, the dataset will contain different samples at every epoch due to 'random_frames', this will break assumptions made by Keras")
             tmp_fn = make_random_frame_chunker_fn(frame_config["length"])
             frame_chunker_fn = lambda feats, *args: (tmp_fn(feats), *args)
             ds = ds.map(frame_chunker_fn, num_parallel_calls=TF_AUTOTUNE)
@@ -337,7 +340,7 @@ def prepare_dataset_for_training(ds, config, feat_config, label2onehot, model_id
                 config["group_by_sequence_length"]["max_batch_size"],
                 verbosity=verbosity,
                 sequence_dim=0)
-    if config.get("copy_cache_to_tmp", False):
+    if config.get("cache_prepared_dataset_to_tmpdir", False):
         tmp_cache_path = "{}/tensorflow-cache/{}/training-prepared_{}_{}".format(
                 os.environ.get("TMPDIR", "/tmp"),
                 model_id,
@@ -396,7 +399,8 @@ def attach_dataset_logger(ds, features_name, max_outputs=10, image_resize_kwargs
         tf.summary.histogram("input_labels", labels, step=batch_idx)
         tf.summary.image(features_name, image, step=batch_idx, max_outputs=max_outputs)
         tf.debugging.assert_equal(tf.expand_dims(wavs.sample_rate[0], 0), wavs.sample_rate, message="All utterances in a batch must have the same sample rate")
-        tf.summary.audio("utterances", tf.expand_dims(wavs.audio, -1), wavs.sample_rate[0], step=batch_idx, max_outputs=max_outputs)
+        if tf.reduce_all(tf.size(wavs.audio) > 0) and tf.reduce_all(wavs.sample_rate != 0):
+            tf.summary.audio("utterances", tf.expand_dims(wavs.audio, -1), wavs.sample_rate[0], step=batch_idx, max_outputs=max_outputs)
         enumerated_uttids = tf.strings.reduce_join(
                 (tf.strings.as_string(tf.range(1, max_outputs + 1)), uttids[:max_outputs]),
                 axis=0,
@@ -679,59 +683,6 @@ def extract_features_from_paths(feat_config, paths, meta, datagroup_key, verbosi
     def wav_batch_to_features(wavs, *meta):
         return extract_features(wavs, *feat_extract_args), (*meta, wavs)
     return wavs_batched.map(wav_batch_to_features, num_parallel_calls=TF_AUTOTUNE)
-    ## This was for debugging the tf normalization implementation
-    # if "mean_var_norm_numpy" in feat_config:
-    #     window_len = tf.constant(feat_config["mean_var_norm_numpy"]["window_len"], tf.int32)
-    #     normalize_variance = tf.constant(feat_config["mean_var_norm_numpy"].get("normalize_variance", True), tf.bool)
-    #     if verbosity:
-    #         tf_util.tf_print("Using numpy to apply mean_var_norm sliding window of length", window_len, "without padding. Will also normalize variance:", normalize_variance)
-    #     def apply_mean_var_norm_numpy(feats, *rest):
-    #         normalized = tf.numpy_function(
-    #             mean_var_norm_nopad_slide_numpy,
-    #             [feats, window_len, normalize_variance],
-    #             feats.dtype)
-    #         normalized.set_shape(feats.shape.as_list())
-    #         return (normalized, *rest)
-    #     features = features.map(apply_mean_var_norm_numpy, num_parallel_calls=TF_AUTOTUNE)
-    # return features
-
-def parse_sparsespeech_features(feat_config, enc_path, feat_path, seg2utt, utt2label):
-    utt2label = {u: d["label"] for u, d in utt2meta.items()}
-    ss_input = kaldiio.load_scp(feat_path)
-    with open(enc_path, "rb") as f:
-        ss_encoding = np.load(f, fix_imports=False, allow_pickle=True).item()
-    assert set(ss_input.keys()) == set(ss_encoding.keys()), "missing utterances, maybe all were not encoded?"
-    keys = list(ss_encoding.keys())
-    assert all(ss_encoding[k].ndim == ss_input[k].ndim for k in keys), "ss input and output must have the same dimensions"
-    assert all(ss_encoding[k].shape[0] == ss_input[k].shape[0] for k in keys), "mismatching amount of time steps in ss input and the output encoding"
-    encodingtype = tf.as_dtype(ss_encoding[keys[0]].dtype)
-    noise_mean = feat_config.get("noise_mean", 0.0)
-    noise_stddev = feat_config.get("noise_stddev", 0.01)
-    feat_scale_kwargs = feat_config.get("sample_minmax_scaling", {})
-    labels_only = feat_config.get("labels_only", False)
-    def datagen():
-        for seg_id, onehot_enc in ss_encoding.items():
-            label = utt2label[seg2utt[seg_id]]
-            noise = tf.random.normal(onehot_enc.shape, mean=noise_mean, stddev=noise_stddev, dtype=encodingtype)
-            input_feat = ss_input[seg_id]
-            output_feat = onehot_enc + noise
-            # Apply feature scaling separately
-            if feat_scale_kwargs:
-                input_feat = feature_scaling(input_feat, **feat_scale_kwargs)
-                output_feat = feature_scaling(output_feat, **feat_scale_kwargs)
-            if labels_only:
-                out = output_feat
-            else:
-                # Stack input and output features
-                out = tf.concat((input_feat, output_feat), 1)
-            yield out, seg_id, label
-    #FIXME metadata into tuple and add dummy signals
-    return tf.data.Dataset.from_generator(
-        datagen,
-        (encodingtype, tf.string, tf.string),
-        (tf.TensorShape(feat_config["shape_after_concat"]),
-         tf.TensorShape([]),
-         tf.TensorShape([])))
 
 def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape, feat_conf):
     utt2label = {u: d["label"] for u, d in utt2meta.items()}
@@ -739,7 +690,6 @@ def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape
     feat_conf = dict(feat_conf)
     normalize_mean_axis = feat_conf.pop("normalize_mean_axis", None)
     normalize_stddev_axis = feat_conf.pop("normalize_stddev_axis", None)
-    assert not feat_conf, "feat_conf contains unrecognized keys: {}".format(','.join(str(k) for k in feat_conf))
     def assert_shape(shape):
         shape_str = "{} vs {}".format(shape, expected_shape)
         assert len(shape) == len(expected_shape), shape_str
@@ -758,12 +708,12 @@ def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape
             if normalize_stddev_axis is not None:
                 stddev = tf.math.reduce_std(feats, axis=normalize_stddev_axis, keepdims=True)
                 normalized = tf.math.divide_no_nan(normalized, stddev)
-            yield normalized, utt, utt2label[utt]
+            yield normalized, (utt, utt2label[utt])
     ds = tf.data.Dataset.from_generator(
         datagen,
-        (tf.float32, tf.string, tf.string),
-        (tf.TensorShape(expected_shape), tf.TensorShape([]), tf.TensorShape([])))
-    # Group metadata into tuple, note that this is not the same as using a 2-element tf.string tensor for metadata
-    # Also add empty signals (since we don't know the origin of these features)
-    ds = ds.map(lambda feats, utt, label: (feats, (utt, label, audio_feat.Wav(tf.zeros([1]), 16000))))
-    return ds.batch(1)
+        (tf.float32, tf.string),
+        (tf.TensorShape(expected_shape), tf.TensorShape([2])))
+    # Add empty signals (since we don't know the origin of these features)
+    empty_wav = audio_feat.Wav(tf.zeros([0]), 0)
+    add_empty_signal = lambda feats, meta: (feats, (meta, empty_wav))
+    return ds.map(add_empty_signal).batch(1)
