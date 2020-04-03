@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setuptools.setup(
     name="lidbox",
-    version="0.3.0",
+    version="0.4.0",
     description="Command line toolbox for spoken language classification experiments.",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
