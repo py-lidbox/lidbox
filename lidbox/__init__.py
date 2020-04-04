@@ -1,10 +1,17 @@
 """
 Toolbox containing various speech data analysis tools.
 """
+import logging
 import os
 import yaml
 
-TF_DEBUG = bool(os.environ.get("LIDBOX_TF_DEBUG", False))
+DEBUG = os.environ.get("LIDBOX_DEBUG") not in (None, "False", "false", "0")
+
+logging.basicConfig(
+        level=logging.DEBUG if DEBUG else logging.INFO,
+        style="{",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        format="{asctime:s}.{msecs:03.0f} {levelname[0]:s} {name:6s}: {message:s}")
 
 def get_package_root():
     from . import __path__

@@ -221,9 +221,6 @@ properties:
                 type: integer
                 description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
                 minimum: 0
-              expected_samples_per_file:
-                type: integer
-                exclusiveMinimum: 0
           filter_sample_rate:
             type: integer
             description: 'Sample rate expected for all read files. Files with different rates are ignored'

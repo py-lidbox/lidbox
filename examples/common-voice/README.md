@@ -33,11 +33,11 @@ After downloading, the directory should contain the following files:
 2. Run
 
         bash scripts/prepare.bash
-    This will convert all mp3-files to wav-files, which creates about 4G of data into directory `./common-voice-data`.
+    This will convert all mp3-files to wav-files, which creates about 4G of data into directory `./data`.
     After the command completes, the mp3-files are no longer needed.
     It is not necessary to delete them, but you can do it if you want to:
 
-        rm -r ./common-voice-data/??/clips
+        rm -r ./data/??/clips
 
 3. Run the `lidbox` end-to-end pipeline with e.g. 100 files for a few epochs to check everything is working:
 
@@ -69,7 +69,7 @@ After downloading, the directory should contain the following files:
 
         lidbox e2e predict -vvv config.xvector.yaml
     The scores are written to `./lidbox-cache/xvector/predictions/scores`
-    In addition, you will see some metrics computed from the scores using correct labels from the `./common-voice-data/test/utt2label` file.
+    In addition, you will see some metrics computed from the scores using correct labels from the `./data/test/utt2label` file.
 
 It is also possible to skip step 6, since all features could also be extracted during the first epoch during training.
 When the first epoch ends, all features have been cached and next epochs will use the cached features.

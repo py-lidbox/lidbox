@@ -3,8 +3,8 @@ import os
 import tensorflow as tf
 
 import lidbox
-if lidbox.TF_DEBUG:
-    tf.autograph.set_verbosity(10, alsologtostdout=True)
+if lidbox.DEBUG:
+    # tf.autograph.set_verbosity(10, alsologtostdout=True)
     TF_AUTOTUNE = None
 else:
     TF_AUTOTUNE = tf.data.experimental.AUTOTUNE

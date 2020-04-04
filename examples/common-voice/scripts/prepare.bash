@@ -22,7 +22,7 @@ datasets=(
 # This contains all tar.gz files
 downloads_dir=./downloads
 # Where to unpack all tars and convert mp3s to wavs
-output_dir=./common-voice-data
+output_dir=./data
 # Ignore files shorter than 1 second
 min_file_dur_sec=1
 # Resample all wav-files to this rate before writing
