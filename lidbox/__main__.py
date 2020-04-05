@@ -6,7 +6,7 @@ import sys
 import time
 
 import lidbox
-from lidbox.commands import create_argparser
+import lidbox.cli
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
         print("Running cProfile, writing output to '{}'".format(profile_file), file=sys.stderr)
         profile = cProfile.Profile()
         profile.enable()
-    parser = create_argparser()
+    parser = lidbox.cli.create_argparser()
     if len(sys.argv) < 2:
         parser.error("Too few arguments, run '{} --help' for more information.".format(lidbox.__name__))
     # TODO when a subcommand is used incorrectly, get usage strings for its subparser  instead of the root parser

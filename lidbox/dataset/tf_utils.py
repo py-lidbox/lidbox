@@ -1,4 +1,6 @@
+import matplotlib.cm
 import tensorflow as tf
+
 import lidbox.features as features
 import lidbox.features.audio as audio_features
 
@@ -11,6 +13,59 @@ def tf_print(*args, **kwargs):
     return tf.print(*args, **kwargs)
 
 
+def make_label2onehot(labels):
+    """
+    >>> labels = tf.constant(["one", "two", "three"], tf.string)
+    >>> label2int, OH = make_label2onehot(labels)
+    >>> for i in range(3):
+    ...     (label2int.lookup(labels[i]).numpy(), tf.math.argmax(OH[i]).numpy())
+    (0, 0)
+    (1, 1)
+    (2, 2)
+    """
+    num_labels = tf.size(labels)
+    labels_enum = tf.range(num_labels)
+    # Label to int or one past last one if not found
+    # TODO slice index out of bounds is probably not a very informative error message
+    out_of_bounds_result = tf.cast(num_labels, dtype=tf.int32)
+    label2int = tf.lookup.StaticHashTable(
+        tf.lookup.KeyValueTensorInitializer(labels, labels_enum),
+        out_of_bounds_result)
+    OH = tf.one_hot(labels_enum, num_labels)
+    return label2int, OH
+
+
+def matplotlib_colormap_to_tensor(colormap):
+    """
+    Given a matplotlib colormap name, extract all RGB values from its cmap numpy array into a tf.constant.
+    Based on https://gist.github.com/jimfleming/c1adfdb0f526465c99409cc143dea97b
+    """
+    cmap = matplotlib.cm.get_cmap(colormap)
+    num_colors = tf.constant(cmap.N, tf.int32)
+    colors = tf.constant(cmap(tf.range(num_colors + 1).numpy())[:,:3], tf.float32)
+    return colors
+
+
+@tf.function
+def tensors_to_rgb_images(inputs, colors, size_multiplier=1):
+    tf.debugging.assert_rank(inputs, 3, message="imshow_tensors expects batches of 2 dimensional tensors with shape [batch, cols, rows].")
+    # Scale features between 0 and 1 to produce a grayscale image
+    images = features.feature_scaling(inputs, tf.constant(0.0), tf.constant(1.0))
+    # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
+    indices = tf.cast(tf.math.round(images * tf.cast(tf.shape(colors)[0] - 1, tf.float32)), tf.int32)
+    images = tf.gather(colors, indices)
+    # Here it is assumed the output images are going to Tensorboard
+    images = tf.image.transpose(images)
+    images = tf.image.flip_up_down(images)
+    # Rows and columns from shape
+    old_size = tf.cast(tf.shape(images)[1:3], tf.float32)
+    new_size = tf.cast(size_multiplier * old_size, tf.int32)
+    images = tf.image.resize(images, new_size)
+    tf.debugging.assert_all_finite(images, message="Tensor conversion to RGB images failed, non-finite values in output")
+    return images
+
+
+@tf.function
 def count_dim_sizes(ds, ds_element_index=0, ndims=1):
     """
     Given a dataset 'ds' of 'ndims' dimensional tensors at element index 'ds_element_index', accumulate the shape counts of all tensors.
@@ -53,60 +108,36 @@ def count_dim_sizes(ds, ds_element_index=0, ndims=1):
         axis=2)
 
 
-def make_label2onehot(labels):
-    """
-    >>> labels = tf.constant(["one", "two", "three"], tf.string)
-    >>> label2int, OH = make_label2onehot(labels)
-    >>> for i in range(3):
-    ...     (label2int.lookup(labels[i]).numpy(), tf.math.argmax(OH[i]).numpy())
-    (0, 0)
-    (1, 1)
-    (2, 2)
-    """
-    labels_enum = tf.range(len(labels))
-    # Label to int or one past last one if not found
-    # TODO slice index out of bounds is probably not a very informative error message
-    label2int = tf.lookup.StaticHashTable(
-        tf.lookup.KeyValueTensorInitializer(
-            tf.constant(labels),
-            tf.constant(labels_enum)
-        ),
-        tf.constant(len(labels), dtype=tf.int32)
-    )
-    OH = tf.one_hot(labels_enum, len(labels))
-    return label2int, OH
-
-
+@tf.function
 def extract_features(signals, sample_rates, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, window_norm_kwargs):
     tf.debugging.assert_rank(signals, 2, message="Input signals for feature extraction must be batches of mono signals without channels, i.e. of shape [B, N] where B is batch size and N number of samples.")
     tf.debugging.assert_equal(sample_rates, [sample_rates[0]], message="Different sample rates in a single batch not supported, all signals in the same batch should have the same sample rate.")
     #TODO batches with different sample rates (probably not worth the effort)
     sample_rate = sample_rates[0]
-    feat = audio_features.spectrograms(signals, sample_rate, **spec_kwargs)
-    # tf.debugging.assert_all_finite(feat, "spectrogram failed")
+    X = audio_features.spectrograms(signals, sample_rate, **spec_kwargs)
+    tf.debugging.assert_all_finite(X, "spectrogram failed")
     if feattype in ("melspectrogram", "logmelspectrogram", "mfcc"):
-        feat = audio_features.melspectrograms(feat, sample_rate=sample_rate, **melspec_kwargs)
-        # tf.debugging.assert_all_finite(feat, "melspectrogram failed")
+        X = audio_features.melspectrograms(X, sample_rate=sample_rate, **melspec_kwargs)
+        tf.debugging.assert_all_finite(X, "melspectrogram failed")
         if feattype in ("logmelspectrogram", "mfcc"):
-            feat = tf.math.log(feat + 1e-6)
-            # tf.debugging.assert_all_finite(feat, "logmelspectrogram failed")
+            X = tf.math.log(X + 1e-6)
+            tf.debugging.assert_all_finite(X, "logmelspectrogram failed")
             if feattype == "mfcc":
                 coef_begin = mfcc_kwargs.get("coef_begin", 1)
                 coef_end = mfcc_kwargs.get("coef_end", 13)
-                mfccs = tf.signal.mfccs_from_log_mel_spectrograms(feat)
-                feat = mfccs[..., coef_begin:coef_end]
-                # tf.debugging.assert_all_finite(feat, "mfcc failed")
+                mfccs = tf.signal.mfccs_from_log_mel_spectrograms(X)
+                X = mfccs[..., coef_begin:coef_end]
+                tf.debugging.assert_all_finite(X, "mfcc failed")
     elif feattype in ("db_spectrogram",):
-        feat = audio_features.power_to_db(feat, **db_spec_kwargs)
-        # tf.debugging.assert_all_finite(feat, "db_spectrogram failed")
+        X = audio_features.power_to_db(X, **db_spec_kwargs)
+        tf.debugging.assert_all_finite(X, "db_spectrogram failed")
     if feat_scale_kwargs:
-        feat = features.feature_scaling(feat, **feat_scale_kwargs)
-        # tf.debugging.assert_all_finite(feat, "feature scaling failed")
+        X = features.feature_scaling(X, **feat_scale_kwargs)
+        tf.debugging.assert_all_finite(X, "feature scaling failed")
     if window_norm_kwargs:
-        feat = features.window_normalization(feat, **window_norm_kwargs)
-        # tf.debugging.assert_all_finite(feat, "window normalization failed")
-    tf.debugging.assert_all_finite(feat, "Non-finite values after feature extraction")
-    return feat
+        X = features.window_normalization(X, **window_norm_kwargs)
+        tf.debugging.assert_all_finite(X, "window normalization failed")
+    return X
 
 
 #TODO

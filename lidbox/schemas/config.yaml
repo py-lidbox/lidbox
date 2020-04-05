@@ -1,12 +1,9 @@
 $schema: 'http://json-schema.org/draft-07/schema#'
 type: object
-description: 'lidbox experiment configuration file'
+description: 'lidbox configuration file'
 
 required:
-  - cache
   - datasets
-  - experiment
-  - features
 
 definitions:
   dataset:
@@ -15,7 +12,7 @@ definitions:
     required:
       - key
       - labels
-      - datagroups
+      - splits
     additionalProperties: false
     properties:
       key:
@@ -26,11 +23,11 @@ definitions:
         description: 'One or more unique labels present in the dataset'
         contains:
           type: string
-      datagroups:
+      splits:
         type: array
         contains:
           type: object
-          description: 'Metadata for one datagroup (e.g. train or test)'
+          description: 'Metadata for one split (e.g. train or test)'
           required:
             - key
             - path
@@ -40,56 +37,22 @@ definitions:
               type: string
             path:
               type: string
-            shuffle_utt2path:
+            shuffle_files:
               type: boolean
-            utt2label:
-              type: string
-            utt2dur:
-              type: string
-  datagroup:
+  split:
     type: object
     required:
-      - datagroup
+      - split
     additionalProperties: false
     properties:
-      datagroup:
+      split:
         type: string
       batch_size:
         type: integer
         exclusiveMinimum: 0
-      features_cache:
-        type: object
-        required:
-          - type
-        properties:
-          type:
-            type: string
-      shuffle_buffer:
-        type: object
-        properties:
-          before_cache:
-            type: integer
-            exclusiveMinimum: 0
-          after_cache:
-            type: integer
-            exclusiveMinimum: 0
-      dataset_logger:
-        type: object
-        properties:
-          num_batches:
-            type: integer
-            exclusiveMinimum: 0
-          max_outputs:
-            type: integer
-            exclusiveMinimum: 0
-          image_resize_kwargs:
-            type: object
-            properties:
-              size_multiplier:
-                type: integer
-                exclusiveMinimum: 0
-      cache_prepared_dataset_to_tmpdir:
-        type: boolean
+      shuffle_buffer_size:
+        type: integer
+        exclusiveMinimum: 0
       group_by_sequence_length:
         type: object
         additionalProperties: false
@@ -102,27 +65,6 @@ definitions:
           max_batch_size:
             type: integer
             exclusiveMinimum: 0
-      min_shape:
-        type: array
-        contains:
-          anyOf:
-            - type: integer
-              minimum: 0
-            - type: 'null'
-      frames:
-        type: object
-        additionalProperties: false
-        properties:
-          flatten:
-            type: boolean
-          pad_zeros:
-            type: boolean
-          length:
-            type: integer
-            exclusiveMinimum: 0
-          step:
-            type: integer
-            exclusiveMinimum: 0
       evaluate_metrics:
         type: array
         contains:
@@ -132,43 +74,18 @@ definitions:
           properties:
             name:
               type: string
-      random_frames:
-        type: object
-        additionalProperties: false
-        properties:
-          pad_zeros:
-            type: boolean
-          flatten:
-            type: boolean
-          length:
-            type: object
-            additionalProperties: false
-            required:
-              - max
-              - min
-              - num_bins
-            properties:
-              max:
-                type: integer
-                exclusiveMinimum: 0
-              min:
-                type: integer
-                minimum: 0
-              num_bins:
-                type: integer
-                exclusiveMinimum: 0
-              min_overlap:
-                type: number
-                exclusiveMaximum: 1.0
 
+#TODO move all to definitions and use refs to make this short and tidy
 properties:
+  filters:
+    type: object
   datasets:
     type: array
     contains:
       $ref: '#/definitions/dataset'
   features:
     type: object
-    description: 'Feature extraction pipeline configuration for all datagroups'
+    description: 'Feature extraction pipeline configuration for all splits'
     required:
       - type
     additionalProperties: false
@@ -282,8 +199,8 @@ properties:
         properties:
           axis:
             type: integer
-      datagroups:
-        # Embeddings, bottleneck-features, Kaldi-features etc. pre-extracted for every datagroup
+      splits:
+        # Embeddings, bottleneck-features, Kaldi-features etc. pre-extracted for every split
         type: array
         contains:
           type: object
@@ -303,7 +220,7 @@ properties:
                   - type: integer
                     minimum: 0
                   - type: 'null'
-      mean_var_norm_slide:
+      window_normalization:
         type: object
         additionalProperties: false
         properties:
@@ -313,26 +230,73 @@ properties:
           normalize_variance:
             type: boolean
   cache:
-    type: string
-    description: 'Persistent cache directory e.g. for extracted features, trained model checkpoints and TensorBoard data'
+    type: object
+    description: 'Persistent cache'
+    required:
+      - directory
+    additionalProperties: false
+    properties:
+      directory:
+        type: string
+      batch_size:
+        type: integer
+        exclusiveMinimum: 0
   experiment:
     type: object
     description: 'Model training pipeline configuration'
     required:
-      - epochs
+      - callbacks
+      - data
       - input_shape
+      - keras_fit_kwargs
       - loss
-      - model_definition
+      - metrics
+      - model
       - name
       - optimizer
-      - test
-      - train
-      - validation
+      - output_shape
     additionalProperties: false
     properties:
-      epochs:
-        type: integer
-        minimum: 0
+      data:
+        type: object
+        additionalProperties: false
+        required:
+          - train
+          - validation
+          - test
+        properties:
+          test:
+            $ref: '#/definitions/split'
+            description: 'Test/evaluation set configuration'
+          train:
+            $ref: '#/definitions/split'
+            description: 'Training set configuration'
+          validation:
+            $ref: '#/definitions/split'
+            description: 'Validation/development set configuration'
+      callbacks:
+        type: array
+        contains:
+          type: object
+          required:
+            - cls
+          additionalProperties: false
+          properties:
+            kwargs:
+              type: object
+            cls:
+              type: string
+      keras_fit_kwargs:
+        type: object
+        properties:
+          epochs:
+            type: integer
+            minimum: 0
+      output_shape:
+        type: array
+        contains:
+          type: integer
+          minimum: 0
       input_shape:
         type: array
         contains:
@@ -351,14 +315,14 @@ properties:
             type: string
           kwargs:
             type: object
-      model_definition:
+      model:
         type: object
         description: 'lidbox model definition, e.g. keyword arguments to the loader'
         required:
-          - name
+          - key
         additionalProperties: false
         properties:
-          name:
+          key:
             type: string
           kwargs:
             type: object
@@ -375,29 +339,64 @@ properties:
             type: string
           kwargs:
             type: object
-      early_stopping:
-        type: object
-      other_callbacks:
-        type: array
-        contains:
-          type: object
-          properties:
-            cls:
-              type: string
       metrics:
         type: array
         contains:
           type: object
           required:
             - cls
-      checkpoints:
+  post_process:
+    type: object
+    properties:
+      frames:
         type: object
-      test:
-        $ref: '#/definitions/datagroup'
-        description: 'Test/evaluation set configuration'
-      train:
-        $ref: '#/definitions/datagroup'
-        description: 'Training set configuration'
-      validation:
-        $ref: '#/definitions/datagroup'
-        description: 'Validation/development set configuration'
+        additionalProperties: false
+        properties:
+          flatten:
+            type: boolean
+          pad_zeros:
+            type: boolean
+          length:
+            type: integer
+            exclusiveMinimum: 0
+          step:
+            type: integer
+            exclusiveMinimum: 0
+      random_frames:
+        type: object
+        additionalProperties: false
+        properties:
+          pad_zeros:
+            type: boolean
+          flatten:
+            type: boolean
+          length:
+            type: object
+            additionalProperties: false
+            required:
+              - max
+              - min
+              - num_bins
+            properties:
+              max:
+                type: integer
+                exclusiveMinimum: 0
+              min:
+                type: integer
+                minimum: 0
+              num_bins:
+                type: integer
+                exclusiveMinimum: 0
+              min_overlap:
+                type: number
+                exclusiveMaximum: 1.0
+  show_samples:
+    type: object
+    additionalProperties: false
+    properties:
+      num_batches:
+        type: integer
+        exclusiveMinimum: 0
+      batch_size:
+        type: integer
+        exclusiveMinimum: 0

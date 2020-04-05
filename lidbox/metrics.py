@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-DEBUG = False
+import lidbox
 
 
 class AverageDetectionCost(tf.keras.metrics.Metric):
@@ -74,7 +74,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         """
         Return smallest C_avg value using all given thresholds.
         """
-        if DEBUG:
+        if lidbox.DEBUG:
             self._assert_P_fa()
         # Average false negative rate over all labels for all given thresholds
         P_miss = tf.math.reduce_mean(
@@ -96,7 +96,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
                 axis=0)
         # Average detection cost for all given thresholds
         C_avg = self.C_miss * self.P_tar * P_miss + self.C_fa * (1 - self.P_tar) * P_fa
-        if DEBUG:
+        if lidbox.DEBUG:
             tf.print("P_miss", P_miss, summarize=-1)
             tf.print("P_fa", P_fa, summarize=-1)
             tf.print("C_avg", C_avg, summarize=-1)
