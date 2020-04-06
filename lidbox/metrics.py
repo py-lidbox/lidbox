@@ -48,7 +48,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         for var in ("fn", "tp", "fp_pairs", "tn_pairs"):
             getattr(self, var).assign(tf.zeros_like(getattr(self, var)))
 
-    def update_state(self, true_positives, predictions):
+    def update_state(self, true_positives, predictions, **kwargs):
         """
         Update P_miss and P_fa counters for a given batch of true labels and predicted scores.
         """
@@ -111,10 +111,10 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
 
 class SparseAverageDetectionCost(AverageDetectionCost):
 
-    def update_state(self, true_positives, predictions):
+    def update_state(self, true_positives, predictions, **kwargs):
         N = tf.shape(self.fn)[0]
         true_positives_dense = tf.one_hot(tf.cast(tf.squeeze(true_positives, -1), tf.int32), N)
-        super().update_state(true_positives_dense, predictions)
+        super().update_state(true_positives_dense, predictions, **kwargs)
 
 
 if __name__ == "__main__":

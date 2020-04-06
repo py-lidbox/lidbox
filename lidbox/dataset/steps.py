@@ -7,6 +7,7 @@ import time
 logger = logging.getLogger("dataset")
 
 import tensorflow as tf
+TF_VERSION_MAJOR, TF_VERSION_MINOR = tuple(int(x) for x in tf.version.VERSION.split(".")[:2])
 
 import lidbox
 import lidbox.dataset.tf_utils as tf_utils
@@ -246,11 +247,14 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
         return (tf.data.Dataset
                   .zip((chunk_ds, chunk_nums_ds, repeat_x_ds))
                   .map(chunks_to_elements))
-    return ds.interleave(
-                chunk_signal_and_flatten,
-                block_length=avg_num_chunks_from_signals,
-                num_parallel_calls=TF_AUTOTUNE,
-                deterministic=deterministic_output_order)
+    interleave_kwargs = {
+            "block_length": avg_num_chunks_from_signals,
+            "num_parallel_calls": TF_AUTOTUNE,
+            "deterministic": deterministic_output_order}
+    if TF_VERSION_MAJOR == 2 and TF_VERSION_MINOR < 2:
+        del interleave_kwargs["deterministic"]
+        logger.warning("Deleted unsupported 'deterministic' kwarg from tf.data.Dataset.interleave call, TF version >= 2.2 is required.")
+    return ds.interleave(chunk_signal_and_flatten, **interleave_kwargs)
 
 
 def drop_empty(ds):
