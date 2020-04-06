@@ -424,7 +424,8 @@ VALID_STEP_FUNCTIONS = {
 
 
 
-# TODO
+# TODO random chunkers
+#
 # def make_random_frame_chunker_fn(len_config):
 #     float_lengths = tf.linspace(
 #         float(len_config["min"]),
@@ -453,3 +454,77 @@ VALID_STEP_FUNCTIONS = {
 #         return tf.gather(features, chunk_indices)
 #     return chunk_timedim_randomly
 
+# TODO
+# def get_random_chunk_loader(paths, meta, wav_config, verbosity=0):
+#     raise NotImplementedError("todo, rewrite to return a function that supports tf.data.Dataset.interleave, like in get_chunk_loader")
+#     chunk_config = wav_config["wav_to_random_chunks"]
+#     sample_rate = wav_config["filter_sample_rate"]
+#     lengths = tf.cast(
+#         tf.linspace(
+#             float(sample_rate * chunk_config["length"]["min"]),
+#             float(sample_rate * chunk_config["length"]["max"]),
+#             int(chunk_config["length"]["num_bins"]),
+#         ),
+#         tf.int32
+#     )
+#     def get_random_length():
+#         rand_index = tf.random.uniform([], 0, tf.size(lengths), dtype=tf.int32)
+#         rand_len = tf.gather(lengths, rand_index)
+#         return rand_len
+#     overlap_ratio = float(chunk_config["length"]["overlap_ratio"])
+#     assert overlap_ratio < 1.0
+#     min_chunk_length = int(sample_rate * chunk_config["min_chunk_length"])
+#     assert min_chunk_length > 0, "invalid min chunk length"
+#     def random_chunk_loader():
+#         for p, *m in zip(paths, meta):
+#             wav = audio_feat.read_wav(tf.constant(p, tf.string))
+#             if "filter_sample_rate" in wav_config and wav.sample_rate != wav_config["filter_sample_rate"]:
+#                 if verbosity:
+#                     print("skipping file", p, ", it has a sample rate", wav.sample_rate, "but config has 'filter_sample_rate'", wav_config["filter_sample_rate"], file=sys.stderr)
+#                 continue
+#             begin = 0
+#             rand_len = get_random_length()
+#             chunk = wav.audio[begin:begin+rand_len]
+#             while len(chunk) >= min_chunk_length:
+#                 yield (audio_feat.Wav(chunk, wav.sample_rate), *m)
+#                 begin += round((1.0 - overlap_ratio) * float(rand_len))
+#                 rand_len = get_random_length()
+#                 chunk = wav.audio[begin:begin+rand_len]
+#     if verbosity:
+#         tf_util.tf_print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length")
+#     return random_chunk_loader
+
+# TODO loading of existing features in Kaldi format
+#def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape, feat_conf):
+#    utt2label = {u: d["label"] for u, d in utt2meta.items()}
+#    utt2feats = kaldiio.load_scp(features_path)
+#    feat_conf = dict(feat_conf)
+#    normalize_mean_axis = feat_conf.pop("normalize_mean_axis", None)
+#    normalize_stddev_axis = feat_conf.pop("normalize_stddev_axis", None)
+#    def assert_shape(shape):
+#        shape_str = "{} vs {}".format(shape, expected_shape)
+#        assert len(shape) == len(expected_shape), shape_str
+#        assert all(x == y for x, y in zip(shape, expected_shape) if y is not None), shape_str
+#    def datagen():
+#        for utt in utterance_list:
+#            if utt not in utt2feats:
+#                print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
+#                continue
+#            feats = utt2feats[utt]
+#            #assert_shape(feats.shape)
+#            normalized = tf.constant(feats, tf.float32)
+#            if normalize_mean_axis is not None:
+#                mean = tf.math.reduce_mean(feats, axis=normalize_mean_axis, keepdims=True)
+#                normalized = feats - mean
+#            if normalize_stddev_axis is not None:
+#                stddev = tf.math.reduce_std(feats, axis=normalize_stddev_axis, keepdims=True)
+#                normalized = tf.math.divide_no_nan(normalized, stddev)
+#            yield normalized, (utt, utt2label[utt])
+#    ds = tf.data.Dataset.from_generator(
+#        datagen,
+#        (tf.float32, tf.string),
+#        (tf.TensorShape(expected_shape), tf.TensorShape([2])))
+#    # Add empty signals (since we don't know the origin of these features)
+#    empty_wav = audio_feat.Wav(tf.zeros([0]), 0)
+#    add_empty_signal = lambda feats, meta: (feats, (meta, empty_wav))
+#    return ds.map(add_empty_signal).batch(1)
