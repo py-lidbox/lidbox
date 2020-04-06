@@ -42,9 +42,9 @@ After downloading, the directory should contain the following files:
 
 3. Run the `lidbox` end-to-end pipeline
 
-        lidbox e2e config.ymal
+        lidbox e2e config.yaml
     You can enable debug mode by setting the environment variable `LIDBOX_DEBUG=true`, but note that this generates a lot of output.
-    It also disables parallel execution.
+    It also disables most of the parallel execution.
 
 4. Inspect the extracted features in TensorBoard by running:
 
@@ -52,12 +52,16 @@ After downloading, the directory should contain the following files:
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
-    Event files for training metrics are available in `./lidbox-cache/xvector/xvector-adam/tensorboard`.
+    The event logs of training metrics are stored separately in `./lidbox-cache/xvector/xvector-adam/tensorboard`.
+    Use e.g.
+
+        tensorboard --logdir ./lidbox-cache/xvector/xvector-adam/tensorboard
 
 
 ## Notes
 
+* You can include any kind of dataset by using Kaldi-like metadata files, see contents of `./data/{train,test}` (`utt2dur` not really needed).
 * If you don't want to use a GPU, you can e.g. prefix all commands with `env CUDA_VISIBLE_DEVICES=-1`.
-* Debug mode can be enabled by using the env var `LIDBOX_DEBUG=-1`.
-* Keep an eye on the memory usage if you are using large feature extraction batches.
-* If you modify the config file, there's a JSON schema for validation, which can be checked with `lidbox utils -v --validate-config-file config.yaml`
+* Debug mode can be enabled by using the env var `LIDBOX_DEBUG=true`.
+* Keep an eye on the memory usage if you are using large feature extraction batches, there's no kill switch for using too large batches.
+* If you modify the config file, there's a JSON schema for validation, which can be checked with `lidbox utils -v --validate-config-file config.yaml`. This might give some useful or useless error messages.
