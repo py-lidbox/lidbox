@@ -1,0 +1,131 @@
+# User script that defines what to run
+user_script: ./script.py
+
+# List of input datasets containing wav-files
+datasets:
+  - key: common-voice
+    # Language labels as BCP-47 tags
+    # See also https://schneegans.de/lv/?tags=br%0D%0Aet%0D%0Amn%0D%0Atr&format=text
+    labels:
+      - br
+      - et
+      - mn
+      - tr
+    splits:
+        # Root directories for the training and test set metadata
+        # Note that the wav-files do not need to be in these directories, since the wav-paths are defined in the utt2path files
+      - key: train
+        path: ./data/train
+        shuffle_files: true
+      - key: test
+        path: ./data/test
+
+# Pre-processing operations on signals, applied before feature extraction
+pre_process:
+  # Apply voice activity detection with WebRTC using aggressiveness level 0
+  webrtcvad:
+    aggressiveness: 0
+    # WebRTC VAD requires VAD windows to be 10, 20, or 30 ms
+    vad_frame_length_ms: 10
+    # Do not drop non-speech segments that are shorter than 500 ms
+    min_non_speech_length_ms: 500
+  # Partition all signals into non-overlapping chunks of 1 second
+  chunks:
+    length_ms: 1000
+    step_ms: 1000
+
+# Configuration of the feature extraction pipeline
+features:
+  # How many signals to process in one batch.
+  # This is quite conservative, you can use e.g. 1000 if you want to increase CPU or GPU usage
+  batch_size: 200
+  # Configuration for log-scale Mel-spectrograms (or Mel filter banks)
+  type: logmelspectrogram
+  spectrogram:
+    frame_length_ms: 25
+    frame_step_ms: 10
+    fft_length: 1024
+  melspectrogram:
+    num_mel_bins: 64
+    fmin: 20
+    fmax: 8000
+  # Mean-normalization with sliding window over 100 feature frames (i.e. 1 second with 10 ms frame step)
+  window_normalization:
+    window_len: 100
+    normalize_variance: false
+
+# Persistent cache for e.g. extracted features, trained model checkpoints and TensorBoard data
+cache:
+  directory: ./lidbox-cache
+  # Store elements in large batches
+  batch_size: 1000
+
+# Show samples in TensorBoard as spectrogram images
+# This is done before training
+show_samples:
+  num_batches: 50
+  batch_size: 16
+
+# Filters for dropping unwanted elements
+filters:
+  sample_rate: 16000
+  min_signal_length_ms: 1000
+
+# Experiment configuration for training a model
+experiment:
+  # Can be anything, will be used to distinguish training runs of the same model
+  name: xvector-adam
+  model:
+    # See lidbox/models/xvector.py
+    key: xvector
+  optimizer:
+    cls: Adam
+    kwargs:
+      learning_rate: 0.0001
+  callbacks:
+    - cls: TensorBoard
+    - cls: ModelCheckpoint
+      format: "epoch{epoch:06d}__val_loss{val_loss:.12f}__val_sparse_categorical_accuracy{val_sparse_categorical_accuracy:.12f}.hdf5"
+      kwargs:
+        monitor: val_loss
+        mode: min
+    - cls: EarlyStopping
+      kwargs:
+        monitor: val_loss
+        patience: 5
+        mode: min
+    - cls: LearningRateDateLogger
+  metrics:
+    - cls: SparseCategoricalAccuracy
+    - cls: SparseAverageDetectionCost
+      N: 4
+      # Score thresholds for searching the minimum C_avg, assuming log-softmax output
+      threshold_linspace:
+        start: -20.0
+        stop: 0.0
+        num: 100
+  loss:
+    cls: SparseCategoricalCrossentropy
+    kwargs:
+      from_logits: true
+  keras_fit_kwargs:
+    epochs: 50
+  input_shape: [98, 64]
+  output_shape: [4]
+  data:
+    train:
+      split: train
+      batch_size: 64
+      shuffle_buffer_size: 10000
+    validation:
+      split: test
+      batch_size: 16
+    test:
+      split: test
+      batch_size: 16
+      evaluate_metrics:
+        - name: sparse_average_detection_cost
+        # - name: sparse_average_equal_error_rate
+        - name: sklearn_classification_report
+        - name: average_f1_score
+        - name: confusion_matrix
