@@ -7,7 +7,6 @@ import os
 import sys
 
 import lidbox
-import lidbox.api
 import lidbox.schemas
 
 
@@ -69,15 +68,7 @@ class Command:
         optional.add_argument("--verbosity", "-v",
             action="count",
             default=0,
-            help="Increases output verbosity for each -v supplied up to 4 (-vvvv).")
-        # optional.add_argument("--run-cProfile",
-        #     action="store_true",
-        #     default=False,
-        #     help="Do profiling on all Python function calls and write results into a file in the working directory.")
-        # optional.add_argument("--run-tf-profiler",
-        #     action="store_true",
-        #     default=False,
-        #     help="Run the TensorFlow profiler and create a trace event file.")
+            help="Increases output verbosity.")
         return parser
 
     def __init__(self, args):
@@ -112,47 +103,39 @@ class Command:
             print()
 
 
-class Extract(Command):
+class E2E(Command):
     """
-    Run the feature extraction pipeline defined by a config file, without model training.
+    Run everything end-to-end as specified in the config file and user script.
     """
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        # optional = parser.add_argument_group("extract options")
-        return parser
-
     def run(self):
+        # This import is here to avoid importing TensorFlow when the user e.g. requests just the help string from the command
+        import lidbox.api
         super().run()
         args = self.args
         if args.verbosity:
-            print("Running feature extraction using config file from '{}'".format(args.lidbox_config_yaml_path))
-        lidbox.api.run_feature_extraction(args.lidbox_config_yaml_path)
+            print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
+        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
+        history = lidbox.api.run_training(split2ds, config)
+        _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
 
 
-class Train(Command):
+class Evaluate(Command):
     """
-    TODO
+    Evaluate the test set with a trained model.
     """
-    tasks = ()
-
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        return parser
-
-
-class Predict(Command):
-    """
-    TODO
-    """
-    tasks = ()
-
-    @classmethod
-    def create_argparser(cls, subparsers):
-        parser = super().create_argparser(subparsers)
-        return parser
-
+    def run(self):
+        import lidbox.api
+        super().run()
+        args = self.args
+        if args.verbosity:
+            print("Running evaluation with config file '{}'".format(args.lidbox_config_yaml_path))
+        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        test_split_key = config["experiment"]["data"]["test"]["split"]
+        # Run the pipeline only for the test split
+        split2meta = {split: meta for split, meta in split2meta.items() if split == test_split_key}
+        split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
+        _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
 
 
 class Utils(Command):
@@ -256,9 +239,8 @@ class Kaldi(Command):
 
 
 VALID_COMMANDS = (
-    Extract,
+    E2E,
+    Evaluate,
     Kaldi,
-    Predict,
-    Train,
     Utils,
 )

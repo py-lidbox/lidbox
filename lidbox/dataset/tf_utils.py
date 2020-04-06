@@ -1,4 +1,3 @@
-import matplotlib.cm
 import tensorflow as tf
 
 import lidbox.features as features
@@ -40,7 +39,8 @@ def matplotlib_colormap_to_tensor(colormap):
     Given a matplotlib colormap name, extract all RGB values from its cmap numpy array into a tf.constant.
     Based on https://gist.github.com/jimfleming/c1adfdb0f526465c99409cc143dea97b
     """
-    cmap = matplotlib.cm.get_cmap(colormap)
+    from matplotlib.cm import get_cmap
+    cmap = get_cmap(colormap)
     num_colors = tf.constant(cmap.N, tf.int32)
     colors = tf.constant(cmap(tf.range(num_colors + 1).numpy())[:,:3], tf.float32)
     return colors

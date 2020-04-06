@@ -109,6 +109,14 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         tf.debugging.assert_equal(tf.math.reduce_sum(tf.gather_nd(self.tn_pairs, indices)), 0.0, message="Failed to compute true negative pairs")
 
 
+class SparseAverageDetectionCost(AverageDetectionCost):
+
+    def update_state(self, true_positives, predictions):
+        N = tf.shape(self.fn)[0]
+        true_positives_dense = tf.one_hot(tf.cast(tf.squeeze(true_positives, -1), tf.int32), N)
+        super().update_state(true_positives_dense, predictions)
+
+
 if __name__ == "__main__":
     tf.config.set_visible_devices([], "GPU")
     true_positives = tf.constant([

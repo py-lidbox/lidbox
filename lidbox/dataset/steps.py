@@ -4,7 +4,6 @@ import os
 import random
 import time
 
-random.seed(42)
 logger = logging.getLogger("dataset")
 
 import tensorflow as tf
@@ -22,13 +21,6 @@ else:
     TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 Step = collections.namedtuple("Step", ("key", "kwargs"))
-
-def _read_and_split(path, num_columns):
-    with open(path, encoding="utf-8") as f:
-        for l in f:
-            l = l.strip()
-            if l and not l.startswith("#"):
-                yield l.split(' ', num_columns)[:num_columns]
 
 def _feature_extraction_kwargs_to_args(config):
     valid_args = [
@@ -49,20 +41,41 @@ def _pretty_dict(d):
     return "\n  ".join("{}: {}".format(k, p) for k, p in d.items())
 
 
+def append_predictions(ds, predictions):
+    """
+    Add predictions to each element in ds.
+    """
+    def _append_predictions(x, p):
+        return dict(x, prediction=p)
+    predictions_ds = tf.data.Dataset.from_tensor_slices(predictions)
+    return (tf.data.Dataset
+              .zip((ds, predictions_ds))
+              .map(_append_predictions, num_parallel_calls=TF_AUTOTUNE))
+
+
 def apply_filters(ds, config):
+    """
+    Drop all elements from ds which do not satisfy all filter conditions given in config.
+    """
     logger.debug("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _pretty_dict(config))
     filter_sample_rate = tf.constant(config.get("sample_rate", -1), tf.int32)
     filter_min_signal_length_sec = tf.constant(config.get("min_signal_length_sec", 0) * 1e-3, tf.float32)
+    # filter_min_input_shape = tf.constant(config.get("min_input_shape", []), tf.int32)
     def all_ok(x):
         if "sample_rate" in x and filter_sample_rate != -1 and x["sample_rate"] != filter_sample_rate:
             return False
         if "signal" in x and tf.size(x["signal"]) < tf.cast(tf.cast(x["sample_rate"], tf.float32) * filter_min_signal_length_sec, tf.int32):
             return False
+        # if "input" in x and tf.size(filter_min_input_shape) != 0 and tf.math.reduce_any(tf.shape(x["input"]) < filter_min_input_shape):
+            # return False
         return True
     return ds.filter(all_ok)
 
 
 def apply_vad(ds):
+    """
+    Assuming each element of ds have voice activity detection decisions, use the decisions to drop non-speech frames.
+    """
     logger.debug("Applying previously computed voice activity decisions.")
     def filter_signals_by_vad_decisions(x):
         vad_frame_length_sec = 1e-3 * tf.cast(x["vad_frame_length_ms"], tf.float32)
@@ -74,22 +87,31 @@ def apply_vad(ds):
 
 
 def as_supervised(ds):
+    """
+    Convert all element dictionaries to tuples of (inputs, targets) pairs that can be given to a Keras model as input.
+    """
     logger.debug("Converting all elements to tuple pairs (inputs, targets) and dropping all other values.")
     def _as_supervised(x):
         return x["input"], x["target"]
     return ds.map(_as_supervised, num_parallel_calls=TF_AUTOTUNE)
 
 
-def cache(ds, cache_dir=None, cache_key=None, batch_size=1):
-    if cache_dir is None:
+def cache(ds, directory=None, batch_size=1, cache_key=None):
+    """
+    Cache all elements of ds to disk or memory.
+    """
+    if directory is None:
         logger.warning("Caching dataset in batches of size %d into memory.", batch_size)
         cache_file = ''
     else:
         if cache_key is None:
             cache_key = str(int(time.time()))
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_file = os.path.join(cache_dir, cache_key)
-        logger.info("Caching dataset in batches of size %d to directory '%s' with key '%s'.", batch_size, cache_dir, cache_key)
+        os.makedirs(directory, exist_ok=True)
+        cache_file = os.path.join(directory, cache_key)
+        if os.path.exists(cache_file + ".index"):
+            logger.info("Loading elements from existing cache in directory '%s' with key '%s'.", directory, cache_key)
+        else:
+            logger.info("Caching dataset in batches of size %d to directory '%s' with key '%s'.", batch_size, directory, cache_key)
     return (ds.batch(batch_size)
               .prefetch(TF_AUTOTUNE)
               .cache(cache_file)
@@ -97,7 +119,10 @@ def cache(ds, cache_dir=None, cache_key=None, batch_size=1):
               .unbatch())
 
 
-def compute_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_length_ms):
+def compute_webrtc_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_length_ms):
+    """
+    Compute voice activity detection with WebRTC VAD.
+    """
     vad_frame_length_sec = tf.constant(vad_frame_length_ms * 1e-3, tf.float32)
     min_non_speech_frames = tf.constant(min_non_speech_length_ms // vad_frame_length_ms, tf.int32)
     logger.debug("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
@@ -119,6 +144,9 @@ def compute_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_length_m
 
 
 def consume(ds, log_interval=-1):
+    """
+    Iterate over ds to exhaust the iterator and fully evaluate the preceding pipeline.
+    """
     speed = 0
     last_update = 0
     counter = time.perf_counter()
@@ -129,6 +157,7 @@ def consume(ds, log_interval=-1):
         logger.info("%d done, %.3f elements per second.", i, speed)
         last_update = i
         counter = time.perf_counter()
+    i = 0
     for i, element in ds.enumerate(start=1).as_numpy_iterator():
         if log_interval > -1 and i % log_interval == 0:
             counter_step(i)
@@ -136,7 +165,13 @@ def consume(ds, log_interval=-1):
     return ds
 
 
-def consume_to_tensorboard(ds, summary_dir, config):
+def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
+    """
+    Inspect the elements of ds by dumping them to TensorBoard summaries, e.g. features as spectrogram images and signals as wav audio.
+    """
+    if skip_if_exists and os.path.isdir(summary_dir) and any(p.name.startswith("events") for p in os.scandir(summary_dir) if p.is_file()):
+        logger.info("Skipping TensorBoard step since 'skip_if_exists' is True and directory '%s' already contains tf event files", summary_dir)
+        return ds
     colors = tf_utils.matplotlib_colormap_to_tensor(config.get("colormap", "viridis"))
     image_size_multiplier = tf.constant(config.get("image_size_multiplier", 1), tf.float32)
     batch_size = tf.constant(config["batch_size"], tf.int64)
@@ -175,6 +210,10 @@ def consume_to_tensorboard(ds, summary_dir, config):
 
 
 def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_output_order=True, max_num_chunks_per_signal=int(1e6), avg_num_chunks_from_signals=100):
+    """
+    Divide the signals of each element of ds into fixed length chunks and create new utterances from the created chunks.
+    The metadata of each element is repeated into into each chunk, except for the utterance ids, which will be appended by the chunk number.
+    """
     logger.debug("Dividing every signal in the dataset into new signals by creating signal chunks of length %d ms and offset %d ms. Maximum amount of padding allowed in the last chunk is %d ms.", length_ms, step_ms, max_pad_ms)
     chunk_length_sec = tf.constant(1e-3 * length_ms, tf.float32)
     chunk_step_sec = tf.constant(1e-3 * step_ms, tf.float32)
@@ -215,6 +254,9 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
 
 
 def drop_empty(ds):
+    """
+    Drop all elements that contain an empty non-scalar value, e.g. signals of size 0 or spectrograms with 0 time frames.
+    """
     non_scalar_keys = ("signal", "input")
     logger.debug("Dropping every element which have an empty tensor at any of the non-scalar element keys:\n  %s", "\n  ".join(non_scalar_keys))
     def is_not_empty(x):
@@ -227,6 +269,9 @@ def drop_empty(ds):
 
 
 def drop_keys_in_set(ds, keys):
+    """
+    Given a set (or iterable) keys, delete those keys from every element of ds.
+    """
     logger.debug("For each element in the dataset, dropping values with keys: %s.", ', '.join(keys))
     def drop_keys(x):
         return {k: v for k, v in x.items() if k not in keys}
@@ -234,6 +279,10 @@ def drop_keys_in_set(ds, keys):
 
 
 def extract_features(ds, config):
+    """
+    Extract features from signals of each element in ds and add them under 'input' key to each element.
+    By default, feature extraction is requested to be placed on the first visible GPU, falling back on a CPU only if GPUs are not available.
+    """
     feature_type = tf.constant(config["type"], tf.string)
     args = _feature_extraction_kwargs_to_args(config)
     gpu_devices = tf.config.experimental.list_physical_devices("GPU")
@@ -249,62 +298,69 @@ def extract_features(ds, config):
     def append_features(x):
         with tf.device(tf_device):
             features = tf_utils.extract_features(x["signal"], x["sample_rate"], *args)
-        feature_type_batch = tf.repeat(feature_type, tf.shape(features)[0])
-        return dict(x, input=features, feature_type=feature_type_batch)
+        feature_types = tf.repeat(feature_type, tf.shape(features)[0])
+        return dict(x, input=features, feature_type=feature_types)
     return (ds.batch(batch_size)
+              .prefetch(TF_AUTOTUNE)
               .map(append_features, num_parallel_calls=TF_AUTOTUNE)
               .unbatch())
 
 
 def filter_keys_in_set(ds, keys):
+    """
+    Inverse of drop_keys_in_set.
+    E.g. instead of dropping keys, keys are kept only if they are in the set 'keys'.
+    """
     logger.debug("For each element in the dataset, keeping only values with keys: %s.", ', '.join(keys))
     def filter_keys(x):
         return {k: v for k, v in x.items() if k in keys}
     return ds.map(filter_keys, num_parallel_calls=TF_AUTOTUNE)
 
 
-def initialize(ds, labels, metadata_paths, file_limit=-1, shuffle_files=False):
+def group_by_sequence_length(ds, max_batch_size, min_batch_size=0, sequence_dim=0):
+    """
+    Group elements such that every group is a batch where all its 'input' tensors have the same length in a given dimension 'sequence_dim'.
+    """
+    max_batch_size = tf.constant(max_batch_size, tf.int32)
+    min_batch_size = tf.constant(min_batch_size, tf.int32)
+    sequence_dim = tf.constant(sequence_dim, tf.int32)
+    def get_seq_len(x):
+        return tf.cast(tf.shape(x["input"])[sequence_dim], tf.int64)
+    def group_to_batch(key, group):
+        return group.batch(max_batch_size)
+    def has_min_batch_size(batch):
+        return tf.shape(batch["input"])[0] >= min_batch_size
+    return ds.apply(tf.data.experimental.group_by_window(
+        get_seq_len,
+        group_to_batch,
+        window_size=max_batch_size))
+
+
+def initialize(ds, labels, init_data):
+    """
+    Initialize a tf.data.Dataset instance for the pipeline.
+    This should probably always be the first step.
+    """
     if ds is not None:
         logger.warning("Step 'initialize' is being applied on an already initialized dataset, all state will be lost.")
     ds = None
-    if logger.getEffectiveLevel() == logging.DEBUG:
-        msg = "Initializing dataset from {} metadata paths:\n  {}".format(len(metadata_paths), _pretty_dict(collections.OrderedDict(metadata_paths)))
-        logger.debug(msg)
-    valid_paths = []
-    for k, p in metadata_paths:
-        if os.path.exists(p):
-            valid_paths.append((k, p))
-        else:
-            logger.warning("Dropping non-existing '%s' metadata file '%s'.", k, p)
-    metadata_paths = valid_paths
-    del valid_paths
-    key2meta = {key: dict(_read_and_split(path, 2)) for key, path in metadata_paths}
-    if len(key2meta) < len(metadata_paths):
-        logger.warning("Possible duplicate metadata keys, %d paths were given but only %d unique metadata files were parsed.", len(metadata_paths), len(key2meta))
-    # Get all utterance ids from some metadata dict
-    all_ids = set(key2meta[list(key2meta)[0]].keys())
-    if not all(set(v.keys()) == all_ids for v in key2meta.values()):
-        logger.critical("Mismatching amount of utterance ids in meta files, unable to deduce the set of all utterance ids that should be used. Make sure all metadata files contain exactly the same set of utterance ids.")
-        return
-    all_ids = sorted(all_ids)
-    if shuffle_files:
-        random.shuffle(all_ids)
-    all_ids = all_ids[:file_limit]
-    init_data = {"id": tf.constant(all_ids, tf.string)}
-    for key, meta in key2meta.items():
-        init_data[key] = tf.constant([meta[i] for i in all_ids], tf.string)
-    # Peek one path to do a sanity check
-    if "path" in init_data and tf.size(init_data["path"]).numpy() and not os.path.exists(init_data["path"][0].numpy().decode("utf-8")):
-        logger.error("First path '%s' does not exist, check that all paths are valid before continuing", init_data["path"][0].numpy().decode("utf-8"))
-        return
-    ds = tf.data.Dataset.from_tensor_slices(init_data)
-    logger.debug("Generating label2target lookup table from indexes of array:\n  %s", '\n  '.join(labels))
+    init_data_tensors = {key: tf.constant(list(meta), tf.string) for key, meta in init_data.items()}
+    logger.info(
+            "Initializing dataset from tensors with metadata keys:\n  %s",
+            '\n  '.join(sorted(init_data_tensors.keys())))
+    ds = tf.data.Dataset.from_tensor_slices(init_data_tensors)
     label2int, _ = tf_utils.make_label2onehot(tf.constant(labels, tf.string))
+    logger.info(
+            "Generated label2target lookup table from indexes of array:\n  %s",
+            '\n  '.join("{:s} {:d}".format(l, label2int.lookup(tf.constant(l, tf.string))) for l in labels))
     append_labels_as_targets = lambda x: dict(x, target=label2int.lookup(x["label"]))
     return ds.map(append_labels_as_targets, num_parallel_calls=TF_AUTOTUNE)
 
 
 def load_audio(ds):
+    """
+    Load signal from the 'path' key as WAV file for each element of ds.
+    """
     logger.debug("Reading audio files from the path of each element and appending the read signals and their sample rates to each element.")
     def append_signals(x):
         signal, sample_rate = audio_features.read_wav(x["path"])
@@ -312,7 +368,18 @@ def load_audio(ds):
     return ds.map(append_signals, num_parallel_calls=TF_AUTOTUNE)
 
 
+def lambda_fn(ds, fn):
+    """
+    For applying arbitrary logic on ds.
+    """
+    return fn(ds)
+
+
 def reduce_stats(ds, statistic):
+    """
+    Reduce ds into a single statistic.
+    This requires evaluating the full, preceding pipeline.
+    """
     logger.debug("Iterating over whole dataset to compute statistic '%s'", statistic)
     if statistic == "num_elements":
         num_elements = ds.reduce(0, lambda c, x: c + 1)
@@ -323,6 +390,9 @@ def reduce_stats(ds, statistic):
 
 
 def show_all_elements(ds):
+    """
+    Iterate over ds printing every element.
+    """
     for i, element in ds.enumerate(start=1).as_numpy_iterator():
         if not isinstance(element, dict):
             element = {i: v for i, v in enumerate(element)}
@@ -331,11 +401,12 @@ def show_all_elements(ds):
 
 
 VALID_STEP_FUNCTIONS = {
+    "append_predictions": append_predictions,
     "apply_filters": apply_filters,
     "apply_vad": apply_vad,
     "as_supervised": as_supervised,
     "cache": cache,
-    "compute_vad": compute_vad,
+    "compute_webrtc_vad": compute_webrtc_vad,
     "consume": consume,
     "consume_to_tensorboard": consume_to_tensorboard,
     "create_signal_chunks": create_signal_chunks,
@@ -343,8 +414,42 @@ VALID_STEP_FUNCTIONS = {
     "drop_keys_in_set": drop_keys_in_set,
     "extract_features": extract_features,
     "filter_keys_in_set": filter_keys_in_set,
+    "group_by_sequence_length": group_by_sequence_length,
     "initialize": initialize,
+    "lambda": lambda_fn,
     "load_audio": load_audio,
     "reduce_stats": reduce_stats,
     "show_all_elements": show_all_elements,
 }
+
+
+
+# TODO
+# def make_random_frame_chunker_fn(len_config):
+#     float_lengths = tf.linspace(
+#         float(len_config["min"]),
+#         float(len_config["max"]),
+#         int(len_config["num_bins"]))
+#     lengths = tf.unique(tf.cast(float_lengths, tf.int32))[0]
+#     min_chunk_length = lengths[0]
+#     tf.debugging.assert_greater(min_chunk_length, 1, message="Too short minimum chunk length")
+#     min_overlap = tf.constant(float(len_config.get("min_overlap", 0)), tf.float32)
+#     tf.debugging.assert_less(min_overlap, 1.0, message="Minimum overlap ratio of two adjacent random chunks must be less than 1.0")
+#     @tf.function
+#     def chunk_timedim_randomly(features):
+#         num_total_frames = tf.shape(features)[0]
+#         max_num_chunks = 1 + tf.math.maximum(0, num_total_frames - min_chunk_length)
+#         rand_length_indexes = tf.random.uniform([max_num_chunks], 0, tf.size(lengths), dtype=tf.int32)
+#         rand_chunk_lengths = tf.gather(lengths, rand_length_indexes)
+#         rand_offset_ratios = tf.random.uniform([tf.size(rand_chunk_lengths)], 0.0, 1.0 - min_overlap, dtype=tf.float32)
+#         offsets = tf.cast(rand_offset_ratios * tf.cast(rand_chunk_lengths, tf.float32), tf.int32)
+#         offsets = tf.concat(([0], tf.math.maximum(1, offsets[:-1])), axis=0)
+#         begin = tf.math.cumsum(offsets)
+#         begin = tf.boolean_mask(begin, begin < num_total_frames)
+#         end = begin + tf.boolean_mask(rand_chunk_lengths, begin < num_total_frames)
+#         end = tf.math.minimum(num_total_frames, end)
+#         # TODO gather is overkill here since we only want several slices
+#         chunk_indices = tf.ragged.range(begin, end)
+#         return tf.gather(features, chunk_indices)
+#     return chunk_timedim_randomly
+

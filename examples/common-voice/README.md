@@ -8,7 +8,7 @@ This example shows how to create a language identification dataset from four [Mo
 
 These datasets were chosen for this example because they do not contain too much data for a simple example (2-10 hours each), yet there should be enough data for applying deep learning.
 
-If you want to experiment with other Common Voice datasets, update variable `datasets` in `scripts/prepare.bash` and key `labels` in `config.xvector.yaml`.
+If you want to experiment with other Common Voice datasets, update variable `datasets` in `scripts/prepare.bash` and key `labels` in `config.yaml`.
 
 ## Requirements
 
@@ -19,7 +19,7 @@ If you want to experiment with other Common Voice datasets, update variable `dat
 * [`tar`](https://www.gnu.org/software/tar)
 * [`tensorflow`](https://www.tensorflow.org/install) 2.1 or newer
 
-Python 3.8.2 with TensorFlow 2.2.0-rc2 should work also.
+Python 3.8.2 with TensorFlow 2.2.0-rc2 has also been tested.
 
 ## Steps
 
@@ -34,51 +34,30 @@ After downloading, the directory should contain the following files:
 
         bash scripts/prepare.bash
     This will convert all mp3-files to wav-files, which creates about 4G of data into directory `./data`.
+    The script is very inefficient and the amount of file IO latency makes it unusable for larger datasets, but it will do for this small example.
     After the command completes, the mp3-files are no longer needed.
     It is not necessary to delete them, but you can do it if you want to:
 
         rm -r ./data/??/clips
 
-3. Run the `lidbox` end-to-end pipeline with e.g. 100 files for a few epochs to check everything is working:
+3. Run the `lidbox` end-to-end pipeline
 
-        lidbox e2e train -vvv config.xvector.yaml --file-limit 100 --exhaust-dataset-iterator --debug-dataset
-    Let it run for e.g. 10 epochs, then interrupt training.
-    You can also use verbosity level 4 (`-vvvv`) for debugging, but this generates a lot of output.
+        lidbox e2e config.ymal
+    You can enable debug mode by setting the environment variable `LIDBOX_DEBUG=true`, but note that this generates a lot of output.
+    It also disables parallel execution.
 
-4. Next, inspect the extracted features and training progress with TensorBoard by running:
+4. Inspect the extracted features in TensorBoard by running:
 
-        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/tensorboard/logs
+        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/dataset_tensorboard
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
-5. Next we will train using whole dataset. First, clear the testing cache that contains samples only for 100 files:
+    Event files for training metrics are available in `./lidbox-cache/xvector/xvector-adam/tensorboard`.
 
-        rm -r ./lidbox-cache
-
-6. Evaluate only the feature extraction pipeline to fill the features cache:
-
-        lidbox e2e train -vvv config.xvector.yaml --exhaust-dataset-iterator --skip-training
-
-7. Generate TensorBoard data (`--debug-dataset`) and start the training using the extracted features:
-
-        lidbox e2e train -vvv config.xvector.yaml --debug-dataset
-    Early stopping has been set to 5 epochs, which probably happens within about 10 first epochs.
-
-8. When training finishes, you should see some information about the epochs when validation loss was at its lowest value.
-    We will use the model checkpoint at that epoch to predict language log-likelihoods for all test set utterances by running:
-
-        lidbox e2e predict -vvv config.xvector.yaml
-    The scores are written to `./lidbox-cache/xvector/predictions/scores`
-    In addition, you will see some metrics computed from the scores using correct labels from the `./data/test/utt2label` file.
-
-It is also possible to skip step 6, since all features could also be extracted during the first epoch during training.
-When the first epoch ends, all features have been cached and next epochs will use the cached features.
-However, if you want to extract features and train on separate machines, then step 6 might be useful.
 
 ## Notes
 
-* Keep an eye on the memory (RAM, not GPU) usage, I have been running out of memory from time to time during the training phase.
-* If you are using a small GPU (less than 4G memory), it might help to prefix the commands that do training with `env TF_FORCE_GPU_ALLOW_GROWTH=true`, in case TF throws errors about being unable to initialize cuDNN.
-This might also happen if you have a Python REPL open with TensorFlow imported, since by default it allocates all GPU memory.
-* When extracting features, `lidbox` currently includes original waveforms of each utterance into the features cache in order to make the audio available in TensorBoard. This might create very large caches for large datasets. E.g. I extracted features for approx. 8000 hours of data and it created a 3.2 TiB cache.
 * If you don't want to use a GPU, you can e.g. prefix all commands with `env CUDA_VISIBLE_DEVICES=-1`.
+* Debug mode can be enabled by using the env var `LIDBOX_DEBUG=-1`.
+* Keep an eye on the memory usage if you are using large feature extraction batches.
+* If you modify the config file, there's a JSON schema for validation, which can be checked with `lidbox utils -v --validate-config-file config.yaml`

@@ -39,6 +39,9 @@ definitions:
               type: string
             shuffle_files:
               type: boolean
+            file_limit:
+              type: integer
+              minimum: -1
   split:
     type: object
     required:
@@ -81,6 +84,7 @@ properties:
     type: object
   datasets:
     type: array
+    minItems: 1
     contains:
       $ref: '#/definitions/dataset'
   features:
@@ -400,3 +404,5 @@ properties:
       batch_size:
         type: integer
         exclusiveMinimum: 0
+  user_script:
+    type: string

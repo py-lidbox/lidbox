@@ -4,10 +4,13 @@ Speech classification toolbox built on top of TensorFlow.
 import io
 import logging
 import os
+import random
 import sys
 
 import yaml
 
+
+random.seed(int(os.environ.get("LIDBOX_RANDOM_SEED", "42")))
 
 DEBUG = os.environ.get("LIDBOX_DEBUG") not in (None, "False", "false", "0")
 
@@ -16,6 +19,7 @@ logging.basicConfig(
         style="{",
         datefmt="%Y-%m-%d %H:%M:%S",
         format="{asctime:s}.{msecs:03.0f} {levelname[0]:s} {name:s}: {message:s}")
+
 
 def get_package_root():
     from . import __path__
@@ -37,3 +41,10 @@ def yaml_pprint(d, left_pad=0, to_string=False, **kwargs):
 def load_yaml(path):
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+def iter_metadata_file(path, num_columns):
+    with open(path, encoding="utf-8") as f:
+        for l in f:
+            l = l.strip()
+            if l and not l.startswith("#"):
+                yield l.split(' ', num_columns)[:num_columns]

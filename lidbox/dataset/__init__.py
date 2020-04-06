@@ -1,5 +1,7 @@
 """
 Modular building blocks for constructing a tf.data.Dataset pipeline from metadata files on the local machine.
+
+See lidbox.dataset.steps for the step definitions.
 """
 import io
 import logging
@@ -8,7 +10,7 @@ logger = logging.getLogger("dataset")
 import yaml
 
 import lidbox
-import lidbox.dataset as dataset
+import lidbox.dataset
 
 def _allow_tf_gpu_memory_growth():
     import tensorflow as tf
@@ -27,7 +29,7 @@ def from_steps(steps):
         logger.critical("When constructing a dataset, the first step must be 'initialize' but it was '%s'. The 'initialize' step is needed for first loading all metadata such as the utterance_id to wavpath mappings.", steps[0].key)
         return
     for step_num, step in enumerate(steps, start=1):
-        step_fn = dataset.VALID_STEP_FUNCTIONS.get(step.key)
+        step_fn = lidbox.dataset.steps.VALID_STEP_FUNCTIONS.get(step.key)
         if step_fn is None:
             logger.error("Skipping unknown step '%s'.", step.key)
             continue

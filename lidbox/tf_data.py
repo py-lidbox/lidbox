@@ -75,34 +75,6 @@ def append_mfcc_energy_vad_decisions(ds, config):
         audio_feat.framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, **vad_kwargs))
     return ds.map(f, num_parallel_calls=TF_AUTOTUNE)
 
-def make_random_frame_chunker_fn(len_config):
-    float_lengths = tf.linspace(
-        float(len_config["min"]),
-        float(len_config["max"]),
-        int(len_config["num_bins"]))
-    lengths = tf.unique(tf.cast(float_lengths, tf.int32))[0]
-    min_chunk_length = lengths[0]
-    tf.debugging.assert_greater(min_chunk_length, 1, message="Too short minimum chunk length")
-    min_overlap = tf.constant(float(len_config.get("min_overlap", 0)), tf.float32)
-    tf.debugging.assert_less(min_overlap, 1.0, message="Minimum overlap ratio of two adjacent random chunks must be less than 1.0")
-    @tf.function
-    def chunk_timedim_randomly(features):
-        num_total_frames = tf.shape(features)[0]
-        max_num_chunks = 1 + tf.math.maximum(0, num_total_frames - min_chunk_length)
-        rand_length_indexes = tf.random.uniform([max_num_chunks], 0, tf.size(lengths), dtype=tf.int32)
-        rand_chunk_lengths = tf.gather(lengths, rand_length_indexes)
-        rand_offset_ratios = tf.random.uniform([tf.size(rand_chunk_lengths)], 0.0, 1.0 - min_overlap, dtype=tf.float32)
-        offsets = tf.cast(rand_offset_ratios * tf.cast(rand_chunk_lengths, tf.float32), tf.int32)
-        offsets = tf.concat(([0], tf.math.maximum(1, offsets[:-1])), axis=0)
-        begin = tf.math.cumsum(offsets)
-        begin = tf.boolean_mask(begin, begin < num_total_frames)
-        end = begin + tf.boolean_mask(rand_chunk_lengths, begin < num_total_frames)
-        end = tf.math.minimum(num_total_frames, end)
-        # TODO gather is overkill here since we only want several slices
-        chunk_indices = tf.ragged.range(begin, end)
-        return tf.gather(features, chunk_indices)
-    return chunk_timedim_randomly
-
 def group_by_sequence_length(ds, min_batch_size, max_batch_size, verbosity=0, sequence_dim=0):
     if verbosity:
         tf_util.tf_print("Grouping samples by sequence length into batches of max size", max_batch_size)
