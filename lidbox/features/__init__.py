@@ -55,22 +55,25 @@ def window_normalization(X, window_len=-1, normalize_variance=True):
 #     )
 
 
-def mean_var_norm_nopad_slide_numpy(X, window_len, normalize_variance):
-    num_total_frames = X.shape[1]
-    if num_total_frames <= window_len:
-        centered = X - np.mean(X, axis=1, keepdims=True)
-        if normalize_variance:
-            centered /= np.std(X, axis=1, keepdims=True)
-        return centered
-    begin = np.arange(0, num_total_frames) - window_len // 2
-    end = begin + window_len
-    begin = np.clip(begin, 0, num_total_frames)
-    end = np.clip(end, 0, num_total_frames)
-    result = np.zeros_like(X)
-    for i, (b, e) in enumerate(zip(begin, end)):
-        window = X[:,b:e]
-        centered = X[:,i] - np.mean(window, axis=1)
-        if normalize_variance:
-            centered /= np.std(window, axis=1)
-        result[:,i] = centered
-    return result
+@tf.function
+def window_normalization_numpy(X_t, window_len_t, normalize_variance_t):
+    def f(X, window_len, normalize_variance):
+        num_total_frames = X.shape[1]
+        if num_total_frames <= window_len:
+            centered = X - np.mean(X, axis=1, keepdims=True)
+            if normalize_variance:
+                centered /= np.std(X, axis=1, keepdims=True)
+            return centered
+        begin = np.arange(0, num_total_frames) - window_len // 2
+        end = begin + window_len
+        begin = np.clip(begin, 0, num_total_frames)
+        end = np.clip(end, 0, num_total_frames)
+        result = np.zeros_like(X)
+        for i, (b, e) in enumerate(zip(begin, end)):
+            window = X[:,b:e]
+            centered = X[:,i] - np.mean(window, axis=1)
+            if normalize_variance:
+                centered /= np.std(window, axis=1)
+            result[:,i] = centered
+        return result
+    return tf.numpy_function(f, [X_t, window_len_t, normalize_variance_t], tf.float32)
