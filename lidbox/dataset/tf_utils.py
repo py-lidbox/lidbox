@@ -1,3 +1,5 @@
+import sys
+
 import tensorflow as tf
 
 import lidbox.features as features
@@ -34,26 +36,37 @@ def make_label2onehot(labels):
     return label2int, OH
 
 
-def matplotlib_colormap_to_tensor(colormap):
+@tf.function
+def matplotlib_colormap_to_tensor(colormap_key_t):
     """
     Given a matplotlib colormap name, extract all RGB values from its cmap numpy array into a tf.constant.
-    Based on https://gist.github.com/jimfleming/c1adfdb0f526465c99409cc143dea97b
     """
-    from matplotlib.cm import get_cmap
-    cmap = get_cmap(colormap)
-    num_colors = tf.constant(cmap.N, tf.int32)
-    colors = tf.constant(cmap(tf.range(num_colors + 1).numpy())[:,:3], tf.float32)
-    return colors
+    def colormap_tensor(colormap):
+        from matplotlib.cm import get_cmap
+        from numpy import arange
+        cmap = get_cmap(colormap.numpy().decode("utf-8"))
+        color_index = arange(cmap.N + 1)
+        return tf.constant(cmap(color_index)[:,:3], tf.float32)
+    return tf.py_function(colormap_tensor, [colormap_key_t], tf.float32)
 
 
 @tf.function
 def tensors_to_rgb_images(inputs, colors, size_multiplier=1):
-    tf.debugging.assert_rank(inputs, 3, message="imshow_tensors expects batches of 2 dimensional tensors with shape [batch, cols, rows].")
+    """
+    Map all values of 'inputs' between [0, 1] and then into RGB color indices.
+    Gather colors from 'colors' using the indices.
+    Based on https://gist.github.com/jimfleming/c1adfdb0f526465c99409cc143dea97b
+    """
+    tf.debugging.assert_rank(inputs, 3, message="tensors_to_rgb_images expects batches of 2 dimensional tensors with shape [batch, cols, rows].")
+    tf.debugging.assert_rank(colors, 2, message="tensors_to_rgb_images expects a colormap of shape [color, component].")
+    tf.debugging.assert_equal(tf.shape(colors)[1], 3, message="tensors_to_rgb_images expects an RGB colormap.")
     # Scale features between 0 and 1 to produce a grayscale image
-    images = features.feature_scaling(inputs, tf.constant(0.0), tf.constant(1.0))
+    inputs = features.feature_scaling(inputs, tf.constant(0.0), tf.constant(1.0))
     # Map linear colormap over all grayscale values [0, 1] to produce an RGB image
-    indices = tf.cast(tf.math.round(images * tf.cast(tf.shape(colors)[0] - 1, tf.float32)), tf.int32)
-    images = tf.gather(colors, indices)
+    indices = tf.cast(tf.math.round(inputs * tf.cast(tf.shape(colors)[0] - 1, tf.float32)), tf.int32)
+    tf.debugging.assert_non_negative(indices, message="Negative color indices")
+    images = tf.gather(colors, indices, axis=0, batch_dims=0)
+    tf.debugging.assert_rank(images, 4, message="Gathering colors failed, output images do not have a channel dimension. Make sure the inputs have a known shape.")
     # Here it is assumed the output images are going to Tensorboard
     images = tf.image.transpose(images)
     images = tf.image.flip_up_down(images)
@@ -66,9 +79,9 @@ def tensors_to_rgb_images(inputs, colors, size_multiplier=1):
 
 
 @tf.function
-def count_dim_sizes(ds, ds_element_index=0, ndims=1):
+def count_dim_sizes(ds, element_key=0, ndims=1):
     """
-    Given a dataset 'ds' of 'ndims' dimensional tensors at element index 'ds_element_index', accumulate the shape counts of all tensors.
+    Given a dataset 'ds' of 'ndims' dimensional tensors at element index 'element_key', accumulate the shape counts of all tensors.
     >>> batch, x, y = 10, 3, 4
     >>> data = tf.random.normal((batch, x, y))
     >>> meta = tf.random.normal((batch, 1))
@@ -85,7 +98,7 @@ def count_dim_sizes(ds, ds_element_index=0, ndims=1):
     True
     """
     tf.debugging.assert_greater(ndims, 0)
-    get_shape_at_index = lambda *t: tf.shape(t[ds_element_index])
+    get_shape_at_index = lambda t: tf.shape(t[element_key])
     shapes_ds = ds.map(get_shape_at_index)
     ones = tf.ones(ndims, dtype=tf.int32)
     shape_indices = tf.range(ndims, dtype=tf.int32)

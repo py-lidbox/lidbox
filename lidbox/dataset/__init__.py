@@ -29,6 +29,9 @@ def from_steps(steps):
         logger.critical("When constructing a dataset, the first step must be 'initialize' but it was '%s'. The 'initialize' step is needed for first loading all metadata such as the utterance_id to wavpath mappings.", steps[0].key)
         return
     for step_num, step in enumerate(steps, start=1):
+        if step is None:
+            logger.warning("Skipping no-op step with value None")
+            continue
         step_fn = lidbox.dataset.steps.VALID_STEP_FUNCTIONS.get(step.key)
         if step_fn is None:
             logger.error("Skipping unknown step '%s'.", step.key)

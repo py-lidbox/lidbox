@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-import lidbox
+DEBUG = False
 
 
 class AverageDetectionCost(tf.keras.metrics.Metric):
@@ -74,7 +74,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         """
         Return smallest C_avg value using all given thresholds.
         """
-        if lidbox.DEBUG:
+        if DEBUG:
             self._assert_P_fa()
         # Average false negative rate over all labels for all given thresholds
         P_miss = tf.math.reduce_mean(
@@ -96,17 +96,19 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
                 axis=0)
         # Average detection cost for all given thresholds
         C_avg = self.C_miss * self.P_tar * P_miss + self.C_fa * (1 - self.P_tar) * P_fa
-        if lidbox.DEBUG:
+        if DEBUG:
             tf.print("P_miss", P_miss, summarize=-1)
             tf.print("P_fa", P_fa, summarize=-1)
             tf.print("C_avg", C_avg, summarize=-1)
         return tf.math.reduce_min(C_avg)
 
     def _assert_P_fa(self):
+        tf.print(self.__class__.__name__, "asserting that l == m pairs are not included in P_fa")
         # All l == m pairs should always be zeros (we want to have N*(N-1) results)
         indices = tf.tile(tf.expand_dims(tf.range(0, tf.shape(self.fp_pairs)[0]), -1), [1, 2])
         tf.debugging.assert_equal(tf.math.reduce_sum(tf.gather_nd(self.fp_pairs, indices)), 0.0, message="Failed to compute false positive pairs")
         tf.debugging.assert_equal(tf.math.reduce_sum(tf.gather_nd(self.tn_pairs, indices)), 0.0, message="Failed to compute true negative pairs")
+        tf.print(self.__class__.__name__, "P_fa ok")
 
 
 class SparseAverageDetectionCost(AverageDetectionCost):

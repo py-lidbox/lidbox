@@ -19,6 +19,7 @@ from lidbox.models.keras_utils import KerasWrapper
 VALID_METADATA_FILES = {
     "utt2dur": "duration",
     "utt2duration": "duration",
+    "utt2feat.scp": "kaldi_ark_key",
     "utt2label": "label",
     "utt2lang": "label",
     "utt2path": "path",
@@ -34,7 +35,9 @@ def get_flat_dataset_config(config):
     for dataset in config["datasets"]:
         for split in dataset["splits"]:
             split = dict(split)
+            logger.info("Scanning dataset '%s' split '%s' for valid metadata files", dataset["key"], split["key"])
             meta = {VALID_METADATA_FILES[p.name]: p.path for p in os.scandir(split.pop("path")) if p.name in VALID_METADATA_FILES}
+            logger.info("Using valid metadata files:\n  %s", '\n  '.join(meta.values()))
             meta["dataset"] = dataset["key"]
             meta["kwargs"] = split
             split2datasets[split.pop("key")].append(meta)
@@ -50,18 +53,29 @@ def load_all_metadata_from_paths(split2datasets):
             meta = dict(meta)
             dataset = meta.pop("dataset")
             kwargs = meta.pop("kwargs")
+            logger.info("Loading all metadata file contents for dataset '%s' split '%s'", dataset, split)
             # Read all meta files
             meta = {key: collections.OrderedDict(lidbox.iter_metadata_file(path, num_columns=2)) for key, path in meta.items()}
+            logger.info("Amount of contents per file:\n  %s", '\n  '.join("{}: {}".format(key, len(val)) for key, val in meta.items()))
             # 'utt2path' is always present, use it to select final utterance ids
             utt_ids = list(meta["path"].keys())
             if kwargs.get("shuffle_files", False):
+                logger.info("'shuffle_files' given for dataset '%s' split '%s', shuffling all its utterance ids", dataset, split)
                 random.shuffle(utt_ids)
-            utt_ids = utt_ids[:kwargs.get("file_limit", -1)]
-            # Filter all metadata with selected utterance ids and ensure correct order
+            file_limit = kwargs.get("file_limit")
+            utt_ids = utt_ids[:file_limit]
+            logger.info("After applying file_limit %s, amount of final utterance ids that will be used is %d", file_limit, len(utt_ids))
+            # Filter all metadata with selected utterance ids to ensure correct order of metadata
+            # This step is very important in order to not have samples with wrong metadata
             meta = {key: [utt2meta[utt] for utt in utt_ids] for key, utt2meta in meta.items()}
             meta["id"] = utt_ids
             meta["dataset"] = len(utt_ids) * [dataset]
+            if "kaldi_ark_key" in meta:
+                logger.info("Metadata contains keys into Kaldi archive files, loading all arrays.")
+                from kaldiio import load_mat
+                meta["kaldi_ark"] = [load_mat(key) for key in meta["kaldi_ark_key"]]
             split2datasets_meta[split].append(meta)
+            logger.info("Dataset '%s' split '%s' done, all its elements will have keys:\n  %s", dataset, split, '\n  '.join(meta.keys()))
     return split2datasets_meta
 
 
@@ -86,10 +100,10 @@ def load_user_script_as_module(path):
 def load_splits_from_config_file(config_file_path):
     logger.info("Using config file '%s'", config_file_path)
     config = lidbox.load_yaml(config_file_path)
-    logger.debug("Reading all metadata from %d different datasets.", len(config["datasets"]))
+    logger.info("Reading all metadata from %d different datasets.", len(config["datasets"]))
     split2datasets, labels = get_flat_dataset_config(config)
     logger.info("Merged all metadata into %d splits, set of all labels is:\n  %s", len(split2datasets), '\n  '.join(labels))
-    logger.debug("Loading metadata from all files and merging metadata of all datasets")
+    logger.info("Loading metadata from all files and merging metadata of all datasets")
     split2meta = merge_dataset_metadata(load_all_metadata_from_paths(split2datasets))
     return split2meta, labels, config
 
@@ -207,7 +221,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     for metric in test_conf["evaluate_metrics"]:
         result = None
         if metric["name"].endswith("average_detection_cost"):
-            logger.debug("Evaluating minimum average detection cost")
+            logger.info("Evaluating minimum average detection cost")
             thresholds = np.linspace(min_score, max_score, metric.get("num_thresholds", 200))
             if metric["name"].startswith("sparse_"):
                 cavg = lidbox.metrics.SparseAverageDetectionCost(len(labels), thresholds)
@@ -219,7 +233,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
             logger.info("%s: %.6f", metric["name"], result)
         elif metric["name"].endswith("average_equal_error_rate"):
             #TODO sparse EER, generate one-hot true_labels
-            logger.debug("Evaluating average equal error rate")
+            logger.info("Evaluating average equal error rate")
             eer = np.zeros(len(labels))
             for l, label in enumerate(labels):
                 if label not in all_testset_labels:
@@ -233,7 +247,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
                       "by_label": {label: float(eer[l]) for l, label in enumerate(labels)}}
             logger.info("%s: %s", metric["name"], lidbox.yaml_pprint(result, to_string=True))
         elif metric["name"] == "average_f1_score":
-            logger.debug("Evaluating average F1 score")
+            logger.info("Evaluating average F1 score")
             f1 = sklearn.metrics.f1_score(
                     true_labels_sparse,
                     pred_labels_sparse,
@@ -242,7 +256,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
             result = {"avg": float(f1)}
             logger.info("%s: %.6f", metric["name"], f1)
         elif metric["name"] == "sklearn_classification_report":
-            logger.debug("Generating full sklearn classification report")
+            logger.info("Generating full sklearn classification report")
             result = sklearn.metrics.classification_report(
                     true_labels_sparse,
                     pred_labels_sparse,
@@ -252,7 +266,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
                     zero_division=0)
             logger.info("%s:\n%s", metric["name"], lidbox.yaml_pprint(result, left_pad=2, to_string=True))
         elif metric["name"] == "confusion_matrix":
-            logger.debug("Generating confusion matrix")
+            logger.info("Generating confusion matrix")
             result = sklearn.metrics.confusion_matrix(true_labels_sparse, pred_labels_sparse)
             logger.info("%s:\n%s", metric["name"], str(result))
             result = result.tolist()

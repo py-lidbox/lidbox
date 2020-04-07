@@ -1,4 +1,5 @@
 import collections
+import io
 import logging
 import os
 import random
@@ -58,7 +59,7 @@ def apply_filters(ds, config):
     """
     Drop all elements from ds which do not satisfy all filter conditions given in config.
     """
-    logger.debug("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _pretty_dict(config))
+    logger.info("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _pretty_dict(config))
     filter_sample_rate = tf.constant(config.get("sample_rate", -1), tf.int32)
     filter_min_signal_length_sec = tf.constant(config.get("min_signal_length_sec", 0) * 1e-3, tf.float32)
     # filter_min_input_shape = tf.constant(config.get("min_input_shape", []), tf.int32)
@@ -77,13 +78,14 @@ def apply_vad(ds):
     """
     Assuming each element of ds have voice activity detection decisions, use the decisions to drop non-speech frames.
     """
-    logger.debug("Applying previously computed voice activity decisions.")
+    logger.info("Applying previously computed voice activity decisions.")
+    drop_keys_after_done = {"vad_frame_length_ms", "vad_is_speech"}
     def filter_signals_by_vad_decisions(x):
         vad_frame_length_sec = 1e-3 * tf.cast(x["vad_frame_length_ms"], tf.float32)
         vad_frame_length = tf.cast(tf.cast(x["sample_rate"], tf.float32) * vad_frame_length_sec, tf.int32)
         frames = tf.signal.frame(x["signal"], vad_frame_length, vad_frame_length, axis=0)
         voiced_signal = tf.reshape(frames[x["vad_is_speech"]], [-1])
-        return dict(x, signal=voiced_signal)
+        return {k: v for k, v in dict(x, signal=voiced_signal).items() if k not in drop_keys_after_done}
     return ds.map(filter_signals_by_vad_decisions, num_parallel_calls=TF_AUTOTUNE)
 
 
@@ -91,7 +93,7 @@ def as_supervised(ds):
     """
     Convert all element dictionaries to tuples of (inputs, targets) pairs that can be given to a Keras model as input.
     """
-    logger.debug("Converting all elements to tuple pairs (inputs, targets) and dropping all other values.")
+    logger.info("Converting all elements to tuple pairs (inputs, targets) and dropping all other values.")
     def _as_supervised(x):
         return x["input"], x["target"]
     return ds.map(_as_supervised, num_parallel_calls=TF_AUTOTUNE)
@@ -126,7 +128,7 @@ def compute_webrtc_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_l
     """
     vad_frame_length_sec = tf.constant(vad_frame_length_ms * 1e-3, tf.float32)
     min_non_speech_frames = tf.constant(min_non_speech_length_ms // vad_frame_length_ms, tf.int32)
-    logger.debug("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
+    logger.info("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
     def append_vad_decisions(x):
         signal, sample_rate = x["signal"], x["sample_rate"]
         vad_frame_length = tf.cast(tf.cast(sample_rate, tf.float32) * vad_frame_length_sec, tf.int32)
@@ -176,7 +178,7 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
     colors = tf_utils.matplotlib_colormap_to_tensor(config.get("colormap", "viridis"))
     image_size_multiplier = tf.constant(config.get("image_size_multiplier", 1), tf.float32)
     batch_size = tf.constant(config["batch_size"], tf.int64)
-    max_outputs = tf.constant(config.get("max_elements_per_batch", batch_size.numpy()), tf.int64)
+    max_outputs = tf.constant(config.get("max_elements_per_batch", batch_size), tf.int64)
     num_batches = tf.constant(config.get("num_batches", -1), tf.int64)
 
     @tf.function
@@ -200,13 +202,16 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
         tf.summary.text("utterance_ids", enumerated_uttids, step=batch_idx)
         return batch
 
-    logger.debug("Writing Tensorboard data into '%s'", summary_dir)
+    logger.info(
+            "Writing %d first elements of %d batches, each of size %d, into Tensorboard summaries in '%s'",
+            max_outputs.numpy(), num_batches.numpy(), batch_size.numpy(), summary_dir)
     writer = tf.summary.create_file_writer(summary_dir)
     with writer.as_default():
-        _ = consume(ds.batch(batch_size)
-                      .take(num_batches)
-                      .enumerate()
-                      .map(inspect_batches, num_parallel_calls=TF_AUTOTUNE))
+        _ = (ds.batch(batch_size)
+               .take(num_batches)
+               .enumerate()
+               .map(inspect_batches, num_parallel_calls=TF_AUTOTUNE)
+               .apply(consume))
     return ds
 
 
@@ -215,7 +220,7 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
     Divide the signals of each element of ds into fixed length chunks and create new utterances from the created chunks.
     The metadata of each element is repeated into into each chunk, except for the utterance ids, which will be appended by the chunk number.
     """
-    logger.debug("Dividing every signal in the dataset into new signals by creating signal chunks of length %d ms and offset %d ms. Maximum amount of padding allowed in the last chunk is %d ms.", length_ms, step_ms, max_pad_ms)
+    logger.info("Dividing every signal in the dataset into new signals by creating signal chunks of length %d ms and offset %d ms. Maximum amount of padding allowed in the last chunk is %d ms.", length_ms, step_ms, max_pad_ms)
     chunk_length_sec = tf.constant(1e-3 * length_ms, tf.float32)
     chunk_step_sec = tf.constant(1e-3 * step_ms, tf.float32)
     max_pad_sec = tf.constant(1e-3 * max_pad_ms, tf.float32)
@@ -225,7 +230,7 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
         chunk_id = tf.strings.join((x["id"], chunk_num_str), separator='-')
         out = dict(x, signal=tf.reshape(chunk, [-1]), id=chunk_id)
         if "duration" in x:
-            duration_str = tf.strings.as_string(tf.cast(x["sample_rate"] * tf.size(chunk), tf.float32))
+            duration_str = tf.strings.as_string(tf.cast(tf.size(chunk) / x["sample_rate"], tf.float32))
             out = dict(out, duration=duration_str)
         return out
     def chunk_signal_and_flatten(x):
@@ -262,7 +267,7 @@ def drop_empty(ds):
     Drop all elements that contain an empty non-scalar value, e.g. signals of size 0 or spectrograms with 0 time frames.
     """
     non_scalar_keys = ("signal", "input")
-    logger.debug("Dropping every element which have an empty tensor at any of the non-scalar element keys:\n  %s", "\n  ".join(non_scalar_keys))
+    logger.info("Dropping every element which have an empty tensor at any of the non-scalar element keys:\n  %s", "\n  ".join(non_scalar_keys))
     def is_not_empty(x):
         empty = False
         for k in non_scalar_keys:
@@ -270,16 +275,6 @@ def drop_empty(ds):
                 empty = True
         return not empty
     return ds.filter(is_not_empty)
-
-
-def drop_keys_in_set(ds, keys):
-    """
-    Given a set (or iterable) keys, delete those keys from every element of ds.
-    """
-    logger.debug("For each element in the dataset, dropping values with keys: %s.", ', '.join(keys))
-    def drop_keys(x):
-        return {k: v for k, v in x.items() if k not in keys}
-    return ds.map(drop_keys, num_parallel_calls=TF_AUTOTUNE)
 
 
 def extract_features(ds, config):
@@ -296,9 +291,9 @@ def extract_features(ds, config):
         tf_device = "/GPU:0"
     else:
         tf_device = "/CPU:0"
-    logger.debug("Extracting '%s' features on device '%s' with arguments:\n  %s", config["type"], tf_device, "\n  ".join(repr(a) for a in args[1:]))
+    logger.info("Extracting '%s' features on device '%s' with arguments:\n  %s", config["type"], tf_device, "\n  ".join(repr(a) for a in args[1:]))
     batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
-    logger.debug("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
+    logger.info("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
     def append_features(x):
         with tf.device(tf_device):
             features = tf_utils.extract_features(x["signal"], x["sample_rate"], *args)
@@ -312,10 +307,9 @@ def extract_features(ds, config):
 
 def filter_keys_in_set(ds, keys):
     """
-    Inverse of drop_keys_in_set.
-    E.g. instead of dropping keys, keys are kept only if they are in the set 'keys'.
+    For every element of ds, keep element keys only if they are in the set 'keys'.
     """
-    logger.debug("For each element in the dataset, keeping only values with keys: %s.", ', '.join(keys))
+    logger.info("For each element in the dataset, keeping only values with keys: %s.", ', '.join(keys))
     def filter_keys(x):
         return {k: v for k, v in x.items() if k in keys}
     return ds.map(filter_keys, num_parallel_calls=TF_AUTOTUNE)
@@ -348,7 +342,7 @@ def initialize(ds, labels, init_data):
     if ds is not None:
         logger.warning("Step 'initialize' is being applied on an already initialized dataset, all state will be lost.")
     ds = None
-    init_data_tensors = {key: tf.constant(list(meta), tf.string) for key, meta in init_data.items()}
+    init_data_tensors = {key: tf.convert_to_tensor(list(meta)) for key, meta in init_data.items()}
     logger.info(
             "Initializing dataset from tensors with metadata keys:\n  %s",
             '\n  '.join(sorted(init_data_tensors.keys())))
@@ -365,7 +359,7 @@ def load_audio(ds):
     """
     Load signal from the 'path' key as WAV file for each element of ds.
     """
-    logger.debug("Reading audio files from the path of each element and appending the read signals and their sample rates to each element.")
+    logger.info("Reading audio files from the path of each element and appending the read signals and their sample rates to each element.")
     def append_signals(x):
         signal, sample_rate = audio_features.read_wav(x["path"])
         return dict(x, signal=signal, sample_rate=sample_rate)
@@ -379,28 +373,64 @@ def lambda_fn(ds, fn):
     return fn(ds)
 
 
-def reduce_stats(ds, statistic):
+def reduce_stats(ds, statistic, **kwargs):
     """
     Reduce ds into a single statistic.
     This requires evaluating the full, preceding pipeline.
     """
-    logger.debug("Iterating over whole dataset to compute statistic '%s'", statistic)
+    logger.info("Iterating over whole dataset to compute statistic '%s' using kwargs:\n  %s", statistic, _pretty_dict(kwargs))
     if statistic == "num_elements":
         num_elements = ds.reduce(0, lambda c, x: c + 1)
         logger.info("Num elements: %d.", int(num_elements.numpy()))
+    if statistic == "size_counts":
+        key = kwargs["key"]
+        ndims = kwargs["ndims"]
+        logger.info("Compute frequencies of sizes in all dimensions for key '%s' of every element of ds. Assuming ndims %d.", key, ndims)
+        with io.StringIO() as sstream:
+            for axis, size_counts in enumerate(tf_utils.count_dim_sizes(ds, key, ndims)):
+                print("\n  axis/dim {:d}:\n    [freq dim-size]".format(axis), file=sstream)
+                for count in size_counts.numpy():
+                    print("    {}".format(count), file=sstream)
+            logger.info("%s", sstream.getvalue())
     else:
         logger.error("Unknown statistic type '%s', cannot compute stats for dataset.", statistic)
     return ds
 
 
-def show_all_elements(ds):
+def remap_keys(ds, new_keys):
     """
-    Iterate over ds printing every element.
+    Given a dictionary 'new_keys' that maps element keys of ds into new keys or None, remap all keys of each element of ds with the new keys or drop keys that map to None.
     """
+    def remap_keys(x):
+        return {new_keys.get(k, k): v for k, v in x.items() if new_keys.get(k, k) is not None}
+    return ds.map(remap_keys, num_parallel_calls=TF_AUTOTUNE)
+
+
+def show_all_elements(ds, shapes_only=True):
+    """
+    Iterate over ds printing shapes of every element.
+    If shapes_only is False, print also summary of contents.
+    """
+    if shapes_only:
+        log = lambda e: logger.info("Element %d:\nshapes: %s", i, repr(_element_shapes_dict(element)))
+    else:
+        log = lambda e: logger.info("Element %d:\nshapes: %s\ncontents: %s.", i, repr(_element_shapes_dict(element)), repr(element))
     for i, element in ds.enumerate(start=1).as_numpy_iterator():
         if not isinstance(element, dict):
-            element = {i: v for i, v in enumerate(element)}
-        logger.info("Element %d:\nshapes: %s\ncontents: %s.", i, repr(_element_shapes_dict(element)), repr(element))
+            element = dict(enumerate(element))
+        log(element)
+    return ds
+
+
+def write_to_kaldi_files(ds, output_dir, element_key="input"):
+    from kaldiio import WriteHelper
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "utt2feat")
+    write_specifier = "ark,scp:{0:s}.ark,{0:s}.scp".format(output_path)
+    logger.info("Writing values of key '%s' for each element in the dataset to Kaldi ark and scp files with write specifier '%s'", element_key, write_specifier)
+    with WriteHelper(write_specifier) as kaldi_writer:
+        for x in ds.as_numpy_iterator():
+            kaldi_writer(x["id"].decode("utf-8"), x[element_key])
     return ds
 
 
@@ -415,7 +445,6 @@ VALID_STEP_FUNCTIONS = {
     "consume_to_tensorboard": consume_to_tensorboard,
     "create_signal_chunks": create_signal_chunks,
     "drop_empty": drop_empty,
-    "drop_keys_in_set": drop_keys_in_set,
     "extract_features": extract_features,
     "filter_keys_in_set": filter_keys_in_set,
     "group_by_sequence_length": group_by_sequence_length,
@@ -423,7 +452,9 @@ VALID_STEP_FUNCTIONS = {
     "lambda": lambda_fn,
     "load_audio": load_audio,
     "reduce_stats": reduce_stats,
+    "remap_keys": remap_keys,
     "show_all_elements": show_all_elements,
+    "write_to_kaldi_files": write_to_kaldi_files,
 }
 
 
@@ -497,38 +528,3 @@ VALID_STEP_FUNCTIONS = {
 #     if verbosity:
 #         tf_util.tf_print("Using random wav chunk loader, drawing lengths (in frames) from", lengths, "with", overlap_ratio, "overlap ratio and", min_chunk_length, "minimum chunk length")
 #     return random_chunk_loader
-
-# TODO loading of existing features in Kaldi format
-#def parse_kaldi_features(utterance_list, features_path, utt2meta, expected_shape, feat_conf):
-#    utt2label = {u: d["label"] for u, d in utt2meta.items()}
-#    utt2feats = kaldiio.load_scp(features_path)
-#    feat_conf = dict(feat_conf)
-#    normalize_mean_axis = feat_conf.pop("normalize_mean_axis", None)
-#    normalize_stddev_axis = feat_conf.pop("normalize_stddev_axis", None)
-#    def assert_shape(shape):
-#        shape_str = "{} vs {}".format(shape, expected_shape)
-#        assert len(shape) == len(expected_shape), shape_str
-#        assert all(x == y for x, y in zip(shape, expected_shape) if y is not None), shape_str
-#    def datagen():
-#        for utt in utterance_list:
-#            if utt not in utt2feats:
-#                print("warning: skipping utterance '{}' since it is not in the kaldi scp file".format(utt), file=sys.stderr)
-#                continue
-#            feats = utt2feats[utt]
-#            #assert_shape(feats.shape)
-#            normalized = tf.constant(feats, tf.float32)
-#            if normalize_mean_axis is not None:
-#                mean = tf.math.reduce_mean(feats, axis=normalize_mean_axis, keepdims=True)
-#                normalized = feats - mean
-#            if normalize_stddev_axis is not None:
-#                stddev = tf.math.reduce_std(feats, axis=normalize_stddev_axis, keepdims=True)
-#                normalized = tf.math.divide_no_nan(normalized, stddev)
-#            yield normalized, (utt, utt2label[utt])
-#    ds = tf.data.Dataset.from_generator(
-#        datagen,
-#        (tf.float32, tf.string),
-#        (tf.TensorShape(expected_shape), tf.TensorShape([2])))
-#    # Add empty signals (since we don't know the origin of these features)
-#    empty_wav = audio_feat.Wav(tf.zeros([0]), 0)
-#    add_empty_signal = lambda feats, meta: (feats, (meta, empty_wav))
-#    return ds.map(add_empty_signal).batch(1)

@@ -41,7 +41,6 @@ definitions:
               type: boolean
             file_limit:
               type: integer
-              minimum: -1
   split:
     type: object
     required:
