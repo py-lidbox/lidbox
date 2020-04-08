@@ -353,15 +353,22 @@ def extract_features(ds, config):
     else:
         tf_device = "/CPU:0"
     logger.info("Extracting '%s' features on device '%s' with arguments:\n  %s", config["type"], tf_device, "\n  ".join(repr(a) for a in args[1:]))
-    batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
-    logger.info("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
+
     def append_features(x):
         with tf.device(tf_device):
             features = tf_utils.extract_features(x["signal"], x["sample_rate"], *args)
         feature_types = tf.repeat(feature_type, tf.shape(features)[0])
         return dict(x, input=features, feature_type=feature_types)
-    return (ds.batch(batch_size)
-              .prefetch(TF_AUTOTUNE)
+
+    if "group_by_input_length" in config:
+        max_batch_size = config["group_by_input_length"]["max_batch_size"]
+        logger.info("Grouping signals by length, creating batches of max size %d from each group", max_batch_size)
+        ds = group_by_axis_length(ds, "signal", max_batch_size, axis=0)
+    else:
+        batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
+        logger.info("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
+        ds = ds.batch(batch_size)
+    return (ds.prefetch(TF_AUTOTUNE)
               .map(append_features, num_parallel_calls=TF_AUTOTUNE)
               .unbatch())
 
@@ -376,19 +383,19 @@ def filter_keys_in_set(ds, keys):
     return ds.map(filter_keys, num_parallel_calls=TF_AUTOTUNE)
 
 
-def group_by_sequence_length(ds, max_batch_size, min_batch_size=0, sequence_dim=0):
+def group_by_axis_length(ds, element_key, max_batch_size, min_batch_size=0, axis=0):
     """
-    Group elements such that every group is a batch where all its 'input' tensors have the same length in a given dimension 'sequence_dim'.
+    Group elements such that every group is a batch where all tensors at key 'element_key' have the same length in a given dimension 'axis'.
     """
-    max_batch_size = tf.constant(max_batch_size, tf.int32)
-    min_batch_size = tf.constant(min_batch_size, tf.int32)
-    sequence_dim = tf.constant(sequence_dim, tf.int32)
+    max_batch_size = tf.constant(max_batch_size, tf.int64)
+    min_batch_size = tf.constant(min_batch_size, tf.int64)
+    axis = tf.constant(axis, tf.int32)
     def get_seq_len(x):
-        return tf.cast(tf.shape(x["input"])[sequence_dim], tf.int64)
+        return tf.cast(tf.shape(x[element_key])[axis], tf.int64)
     def group_to_batch(key, group):
         return group.batch(max_batch_size)
     def has_min_batch_size(batch):
-        return tf.shape(batch["input"])[0] >= min_batch_size
+        return tf.shape(batch[element_key])[0] >= min_batch_size
     return ds.apply(tf.data.experimental.group_by_window(
         get_seq_len,
         group_to_batch,
@@ -476,7 +483,8 @@ def reduce_stats(ds, statistic, **kwargs):
 
 def remap_keys(ds, new_keys):
     """
-    Given a dictionary 'new_keys' that maps element keys of ds into new keys or None, remap all keys of each element of ds with the new keys or drop keys that map to None.
+    Given a dictionary 'new_keys' of key-to-key mappings, update the keys of every element in ds with the new keys, if the key is in 'new_keys'.
+    If some key maps to None, that key (and value) is dropped from each element that contains the key.
     """
     def remap_keys(x):
         return {new_keys.get(k, k): v for k, v in x.items() if new_keys.get(k, k) is not None}
@@ -532,7 +540,7 @@ VALID_STEP_FUNCTIONS = {
     "drop_empty": drop_empty,
     "extract_features": extract_features,
     "filter_keys_in_set": filter_keys_in_set,
-    "group_by_sequence_length": group_by_sequence_length,
+    "group_by_axis_length": group_by_axis_length,
     "initialize": initialize,
     "lambda": lambda_fn,
     "load_audio": load_audio,
