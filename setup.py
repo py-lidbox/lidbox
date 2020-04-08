@@ -6,7 +6,7 @@ with open("README.md") as f:
 setuptools.setup(
     name="lidbox",
     version="0.4.0",
-    description="Command line toolbox for end-to-end speech classification experiments.",
+    description="End-to-end spoken language identification (LID) on TensorFlow",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
     author="Matias Lindgren",

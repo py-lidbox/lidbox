@@ -1,9 +1,9 @@
 # lidbox
 
-* Command line toolbox for managing spoken language identification (LID) experiments, or any discriminative speech classification.
-* Parallel feature extraction using `tf.data.Dataset` with STFT computations on the GPU using the `tf.signal` package.
-* Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
+* End-to-end spoken language identification (LID) on TensorFlow.
+* Parallel feature extraction using `tf.data.Dataset`, with STFT computations on the GPU using the `tf.signal` package.
 * Model training with `tf.keras`, some model examples are available [here](./lidbox/models).
+* Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
 * Expect to do some debugging if (when) stuff does not work.
 
 ## Quickstart
