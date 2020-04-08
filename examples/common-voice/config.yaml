@@ -1,4 +1,4 @@
-# User script that defines what to run
+# User script that defines what to run (if not given, lidbox.dataset.pipelines is used)
 user_script: ./script.py
 
 # List of input datasets containing wav-files
@@ -22,6 +22,11 @@ datasets:
 
 # Pre-processing operations on signals, applied before feature extraction
 pre_process:
+  filters:
+    equal:
+      key: sample_rate
+      value: 16000
+    min_signal_length_ms: 1000
   # Apply voice activity detection with WebRTC using aggressiveness level 0
   webrtcvad:
     aggressiveness: 0
@@ -39,7 +44,7 @@ features:
   # How many signals to process in one batch.
   # This is quite conservative, you can use e.g. 1000 if you want to increase CPU or GPU usage
   batch_size: 200
-  # Configuration for log-scale Mel-spectrograms (or Mel filter banks)
+  # Configuration for 1024-point STFT and log-scale Mel-spectrograms (or Mel filter banks)
   type: logmelspectrogram
   spectrogram:
     frame_length_ms: 25
@@ -59,17 +64,14 @@ cache:
   directory: ./lidbox-cache
   # Store elements in large batches
   batch_size: 1000
+  # Unique key for naming cache directories to distinguish other caches
+  key: logmelspectrogram
 
 # Show samples in TensorBoard as spectrogram images
 # This is done before training
 show_samples:
   num_batches: 50
   batch_size: 16
-
-# Filters for dropping unwanted elements
-filters:
-  sample_rate: 16000
-  min_signal_length_ms: 1000
 
 # Experiment configuration for training a model
 experiment:
