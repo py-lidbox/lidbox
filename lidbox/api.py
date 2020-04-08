@@ -205,7 +205,14 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     test_ids = [x["id"].decode("utf-8") for x in split2ds[test_conf["split"]].as_numpy_iterator()]
     utt2prediction = sorted(zip(test_ids, predictions), key=lambda t: t[0])
     del test_ids
+    has_chunks = False
     if "chunks" in config.get("pre_process", {}):
+        logger.info("Original signals were divided into chunks, merging chunk scores by averaging")
+        has_chunks = True
+    if "chunks" in config.get("post_process", {}):
+        logger.info("Extracted features were divided into chunks, merging chunk scores by averaging")
+        has_chunks = True
+    if has_chunks:
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
         predictions = np.array([p for _, p in utt2prediction])
     test_meta_ds = initialize(None, labels, split2meta[test_conf["split"]])

@@ -108,14 +108,21 @@ class E2E(Command):
     Run everything end-to-end as specified in the config file and user script.
     """
     def run(self):
-        # This import is here to avoid importing TensorFlow when the user e.g. requests just the help string from the command
+        # These imports are here to avoid importing TensorFlow when the user e.g. requests just the help string from the command
         import lidbox.api
+        import lidbox.dataset.pipelines
         super().run()
         args = self.args
         if args.verbosity:
             print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
-        split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
+        if "user_script" in config:
+            split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
+        else:
+            split2ds = {}
+            for split, split_meta in split2meta.items():
+                steps = lidbox.dataset.pipelines.create_dataset(split, labels, split_meta, config)
+                split2ds[split] = lidbox.dataset.from_steps(steps)
         history = lidbox.api.run_training(split2ds, config)
         _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
 

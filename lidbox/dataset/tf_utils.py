@@ -36,18 +36,15 @@ def make_label2onehot(labels):
     return label2int, OH
 
 
-@tf.function
-def matplotlib_colormap_to_tensor(colormap_key_t):
+def matplotlib_colormap_to_tensor(colormap_key):
     """
     Given a matplotlib colormap name, extract all RGB values from its cmap numpy array into a tf.constant.
     """
-    def colormap_tensor(colormap):
-        from matplotlib.cm import get_cmap
-        from numpy import arange
-        cmap = get_cmap(colormap.numpy().decode("utf-8"))
-        color_index = arange(cmap.N + 1)
-        return tf.constant(cmap(color_index)[:,:3], tf.float32)
-    return tf.py_function(colormap_tensor, [colormap_key_t], tf.float32)
+    from matplotlib.cm import get_cmap
+    from numpy import arange
+    cmap = get_cmap(colormap_key)
+    rgb = cmap(arange(cmap.N + 1))[:,:3]
+    return tf.convert_to_tensor(rgb)
 
 
 @tf.function
