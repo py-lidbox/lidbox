@@ -2,7 +2,7 @@ import collections
 import io
 import logging
 import os
-import random
+# import random
 import time
 
 logger = logging.getLogger("dataset")
@@ -23,6 +23,29 @@ else:
     TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 Step = collections.namedtuple("Step", ("key", "kwargs"))
+
+
+def from_steps(steps):
+    logger.info("Initializing dataset from %d steps:\n  %s", len(steps), "\n  ".join(s.key for s in steps))
+    ds = None
+    if steps[0].key != "initialize":
+        logger.critical("When constructing a dataset, the first step must be 'initialize' but it was '%s'. The 'initialize' step is needed for first loading all metadata such as the utterance_id to wavpath mappings.", steps[0].key)
+        return
+    for step_num, step in enumerate(steps, start=1):
+        if step is None:
+            logger.warning("Skipping no-op step with value None")
+            continue
+        step_fn = VALID_STEP_FUNCTIONS.get(step.key)
+        if step_fn is None:
+            logger.error("Skipping unknown step '%s'.", step.key)
+            continue
+        logger.info("Applying step number %d: '%s'.", step_num, step.key)
+        ds = step_fn(ds, **step.kwargs)
+        if ds is None:
+            logger.critical("Failed to apply step '%s', stopping.", step.key)
+            return
+    return ds
+
 
 def _feature_extraction_kwargs_to_args(config):
     valid_args = [
@@ -60,17 +83,37 @@ def apply_filters(ds, config):
     Drop all elements from ds which do not satisfy all filter conditions given in config.
     """
     logger.info("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _pretty_dict(config))
-    filter_sample_rate = tf.constant(config.get("sample_rate", -1), tf.int32)
-    filter_min_signal_length_sec = tf.constant(config.get("min_signal_length_sec", 0) * 1e-3, tf.float32)
-    # filter_min_input_shape = tf.constant(config.get("min_input_shape", []), tf.int32)
+    filters = []
+    if "equal" in config:
+        key = config["equal"]["key"]
+        value = config["equal"]["value"]
+        fn = (lambda x, k=key, v=value:
+                k not in x or tf.math.reduce_all(x[k] == v))
+        filters.append((fn, key))
+    if "min_signal_length_ms" in config:
+        key = "signal"
+        min_signal_length_sec = tf.constant(1e-3 * config["min_signal_length_ms"], tf.float32)
+        tf.debugging.assert_scalar(min_signal_length_sec, message="min_signal_length_ms must be a scalar")
+        fn = (lambda x, k=key, v=min_signal_length_sec:
+                k not in x or tf.size(x[k]) >= tf.cast(tf.cast(x["sample_rate"], tf.float32) * v, tf.int32))
+        filters.append((fn, "min_signal_length_sec"))
+    if "min_shape" in config:
+        key = config["min_shape"]["key"]
+        min_shape = tf.constant(config["min_shape"]["shape"])
+        fn = (lambda x, k=key, v=min_shape:
+                k not in x or tf.math.reduce_all(tf.shape(x[k]) >= v))
+        filters.append((fn, key))
+    if filters:
+        logger.info("Using %d different filters:\n  %s", len(filters), "\n  ".join(name for fn, name in filters))
+    else:
+        logger.warning("No filters defined, skipping filtering")
+        return ds
     def all_ok(x):
-        if "sample_rate" in x and filter_sample_rate != -1 and x["sample_rate"] != filter_sample_rate:
-            return False
-        if "signal" in x and tf.size(x["signal"]) < tf.cast(tf.cast(x["sample_rate"], tf.float32) * filter_min_signal_length_sec, tf.int32):
-            return False
-        # if "input" in x and tf.size(filter_min_input_shape) != 0 and tf.math.reduce_any(tf.shape(x["input"]) < filter_min_input_shape):
-            # return False
-        return True
+        # This will be traced by tf autograph and coverted into a graph, we cannot use python's builtin 'all' at the moment
+        ok = True
+        for fn, _ in filters:
+            ok = ok and fn(x)
+        return ok
     return ds.filter(all_ok)
 
 
@@ -78,7 +121,7 @@ def apply_vad(ds):
     """
     Assuming each element of ds have voice activity detection decisions, use the decisions to drop non-speech frames.
     """
-    logger.info("Applying previously computed voice activity decisions.")
+    logger.info("Using previously computed voice activity decisions to drop signal frames marked as non-speech.")
     drop_keys_after_done = {"vad_frame_length_ms", "vad_is_speech"}
     def filter_signals_by_vad_decisions(x):
         vad_frame_length_sec = 1e-3 * tf.cast(x["vad_frame_length_ms"], tf.float32)
@@ -207,12 +250,30 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
             max_outputs.numpy(), num_batches.numpy(), batch_size.numpy(), summary_dir)
     writer = tf.summary.create_file_writer(summary_dir)
     with writer.as_default():
-        _ = (ds.batch(batch_size)
+        _ = (ds.batch(batch_size, drop_remainder=True)
                .take(num_batches)
                .enumerate()
                .map(inspect_batches, num_parallel_calls=TF_AUTOTUNE)
                .apply(consume))
     return ds
+
+
+def create_input_chunks(ds, length, step):
+    id_str_padding = 6
+    def chunks_to_elements(chunk, chunk_num, x):
+        chunk_num_str = tf.strings.as_string(chunk_num, width=id_str_padding, fill='0')
+        chunk_id = tf.strings.join((x["id"], chunk_num_str), separator='-')
+        return dict(x, input=chunk)
+    def chunk_input_and_flatten(x):
+        chunks = tf.signal.frame(x["input"], length, step, axis=0)
+        num_chunks = tf.cast(tf.shape(chunks)[0], tf.int64)
+        chunk_ds = tf.data.Dataset.from_tensor_slices(chunks)
+        chunk_nums_ds = tf.data.Dataset.range(1, num_chunks + 1)
+        repeat_x_ds = tf.data.Dataset.from_tensors(x).repeat(num_chunks)
+        return (tf.data.Dataset
+                  .zip((chunk_ds, chunk_nums_ds, repeat_x_ds))
+                  .map(chunks_to_elements))
+    return ds.interleave(chunk_input_and_flatten, num_parallel_calls=TF_AUTOTUNE)
 
 
 def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_output_order=True, max_num_chunks_per_signal=int(1e6), avg_num_chunks_from_signals=100):
@@ -378,11 +439,27 @@ def reduce_stats(ds, statistic, **kwargs):
     Reduce ds into a single statistic.
     This requires evaluating the full, preceding pipeline.
     """
-    logger.info("Iterating over whole dataset to compute statistic '%s' using kwargs:\n  %s", statistic, _pretty_dict(kwargs))
+    logger.info(
+            "Iterating over whole dataset to compute statistic '%s'%s",
+            statistic,
+            " using kwargs:\n  {}".format(_pretty_dict(kwargs)) if kwargs else '')
     if statistic == "num_elements":
         num_elements = ds.reduce(0, lambda c, x: c + 1)
         logger.info("Num elements: %d.", int(num_elements.numpy()))
-    if statistic == "size_counts":
+    elif statistic == "vad_ratio":
+        def get_vad_ratio(vad_decisions):
+            num_speech = tf.math.reduce_sum(tf.cast(vad_decisions, tf.int64))
+            num_not_speech = tf.math.reduce_sum(tf.cast(~vad_decisions, tf.int64))
+            return tf.stack((num_speech, num_not_speech))
+        frame_length_ms = list(ds.take(1).as_numpy_iterator())[0]["vad_frame_length_ms"]
+        vad_ratio = ds.reduce(
+                tf.constant([0, 0], tf.int64),
+                lambda c, x: c + get_vad_ratio(x["vad_is_speech"]))
+        kept, dropped = vad_ratio.numpy().tolist()
+        logger.info(
+                "VAD frame statistics:\n  frame length %d ms\n  kept %d\n  dropped %d\n  total %d\n  kept ratio %.3f",
+                frame_length_ms, kept, dropped, kept + dropped, kept / ((kept + dropped) or 1))
+    elif statistic == "size_counts":
         key = kwargs["key"]
         ndims = kwargs["ndims"]
         logger.info("Compute frequencies of sizes in all dimensions for key '%s' of every element of ds. Assuming ndims %d.", key, ndims)
@@ -412,13 +489,20 @@ def show_all_elements(ds, shapes_only=True):
     If shapes_only is False, print also summary of contents.
     """
     if shapes_only:
-        log = lambda e: logger.info("Element %d:\nshapes: %s", i, repr(_element_shapes_dict(element)))
+        log = lambda i, e: logger.info(
+                "Element %d:\nshapes:\n  %s",
+                i, _pretty_dict(_element_shapes_dict(e)))
     else:
-        log = lambda e: logger.info("Element %d:\nshapes: %s\ncontents: %s.", i, repr(_element_shapes_dict(element)), repr(element))
+        log = lambda i, e: logger.info(
+                "Element %d:\nshapes:\n  %s\ncontents:\n  %s",
+                i, _pretty_dict(_element_shapes_dict(e)), _pretty_dict(e))
+    logger.info("Showing all elements.")
+    i = 0
     for i, element in ds.enumerate(start=1).as_numpy_iterator():
         if not isinstance(element, dict):
             element = dict(enumerate(element))
-        log(element)
+        log(i, element)
+    logger.info("All %d elements shown.", i)
     return ds
 
 
@@ -443,6 +527,7 @@ VALID_STEP_FUNCTIONS = {
     "compute_webrtc_vad": compute_webrtc_vad,
     "consume": consume,
     "consume_to_tensorboard": consume_to_tensorboard,
+    "create_input_chunks": create_input_chunks,
     "create_signal_chunks": create_signal_chunks,
     "drop_empty": drop_empty,
     "extract_features": extract_features,
