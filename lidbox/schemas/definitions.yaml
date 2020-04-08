@@ -77,7 +77,7 @@ webrtcvad:
   description: 'Voice activity detection with WebRTC'
   required:
     - aggressiveness
-    - frame_ms
+    - vad_frame_length_ms
     - min_non_speech_length_ms
   additionalProperties: false
   properties:
@@ -85,7 +85,7 @@ webrtcvad:
       type: integer
       minimum: 0
       maximum: 3
-    frame_ms:
+    vad_frame_length_ms:
       type: integer
       description: 'WebRTC VAD frame length in milliseconds'
       minimum: 10
@@ -176,12 +176,7 @@ features:
           key:
             type: string
           shape:
-            type: array
-            contains:
-              anyOf:
-                - type: integer
-                  minimum: 0
-                - type: 'null'
+            $ref: '#/definitions/shape'
     window_normalization:
       type: object
       additionalProperties: false
@@ -204,6 +199,8 @@ cache:
     batch_size:
       type: integer
       exclusiveMinimum: 0
+    key:
+      type: string
 
 experiment:
   type: object
@@ -312,13 +309,14 @@ experiment:
 
 post_process:
   type: object
+  additionalProperties: false
   properties:
+    filters:
+      $ref: '#/definitions/filters'
     chunks:
       type: object
       additionalProperties: false
       properties:
-        flatten:
-          type: boolean
         pad_zeros:
           type: boolean
         length:
@@ -363,7 +361,7 @@ pre_process:
   additionalProperties: false
   properties:
     filters:
-      $ref: '#/definitions/pre_process_filters'
+      $ref: '#/definitions/filters'
     webrtcvad:
       $ref: '#/definitions/webrtcvad'
     chunks:
@@ -386,21 +384,36 @@ pre_process:
           type: integer
           description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
           minimum: 0
-    filter_sample_rate:
-      type: integer
-      description: 'Sample rate expected for all read files. Files with different rates are ignored'
-      exclusiveMinimum: 0
 
-pre_process_filters:
+filters:
   type: object
   additionalProperties: false
   properties:
-    sample_rate:
-      type: integer
+    equal:
+      type: object
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        value:
+          type: [string, array, integer, number]
       exclusiveMinimum: 0
     min_signal_length_ms:
       type: integer
       minimum: 0
+    min_shape:
+        key:
+          type: string
+        shape:
+          $ref: '#/definitions/shape'
+
+shape:
+  type: array
+  contains:
+    anyOf:
+      - type: integer
+        minimum: 0
+      - type: 'null'
 
 show_samples:
   type: object
