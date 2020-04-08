@@ -6,15 +6,22 @@ import jsonschema
 import lidbox
 
 try:
-    CONFIG_FILE_SCHEMA_PATH = os.path.join(__path__[0], "config.yaml")
+    SCHEMA_PATHS = {
+        key: os.path.join(__path__[0], filename)
+        for key, filename in
+        [("schema", "config.yaml"),
+         ("definitions", "definitions.yaml")]}
 except Exception as e:
     print("Warning: unable to load JSON schema path, error was:")
     print(str(e))
-    CONFIG_FILE_SCHEMA_PATH = None
+    SCHEMA_PATHS = {}
 
 
 def validate_config_file_and_get_error_string(path, verbose):
-    schema = lidbox.load_yaml(CONFIG_FILE_SCHEMA_PATH)
+    schema = lidbox.load_yaml(SCHEMA_PATHS["schema"])
+    if "definitions" in schema:
+        print("WARNING: 'definitions' already in defined in '{}', they will be overwritten with contents from '{}'".format(SCHEMA_PATHS["schema"], SCHEMA_PATHS["definitions"]))
+    schema["definitions"] = lidbox.load_yaml(SCHEMA_PATHS["definitions"])
     config = lidbox.load_yaml(path)
     error_string = ''
     try:
