@@ -136,13 +136,17 @@ def run_training(split2ds, config):
     validation_ds = (split2ds[split_conf["validation"]["split"]]
                         .batch(split_conf["validation"]["batch_size"])
                         .apply(as_supervised))
-    user_script = load_user_script_as_module(config["user_script"])
-    if hasattr(user_script, "train"):
-        logger.info("User script has defined a 'train' function, will use it")
-        history = user_script.train(train_ds, validation_ds, config)
-        if history is None:
-            logger.warning("Function 'train' in the user script '%s' did not return a history object", config["user_script"])
-    else:
+    #TODO split
+    history = None
+    if "user_script" in config:
+        user_script = load_user_script_as_module(config["user_script"])
+        if hasattr(user_script, "train"):
+            logger.info("User script has defined a 'train' function, will use it")
+            history = user_script.train(train_ds, validation_ds, config)
+            if history is None:
+                logger.warning("Function 'train' in the user script '%s' did not return a history object", config["user_script"])
+                history = []
+    if history is None:
         logger.info("User script has not defined a 'train' function, will use default approach")
         keras_wrapper = KerasWrapper.from_config(config)
         logger.info("Model initialized:\n%s", str(keras_wrapper))
@@ -171,6 +175,7 @@ def print_predictions(utt2prediction, labels, precision=3, **print_kwargs):
 
 
 #TODO simplify and divide into manageable pieces
+#TODO check user script before calling this
 def evaluate_test_set(split2ds, split2meta, labels, config):
     from lidbox.dataset.steps import as_supervised, initialize
     from lidbox.models.keras_utils import best_model_checkpoint_from_config, experiment_cache_from_config
@@ -178,14 +183,16 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     test_ds = (split2ds[test_conf["split"]]
                 .batch(test_conf["batch_size"])
                 .apply(as_supervised))
-    user_script = load_user_script_as_module(config["user_script"])
-    if hasattr(user_script, "predict"):
-        logger.info("User script has defined a 'predict' function, will use it")
-        predictions = user_script.predict(test_ds, config)
-        if predictions is None:
-            logger.error("Function 'predict' in the user script '%s' did not return predictions", config["user_script"])
-            return
-    else:
+    predictions = None
+    if "user_script" in config:
+        user_script = load_user_script_as_module(config["user_script"])
+        if hasattr(user_script, "predict"):
+            logger.info("User script has defined a 'predict' function, will use it")
+            predictions = user_script.predict(test_ds, config)
+            if predictions is None:
+                logger.error("Function 'predict' in the user script '%s' did not return predictions", config["user_script"])
+                return
+    if predictions is None:
         logger.info("User script has not defined a 'predict' function, will use default approach")
         keras_wrapper = KerasWrapper.from_config(config)
         logger.info("Model initialized:\n%s", str(keras_wrapper))
