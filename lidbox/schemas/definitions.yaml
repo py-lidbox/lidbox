@@ -351,6 +351,8 @@ post_process:
             min_overlap:
               type: number
               exclusiveMaximum: 1.0
+    remap_keys:
+      type: object
 
 user_script:
   type: string

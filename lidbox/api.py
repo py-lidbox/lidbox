@@ -27,6 +27,17 @@ VALID_METADATA_FILES = {
 }
 
 
+def create_datasets(split2meta, labels, config):
+    from lidbox.dataset import from_steps
+    create_dataset = None
+    if "user_script" in config:
+        create_dataset = getattr(load_user_script_as_module(config["user_script"]), "create_dataset")
+    if create_dataset is None:
+        from lidbox.dataset.pipelines import create_dataset
+    return {split: from_steps(create_dataset(split, labels, split_meta, config))
+            for split, split_meta in split2meta.items()}
+
+
 def get_flat_dataset_config(config):
     num_datasets = len(config["datasets"])
     # Merge all labels and sort
@@ -106,16 +117,6 @@ def load_splits_from_config_file(config_file_path):
     logger.info("Loading metadata from all files and merging metadata of all datasets")
     split2meta = merge_dataset_metadata(load_all_metadata_from_paths(split2datasets))
     return split2meta, labels, config
-
-
-def create_datasets_using_user_script(split2meta, labels, config):
-    logger.info("Loading user script at '%s'.", config["user_script"])
-    user_script = load_user_script_as_module(config["user_script"])
-    split2ds = {}
-    for split, split_meta in split2meta.items():
-        steps = user_script.create_dataset(split, labels, split_meta, config)
-        split2ds[split] = lidbox.dataset.from_steps(steps)
-    return split2ds
 
 
 def run_training(split2ds, config):

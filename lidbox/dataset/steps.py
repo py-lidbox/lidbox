@@ -434,9 +434,22 @@ def load_audio(ds):
     return ds.map(append_signals, num_parallel_calls=TF_AUTOTUNE)
 
 
+def normalize(ds, config):
+    """
+    Apply normalization for all elements of ds for some key.
+    E.g. in case features were not normalized during feature extraction.
+    """
+    logger.info("Applying normalization with config:\n  %s".format(_pretty_dict(config)))
+    key = config["key"]
+    def _normalize(x):
+        return dict(x, key=features.window_normalization(x[key], **config["kwargs"]))
+    return ds.map(_normalize, num_parallel_calls=TF_AUTOTUNE)
+
+
 def lambda_fn(ds, fn):
     """
     For applying arbitrary logic on ds.
+    Note that in this case it might be easier to write a custom pipeline and not use the from_steps function at all.
     """
     return fn(ds)
 
@@ -544,6 +557,7 @@ VALID_STEP_FUNCTIONS = {
     "initialize": initialize,
     "lambda": lambda_fn,
     "load_audio": load_audio,
+    "normalize": normalize,
     "reduce_stats": reduce_stats,
     "remap_keys": remap_keys,
     "show_all_elements": show_all_elements,

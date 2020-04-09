@@ -110,19 +110,12 @@ class E2E(Command):
     def run(self):
         # These imports are here to avoid importing TensorFlow when the user e.g. requests just the help string from the command
         import lidbox.api
-        import lidbox.dataset.pipelines
         super().run()
         args = self.args
         if args.verbosity:
             print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
-        if "user_script" in config:
-            split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
-        else:
-            split2ds = {}
-            for split, split_meta in split2meta.items():
-                steps = lidbox.dataset.pipelines.create_dataset(split, labels, split_meta, config)
-                split2ds[split] = lidbox.dataset.from_steps(steps)
+        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
         history = lidbox.api.run_training(split2ds, config)
         _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
 
@@ -133,6 +126,7 @@ class Evaluate(Command):
     """
     def run(self):
         import lidbox.api
+        import lidbox.dataset.pipelines
         super().run()
         args = self.args
         if args.verbosity:
@@ -141,7 +135,7 @@ class Evaluate(Command):
         test_split_key = config["experiment"]["data"]["test"]["split"]
         # Run the pipeline only for the test split
         split2meta = {split: meta for split, meta in split2meta.items() if split == test_split_key}
-        split2ds = lidbox.api.create_datasets_using_user_script(split2meta, labels, config)
+        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
         _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
 
 

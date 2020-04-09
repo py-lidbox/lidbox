@@ -66,6 +66,15 @@ def create_dataset(split, labels, init_data, config):
             steps.extend([
                 Step("create_input_chunks", config["post_process"]["chunks"]),
             ])
+        if "remap_keys" in config["post_process"]:
+            # Reordering or dropping keys
+            steps.extend([
+                Step("remap_keys", {"new_keys": config["post_process"]["remap_keys"]}),
+            ])
+        if "normalize" in config["post_process"]:
+            steps.extend([
+                Step("normalize", {"config": config["post_process"]["normalize"]}),
+            ])
     if "cache" in config:
         cache_root = config["cache"]["directory"]
         cache_config = {
