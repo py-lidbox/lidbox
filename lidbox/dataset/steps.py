@@ -258,12 +258,13 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
     return ds
 
 
+# TODO generalize and merge with create_signal_chunks
 def create_input_chunks(ds, length, step):
     id_str_padding = 6
     def chunks_to_elements(chunk, chunk_num, x):
         chunk_num_str = tf.strings.as_string(chunk_num, width=id_str_padding, fill='0')
         chunk_id = tf.strings.join((x["id"], chunk_num_str), separator='-')
-        return dict(x, input=chunk)
+        return dict(x, id=chunk_id, input=chunk)
     def chunk_input_and_flatten(x):
         chunks = tf.signal.frame(x["input"], length, step, axis=0)
         num_chunks = tf.cast(tf.shape(chunks)[0], tf.int64)

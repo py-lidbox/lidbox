@@ -163,9 +163,10 @@ def group_chunk_predictions_by_parent_id(utt2prediction):
     """
     Group all chunks by the parent utterance id separated by '-' and take average over chunk predictions.
     """
+    get_parent_id = lambda t: t[0].rsplit('-', 1)[0]
     return [(utt, np.stack([pred for _, pred in chunk2pred]).mean(axis=0))
             for utt, chunk2pred in
-            itertools.groupby(utt2prediction, key=lambda t: t[0].rsplit('-', 1)[0])]
+            itertools.groupby(sorted(utt2prediction, key=get_parent_id), key=get_parent_id)]
 
 
 def print_predictions(utt2prediction, labels, precision=3, **print_kwargs):
