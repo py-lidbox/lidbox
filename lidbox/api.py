@@ -226,8 +226,11 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
         utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
         predictions = np.array([p for _, p in utt2prediction])
-    scores_file = os.path.join(experiment_cache_from_config(config), "predictions")
+    scores_file = os.path.join(experiment_cache_from_config(config), "predictions", "scores")
+    os.makedirs(os.path.dirname(scores_file), exist_ok=True)
     logger.info("Writing predicted scores to '%s'", scores_file)
+    if os.path.exists(scores_file):
+        logger.warning("Overwriting existing '%s'", scores_file)
     with open(scores_file, "w") as scores_f:
         print_predictions(utt2prediction, labels, file=scores_f)
     metric_results = []
@@ -289,3 +292,11 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         else:
             logger.error("Cannot evaluate unknown metric '%s'", metric["name"])
         metric_results.append({"name": metric["name"], "result": result})
+    return metric_results
+
+
+def write_metrics(metrics, config):
+    from lidbox.models.keras_utils import experiment_cache_from_config
+    metrics_file = os.path.join(experiment_cache_from_config(config), "predictions", "metrics.json")
+    os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
+    logger.info("Writing evaluated metrics to '%s'", metrics_file)

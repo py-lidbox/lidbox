@@ -117,7 +117,8 @@ class E2E(Command):
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2ds = lidbox.api.create_datasets(split2meta, labels, config)
         history = lidbox.api.run_training(split2ds, config)
-        _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
+        metrics = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
+        lidbox.api.write_metrics(metrics, config)
 
 
 class Evaluate(Command):
@@ -136,7 +137,8 @@ class Evaluate(Command):
         # Run the pipeline only for the test split
         split2meta = {split: meta for split, meta in split2meta.items() if split == test_split_key}
         split2ds = lidbox.api.create_datasets(split2meta, labels, config)
-        _ = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
+        metrics = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
+        lidbox.api.write_metrics(metrics, config)
 
 
 class Utils(Command):
