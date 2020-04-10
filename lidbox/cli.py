@@ -12,7 +12,7 @@ import lidbox.schemas
 
 def create_argparser():
     """Root argparser for all lidbox command line interface commands"""
-    description = lidbox.__doc__ + "For help on other commands, try e.g. lidbox extract -h."
+    description = lidbox.__doc__ + "For help on other commands, try e.g. lidbox e2e -h."
     root_parser = argparse.ArgumentParser(
         prog=lidbox.__name__,
         description=description,
