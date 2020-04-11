@@ -203,7 +203,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         keras_wrapper.load_weights(best_checkpoint)
         logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
         predictions = keras_wrapper.keras_model.predict(test_ds)
-    logger.info("Model predicted results for %d inputs, now gathering all test set ids", predictions.shape[0])
+    logger.info("Model returned predictions of shape %s, now gathering all test set ids", repr(predictions.shape))
     test_ids = [x["id"].decode("utf-8") for x in split2ds[test_conf["split"]].as_numpy_iterator()]
     utt2prediction = sorted(zip(test_ids, predictions), key=lambda t: t[0])
     del test_ids
