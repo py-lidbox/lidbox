@@ -176,6 +176,20 @@ def print_predictions(utt2prediction, labels, precision=3, **print_kwargs):
         print(utt, *scores_str, **print_kwargs)
 
 
+def format_confusion_matrix(cm, labels):
+    assert cm.shape[0] == cm.shape[1] == len(labels), "invalid confusion matrix and/or labels"
+    label_format = "{{:{:d}s}}".format(max(len(l) for l in labels))
+    labels_padded = [label_format.format(l) for l in labels]
+    num_pred_labels = cm.sum(axis=0)
+    num_true_labels = cm.sum(axis=1)
+    cm_lines = str(cm).splitlines()
+    cm_lines = [label + " " + cm_line + " " + str(num_true)
+                for label, cm_line, num_true in zip(labels_padded, cm_lines, num_true_labels)]
+    cm_lines = [label_format.format('') + ' '.join(labels)] + cm_lines
+    cm_lines.append(label_format.format('') + ' '.join(str(n) for n in num_pred_labels))
+    return '\n'.join(cm_lines)
+
+
 #TODO simplify and divide into manageable pieces
 #TODO check user script before calling this
 def evaluate_test_set(split2ds, split2meta, labels, config):
@@ -289,7 +303,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         elif metric["name"] == "confusion_matrix":
             logger.info("Generating confusion matrix")
             result = sklearn.metrics.confusion_matrix(true_labels_sparse, pred_labels_sparse)
-            logger.info("%s:\n%s", metric["name"], str(result))
+            logger.info("%s:\n%s", metric["name"], format_confusion_matrix(result, labels))
             result = result.tolist()
         else:
             logger.error("Cannot evaluate unknown metric '%s'", metric["name"])
