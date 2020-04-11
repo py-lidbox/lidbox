@@ -217,15 +217,15 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     if has_chunks:
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
         predictions = np.array([p for _, p in utt2prediction])
+    # Collect targets from the test set iterator
     test_meta_ds = initialize(None, labels, split2meta[test_conf["split"]])
-    utt2target = [(x["id"].decode("utf-8"), x["target"]) for x in test_meta_ds.as_numpy_iterator()]
-    missed_utterances = set(u for u, _ in utt2target) - set(u for u, _ in utt2prediction)
+    utt2target = {x["id"].decode("utf-8"): x["target"] for x in test_meta_ds.as_numpy_iterator()}
+    missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
     min_score = np.amin(predictions)
     max_score = np.amax(predictions)
     if missed_utterances:
         logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
         utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
-        predictions = np.array([p for _, p in utt2prediction])
     scores_file = os.path.join(experiment_cache_from_config(config), "predictions", "scores")
     os.makedirs(os.path.dirname(scores_file), exist_ok=True)
     logger.info("Writing predicted scores to '%s'", scores_file)
@@ -234,7 +234,9 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     with open(scores_file, "w") as scores_f:
         print_predictions(utt2prediction, labels, file=scores_f)
     metric_results = []
-    true_labels_sparse = np.array([t for _, t in utt2target])
+    # Ensure true labels are always in the same order as in predictions
+    predictions = np.array([p for _, p in utt2prediction])
+    true_labels_sparse = np.array([utt2target[u] for u, _ in utt2prediction])
     pred_labels_sparse = np.argmax(predictions, axis=1)
     logger.info("Evaluating metrics on true labels of shape %s and predicted labels of shape %s", true_labels_sparse.shape, pred_labels_sparse.shape)
     for metric in test_conf["evaluate_metrics"]:
