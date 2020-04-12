@@ -443,7 +443,7 @@ def normalize(ds, config):
     logger.info("Applying normalization with config:\n  %s".format(_pretty_dict(config)))
     key = config["key"]
     def _normalize(x):
-        return dict(x, key=features.window_normalization(x[key], **config["kwargs"]))
+        return dict(x, **{key: features.window_normalization(x[key], **config.get("kwargs", {}))})
     return ds.map(_normalize, num_parallel_calls=TF_AUTOTUNE)
 
 

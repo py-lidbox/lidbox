@@ -1,6 +1,7 @@
 import collections
 import importlib
 import itertools
+import json
 import logging
 import os
 import random
@@ -68,6 +69,10 @@ def load_all_metadata_from_paths(split2datasets):
             # Read all meta files
             meta = {key: collections.OrderedDict(lidbox.iter_metadata_file(path, num_columns=2)) for key, path in meta.items()}
             logger.info("Amount of contents per file:\n  %s", '\n  '.join("{}: {}".format(key, len(val)) for key, val in meta.items()))
+            first_meta_length = len(list(meta.values())[0])
+            if not all(len(meta_list) == first_meta_length for meta_list in meta.values()):
+                logger.error("All metadata files must contain exactly the same amount of unique utterance ids")
+                return
             # 'utt2path' is always present, use it to select final utterance ids
             utt_ids = list(meta["path"].keys())
             if kwargs.get("shuffle_files", False):
@@ -82,7 +87,7 @@ def load_all_metadata_from_paths(split2datasets):
             meta["id"] = utt_ids
             meta["dataset"] = len(utt_ids) * [dataset]
             if "kaldi_ark_key" in meta:
-                logger.info("Metadata contains keys into Kaldi archive files, loading all arrays.")
+                logger.info("Metadata contains 'kaldi_ark_key', loading all arrays from Kaldi archive files.")
                 from kaldiio import load_mat
                 meta["kaldi_ark"] = [load_mat(key) for key in meta["kaldi_ark_key"]]
             split2datasets_meta[split].append(meta)
@@ -316,3 +321,5 @@ def write_metrics(metrics, config):
     metrics_file = os.path.join(experiment_cache_from_config(config), "predictions", "metrics.json")
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     logger.info("Writing evaluated metrics to '%s'", metrics_file)
+    with open(metrics_file, "w") as f:
+        json.dump(metrics, f)

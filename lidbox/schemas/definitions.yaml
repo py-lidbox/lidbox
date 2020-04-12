@@ -311,6 +311,8 @@ post_process:
   type: object
   additionalProperties: false
   properties:
+    normalize:
+      type: object
     filters:
       $ref: '#/definitions/filters'
     chunks:
