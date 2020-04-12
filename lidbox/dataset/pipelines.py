@@ -42,6 +42,11 @@ def create_dataset(split, labels, init_data, config):
                 # Some signals might contain only non-speech frames
                 Step("drop_empty", {}),
             ])
+        if "augment_by_additive_noise" in config["pre_process"]:
+            # Create new signals by mixing in random noise signals with random SNR dB levels into existing signals
+            steps.extend([
+                Step("augment_by_additive_noise", config["pre_process"]["augment_by_additive_noise"]),
+            ])
         if "chunks" in config["pre_process"]:
             # Dividing signals into fixed length chunks
             steps.extend([
@@ -50,11 +55,19 @@ def create_dataset(split, labels, init_data, config):
         # TODO not yet supported
         # if "random_chunks" in config["pre_process"]:
     if "features" in config:
-        # Feature extraction
-        steps.extend([
-            # Apply feature extraction, uses GPU by default, change with 'device' key
-            Step("extract_features", {"config": config["features"]}),
-        ])
+        # Load features
+        if config["features"]["type"] == "kaldi":
+            # Pre-extracted Kaldi features will be used as input
+            steps.extend([
+                # Use data under 'kaldi_ark' as 'input' and drop ark metadata
+                Step("remap_keys", {"new_keys": {"input": "kaldi_ark", "kaldi_ark": None, "kaldi_ark_key": None}}),
+            ])
+        else:
+            # Features will be extracted from 'signal' and stored under 'input'
+            steps.extend([
+                # Apply feature extraction, uses GPU by default, change with 'device' key
+                Step("extract_features", {"config": config["features"]}),
+            ])
     if "post_process" in config:
         if "filters" in config["post_process"]:
             # Drop unwanted features

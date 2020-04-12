@@ -142,6 +142,66 @@ def as_supervised(ds):
     return ds.map(_as_supervised, num_parallel_calls=TF_AUTOTUNE)
 
 
+def augment_by_additive_noise(ds, noise_source_dir, snr_list):
+    """
+    Read all noise signals from $noise_source_dir/id2path and create new signals by mixing noise to each element of ds.
+    'snr_list' defines the noise labels, which is determined by $noise_source_dir/id2label, and the SNR dB range from which the noise level in the resulting signal will be chosen randomly.
+    E.g. to choose 3 random noise signals from categories "noise", "speech" and "music" with 3 different SNR dB (low, high) ranges:
+        noise_source_dir = "/my/path/musan"
+        snr_list = [
+            ("noise", 5, 15),
+            ("speech", 15, 20),
+            ("music", 10, 20)
+        ]
+    """
+    logger.info("Augmenting dataset with additive noise from '%s'.", noise_source_dir)
+    id2type = dict(lidbox.iter_metadata_file(os.path.join(noise_source_dir, "id2label"), 2))
+    type2paths = collections.defaultdict(list)
+    for noise_id, path in lidbox.iter_metadata_file(os.path.join(noise_source_dir, "id2path"), 2):
+        type2paths[id2type[noise_id]].append(path)
+    del id2type
+    type2paths = {t: tf.constant(paths, tf.string) for t, paths in type2paths.items()}
+    def update_element_meta(new_id, mixed_signal, x):
+        return dict(x, id=new_id, signal=mixed_signal)
+    def add_random_noise_and_flatten(x):
+        # Random noise path indexes and random snr levels
+        rand_noise = [
+                (noise_type,
+                 tf.random.uniform([], 0, tf.size(type2paths[noise_type]), tf.int64),
+                 tf.random.uniform([], snr_low, snr_high, tf.float32))
+                for noise_type, snr_low, snr_high in snr_list]
+        # Load random noise signals with drawn indexes
+        rand_noise = [
+                (audio_features.read_wav(type2paths[noise_type][rand_index]), snr)
+                for noise_type, rand_index, snr in rand_noise]
+        # Assert sample rates
+        # TODO maybe add inline resampling
+        for (noise, sample_rate), snr in rand_noise:
+            tf.debugging.assert_equal(sample_rate, x["sample_rate"], message="Invalid noise signals are being used, all noise signals must have same sample rate as speech signals that are being augmented")
+        # Fix noise signal length to match x["signal"] by repeating the noise signal if it is too short
+        rand_noise = [
+                (tf.cast(tf.size(x["signal"]) / tf.size(noise), tf.int32), noise, snr)
+                for (noise, _), snr in rand_noise]
+        rand_noise = [
+                (tf.tile(noise, [1 + noise_length_ratio])[:tf.size(noise)], snr)
+                for noise_length_ratio, noise, snr in rand_noise]
+        mixed_signals = [audio_features.snr_mixer(x["signal"], noise, snr)[2] for noise, snr in rand_noise]
+        new_ids = [
+                tf.strings.join((x["id"], noise_type, tf.strings.as_string(snr, precision=2)), separator="-")
+                for noise_type, snr in rand_noise]
+        signal_ds = tf.data.Dataset.from_tensor_slices(mixed_signals)
+        repeat_x_ds = tf.data.Dataset.from_tensors(x).repeat(len(mixed_signals))
+        return (tf.data.Dataset
+                  .from_tensor_slices((new_ids, mixed_signals, len(mixed_signals) * [x]))
+                  .map(update_element_meta))
+    return ds.interleave(add_random_noise_and_flatten, num_parallel_calls=TF_AUTOTUNE)
+
+
+
+def augment_by_random_resampling(ds, range):
+    pass
+
+
 def cache(ds, directory=None, batch_size=1, cache_key=None):
     """
     Cache all elements of ds to disk or memory.
@@ -545,6 +605,8 @@ VALID_STEP_FUNCTIONS = {
     "apply_filters": apply_filters,
     "apply_vad": apply_vad,
     "as_supervised": as_supervised,
+    "augment_by_additive_noise": augment_by_additive_noise,
+    "augment_by_random_resampling": augment_by_random_resampling,
     "cache": cache,
     "compute_webrtc_vad": compute_webrtc_vad,
     "consume": consume,
