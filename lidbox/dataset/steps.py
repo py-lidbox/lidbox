@@ -479,12 +479,19 @@ def drop_empty(ds):
 
 def drop_invalid_wavs(ds):
     """
-    Drop wav files with invalid headers.
+    Drop all samples that have a wav file with an invalid header.
     """
     logger.info("Dropping all elements that have a wav file with a corrupted header.")
+    # The current wav check implementation has a lot of latency so we add flags in parallel and filter sequentially using the flags
+    def _add_valid_header_flag(x):
+        return dict(x, _wav_header_is_valid=audio_features.wav_header_is_valid(x["path"]))
     def _has_valid_header(x):
-        return audio_features.wav_header_is_valid(x["path"])
-    return ds.filter(_has_valid_header)
+        return x["_wav_header_is_valid"]
+    def _drop_flag(x):
+        return {k: v for k, v in x.items() if k != "_wav_header_is_valid"}
+    return (ds.map(_add_valid_header_flag, num_parallel_calls=TF_AUTOTUNE)
+              .filter(_has_valid_header)
+              .map(_drop_flag, num_parallel_calls=TF_AUTOTUNE))
 
 
 def extract_features(ds, config):

@@ -95,22 +95,25 @@ def framewise_rms_energy_vad_decisions(signals, sample_rate, frame_length_ms=25,
 #     return vad_decisions
 
 
-def _wav_header_is_valid(path_bytes):
+def _count_wav_body_size(path_bytes):
     """
     https://github.com/mozilla/DeepSpeech/issues/2048#issuecomment-539518251
     """
-    path = path_bytes.decode("utf-8")
-    with wave.open(path, 'r') as f_in:
-        wav_size = (f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()) + 44
-    return wav_size == os.path.getsize(path)
+    with wave.open(path_bytes.decode("utf-8"), 'r') as f_in:
+        return f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()
 
 @tf.function
 def wav_header_is_valid(path):
+    """
+    Return True if the file at 'path' is a valid wav file that can be decoded using 'read_wav' and False if it is not.
+    It is assumed the wav file is less than 2 GiB.
+    """
     file_contents = tf.io.read_file(path)
     if tf.strings.substr(file_contents, 0, 4) != "RIFF":
         return False
     else:
-        return tf.numpy_function(_wav_header_is_valid, [path], tf.bool)
+        wav_body_size = tf.cast(tf.numpy_function(_count_wav_body_size, [path], tf.int64), tf.int32)
+        return wav_body_size + 44 == tf.strings.length(file_contents)
 
 @tf.function
 def read_wav(path):
