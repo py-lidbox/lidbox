@@ -2,6 +2,9 @@
 Audio feature extraction.
 Some functions are simply one-to-one TensorFlow math conversions from https://github.com/librosa.
 """
+import os
+import wave
+
 import numpy as np
 import tensorflow as tf
 import webrtcvad
@@ -91,20 +94,31 @@ def framewise_rms_energy_vad_decisions(signals, sample_rate, frame_length_ms=25,
 #     vad_decisions = log_energy > (energy_threshold + energy_mean_scale * mean_log_energy)
 #     return vad_decisions
 
+
+def _wav_header_is_valid(path_bytes):
+    """
+    https://github.com/mozilla/DeepSpeech/issues/2048#issuecomment-539518251
+    """
+    path = path_bytes.decode("utf-8")
+    with wave.open(path, 'r') as f_in:
+        wav_size = (f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()) + 44
+    return wav_size == os.path.getsize(path)
+
+@tf.function
+def wav_header_is_valid(path):
+    file_contents = tf.io.read_file(path)
+    if tf.strings.substr(file_contents, 0, 4) != "RIFF":
+        return False
+    else:
+        return tf.numpy_function(_wav_header_is_valid, [path], tf.bool)
+
 @tf.function
 def read_wav(path):
     file_contents = tf.io.read_file(path)
-    if tf.strings.length(file_contents) <= 44 or tf.strings.substr(file_contents, 0, 4) != "RIFF":
-        # This file does not contain PCM wave encoded data
-        # Return a null signal that can be easily dropped from a dataset iterator
-        signal = tf.zeros([0])
-        sample_rate = 0
-    else:
-        wav = tf.audio.decode_wav(file_contents)
-        # Merge channels by averaging, for mono this just drops the channel dim.
-        signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
-        sample_rate = wav.sample_rate
-    return signal, sample_rate
+    wav = tf.audio.decode_wav(file_contents)
+    # Merge channels by averaging, for mono this just drops the channel dim.
+    signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
+    return signal, wav.sample_rate
 
 @tf.function
 def write_mono_wav(path, signal, sample_rate):

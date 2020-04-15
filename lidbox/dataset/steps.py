@@ -477,6 +477,16 @@ def drop_empty(ds):
     return ds.filter(is_not_empty)
 
 
+def drop_invalid_wavs(ds):
+    """
+    Drop wav files with invalid headers.
+    """
+    logger.info("Dropping all elements that have a wav file with a corrupted header.")
+    def _has_valid_header(x):
+        return audio_features.wav_header_is_valid(x["path"])
+    return ds.filter(_has_valid_header)
+
+
 def extract_features(ds, config):
     """
     Extract features from signals of each element in ds and add them under 'input' key to each element.
@@ -751,6 +761,7 @@ VALID_STEP_FUNCTIONS = {
     "create_input_chunks": create_input_chunks,
     "create_signal_chunks": create_signal_chunks,
     "drop_empty": drop_empty,
+    "drop_invalid_wavs": drop_invalid_wavs,
     "extract_features": extract_features,
     "filter_keys_in_set": filter_keys_in_set,
     "group_by_axis_length": group_by_axis_length,
