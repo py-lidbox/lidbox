@@ -33,6 +33,10 @@ dataset:
             type: boolean
           file_limit:
             type: integer
+          datafiles:
+            type: array
+            contains:
+              type: string
 
 split:
   type: object
@@ -45,11 +49,10 @@ split:
     batch_size:
       type: integer
       exclusiveMinimum: 0
-    shuffle_buffer_size:
-      type: integer
-      exclusiveMinimum: 0
     group_by_input_length:
       $ref: '#/definitions/group_by_input_length'
+    shuffle_buffer_size:
+      $ref: '#/definitions/shuffle_buffer_size'
     evaluate_metrics:
       type: array
       contains:
@@ -110,6 +113,14 @@ features:
       exclusiveMinimum: 0
     group_by_input_length:
       $ref: '#/definitions/group_by_input_length'
+    kaldi:
+      type: object
+      required:
+        - shape
+      additionalProperties: false
+      properties:
+        shape:
+          $ref: '#/definitions/shape'
     spectrogram:
       type: object
       additionalProperties: false
@@ -161,6 +172,10 @@ features:
       properties:
         axis:
           type: integer
+        min:
+          type: number
+        max:
+          type: number
     splits:
       # Embeddings, bottleneck-features, Kaldi-features etc. pre-extracted for every split
       type: array
@@ -201,6 +216,9 @@ cache:
       exclusiveMinimum: 0
     key:
       type: string
+    log_interval:
+      type: integer
+      exclusiveMinimum: 0
 
 experiment:
   type: object
@@ -311,6 +329,8 @@ post_process:
   type: object
   additionalProperties: false
   properties:
+    shuffle_buffer_size:
+      $ref: '#/definitions/shuffle_buffer_size'
     normalize:
       type: object
     filters:
@@ -369,25 +389,22 @@ pre_process:
     webrtcvad:
       $ref: '#/definitions/webrtcvad'
     chunks:
+      $ref: '#/definitions/signal_chunks'
+    repeat_too_short_signals:
       type: object
-      description: 'Signal chunk configuration, all utterances will be divided into sub-utterances of specific size'
-      required:
-        - length_ms
-        - step_ms
       additionalProperties: false
+      required:
+        - min_length_ms
       properties:
-        length_ms:
+        min_length_ms:
           type: integer
-          description: 'Chunk length in milliseconds'
           exclusiveMinimum: 0
-        step_ms:
-          type: integer
-          description: 'Chunk step/offset in milliseconds'
-          exclusiveMinimum: 0
-        max_pad_ms:
-          type: integer
-          description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
-          minimum: 0
+    augment:
+      type: array
+      contains:
+        anyOf:
+          - $ref: '#/definitions/augment_config_additive_noise'
+          - $ref: '#/definitions/augment_config_random_resampling'
 
 filters:
   type: object
@@ -429,3 +446,88 @@ show_samples:
     batch_size:
       type: integer
       exclusiveMinimum: 0
+
+augment_config_random_resampling:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - split
+    - range
+  properties:
+    type:
+      type: string
+      pattern: random_resampling
+    split:
+      type: string
+    skip_already_augmented:
+      type: boolean
+    range:
+      type: array
+      minItems: 2
+      maxItems: 2
+      contains:
+        type: number
+
+augment_config_additive_noise:
+  type: object
+  additionalProperties: false
+  required:
+    - type
+    - split
+    - noise_datadir
+    - snr_datadir
+  properties:
+    type:
+      type: string
+      pattern: additive_noise
+    split:
+      type: string
+    noise_datadir:
+      type: string
+    skip_already_augmented:
+      type: boolean
+    snr_list:
+      type: array
+      contains:
+        anyOf:
+          - type: integer
+            minimum: 0
+          - type: string
+
+signal_chunks:
+  type: object
+  description: 'Signal chunk configuration, all utterances will be divided into sub-utterances of specific size'
+  required:
+    - length_ms
+    - step_ms
+  additionalProperties: false
+  properties:
+    length_ms:
+      type: integer
+      description: 'Chunk length in milliseconds'
+      exclusiveMinimum: 0
+    step_ms:
+      type: integer
+      description: 'Chunk step/offset in milliseconds'
+      exclusiveMinimum: 0
+    max_pad_ms:
+      type: integer
+      description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
+      minimum: 0
+
+meta:
+  type: object
+  description: 'Pre-pre-process configuration of the metadata iterator'
+  additionalProperties: false
+  properties:
+    shuffle_buffer_size:
+      $ref: '#/definitions/shuffle_buffer_size'
+    binary_classification:
+      type: string
+    file_limit:
+      type: integer
+
+shuffle_buffer_size:
+  type: integer
+  exclusiveMinimum: 0

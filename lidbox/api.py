@@ -1,3 +1,6 @@
+"""
+High-level interface for interacting with lidbox.
+"""
 import collections
 import importlib
 import itertools
@@ -13,10 +16,13 @@ import numpy as np
 import sklearn.metrics
 
 import lidbox
+import lidbox.dataset.steps
+import lidbox.models.keras_utils
 from lidbox.dataset.steps import Step
 from lidbox.models.keras_utils import KerasWrapper
 
 
+# When scanning a datadir for valid metadata files, these filenames will be accepted, all others are ignored
 VALID_METADATA_FILES = {
     "utt2dur": "duration",
     "utt2duration": "duration",
@@ -25,6 +31,8 @@ VALID_METADATA_FILES = {
     "utt2lang": "label",
     "utt2path": "path",
     "utt2spk": "speaker",
+    "utt2transcript": "transcript",
+    "transcript.ctm": "transcript",
 }
 
 
@@ -35,8 +43,11 @@ def create_datasets(split2meta, labels, config):
         create_dataset = getattr(load_user_script_as_module(config["user_script"]), "create_dataset")
     if create_dataset is None:
         from lidbox.dataset.pipelines import create_dataset
-    return {split: from_steps(create_dataset(split, labels, split_meta, config))
-            for split, split_meta in split2meta.items()}
+    split2ds = {}
+    for split, split_meta in split2meta.items():
+        logger.info("Creating dataset iterator for split '%s' with metadata containing %d keys", split, len(split_meta))
+        split2ds[split] = from_steps(create_dataset(split, labels, split_meta, config))
+    return split2ds
 
 
 def get_flat_dataset_config(config):
@@ -63,9 +74,9 @@ def load_all_metadata_from_paths(split2datasets):
         split2datasets_meta[split] = []
         for meta in datasets:
             meta = dict(meta)
-            dataset = meta.pop("dataset")
+            dataset_key = meta.pop("dataset")
             kwargs = meta.pop("kwargs")
-            logger.info("Loading all metadata file contents for dataset '%s' split '%s'", dataset, split)
+            logger.info("Loading all metadata file contents for dataset '%s' split '%s'", dataset_key, split)
             # Read all meta files
             meta = {key: collections.OrderedDict(lidbox.iter_metadata_file(path, num_columns=2)) for key, path in meta.items()}
             logger.info("Amount of contents per file:\n  %s", '\n  '.join("{}: {}".format(key, len(val)) for key, val in meta.items()))
@@ -76,7 +87,7 @@ def load_all_metadata_from_paths(split2datasets):
             # 'utt2path' is always present, use it to select final utterance ids
             utt_ids = list(meta["path"].keys())
             if kwargs.get("shuffle_files", False):
-                logger.info("'shuffle_files' given for dataset '%s' split '%s', shuffling all its utterance ids", dataset, split)
+                logger.info("'shuffle_files' given for dataset '%s' split '%s', shuffling all its utterance ids", dataset_key, split)
                 random.shuffle(utt_ids)
             file_limit = kwargs.get("file_limit")
             utt_ids = utt_ids[:file_limit]
@@ -85,23 +96,19 @@ def load_all_metadata_from_paths(split2datasets):
             # This step is very important in order to not have samples with wrong metadata
             meta = {key: [utt2meta[utt] for utt in utt_ids] for key, utt2meta in meta.items()}
             meta["id"] = utt_ids
-            meta["dataset"] = len(utt_ids) * [dataset]
-            if "kaldi_ark_key" in meta:
-                logger.info("Metadata contains 'kaldi_ark_key', loading all arrays from Kaldi archive files.")
-                from kaldiio import load_mat
-                meta["kaldi_ark"] = [load_mat(key) for key in meta["kaldi_ark_key"]]
+            meta["dataset"] = len(utt_ids) * [dataset_key]
             split2datasets_meta[split].append(meta)
-            logger.info("Dataset '%s' split '%s' done, all its elements will have keys:\n  %s", dataset, split, '\n  '.join(meta.keys()))
+            logger.info("Dataset '%s' split '%s' done, all its elements will have keys:\n  %s", dataset_key, split, '\n  '.join(meta.keys()))
     return split2datasets_meta
 
 
 def merge_dataset_metadata(split2datasets_meta):
     split2meta = {}
     for split, datasets in split2datasets_meta.items():
-        split2meta[split] = {key: data for key, data in datasets[0].items()}
+        split2meta[split] = {meta_key: meta for meta_key, meta in datasets[0].items()}
         for dataset in datasets[1:]:
-            for key, data in dataset.items():
-                split2meta[split][key].extend(data)
+            for meta_key, meta in dataset.items():
+                split2meta[split][meta_key].extend(meta)
     return split2meta
 
 
@@ -125,7 +132,6 @@ def load_splits_from_config_file(config_file_path):
 
 
 def run_training(split2ds, config):
-    from lidbox.dataset.steps import as_supervised
     from lidbox.models.keras_utils import best_model_checkpoint_from_config
     split_conf = config["experiment"]["data"]
     # 1. get the training and validation splits as defined by the user
@@ -138,10 +144,10 @@ def run_training(split2ds, config):
         train_ds = train_ds.shuffle(shuffle_buffer_size)
     train_ds = (train_ds
                     .batch(split_conf["train"]["batch_size"])
-                    .apply(as_supervised))
+                    .apply(lidbox.dataset.steps.as_supervised))
     validation_ds = (split2ds[split_conf["validation"]["split"]]
                         .batch(split_conf["validation"]["batch_size"])
-                        .apply(as_supervised))
+                        .apply(lidbox.dataset.steps.as_supervised))
     #TODO split
     history = None
     if "user_script" in config:
@@ -156,7 +162,7 @@ def run_training(split2ds, config):
         logger.info("User script has not defined a 'train' function, will use default approach")
         keras_wrapper = KerasWrapper.from_config(config)
         logger.info("Model initialized:\n%s", str(keras_wrapper))
-        best_checkpoint = best_model_checkpoint_from_config(config)
+        best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
         if best_checkpoint:
             logger.info("Found existing model checkpoint '%s', loading weights from it and continuing training", best_checkpoint)
             keras_wrapper.load_weights(best_checkpoint)
@@ -198,12 +204,10 @@ def format_confusion_matrix(cm, labels):
 #TODO simplify and divide into manageable pieces
 #TODO check user script before calling this
 def evaluate_test_set(split2ds, split2meta, labels, config):
-    from lidbox.dataset.steps import as_supervised, initialize
-    from lidbox.models.keras_utils import best_model_checkpoint_from_config, experiment_cache_from_config
     test_conf = config["experiment"]["data"]["test"]
     test_ds = (split2ds[test_conf["split"]]
                 .batch(test_conf["batch_size"])
-                .apply(as_supervised))
+                .apply(lidbox.dataset.steps.as_supervised))
     predictions = None
     if "user_script" in config:
         user_script = load_user_script_as_module(config["user_script"])
@@ -217,7 +221,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         logger.info("User script has not defined a 'predict' function, will use default approach")
         keras_wrapper = KerasWrapper.from_config(config)
         logger.info("Model initialized:\n%s", str(keras_wrapper))
-        best_checkpoint = best_model_checkpoint_from_config(config)
+        best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
         logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
         keras_wrapper.load_weights(best_checkpoint)
         logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
@@ -237,7 +241,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
         predictions = np.array([p for _, p in utt2prediction])
     # Collect targets from the test set iterator
-    test_meta_ds = initialize(None, labels, split2meta[test_conf["split"]])
+    test_meta_ds = lidbox.dataset.steps.initialize(None, labels, split2meta[test_conf["split"]])
     utt2target = {x["id"].decode("utf-8"): x["target"] for x in test_meta_ds.as_numpy_iterator()}
     missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
     min_score = np.amin(predictions)
@@ -245,7 +249,10 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     if missed_utterances:
         logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
         utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
-    scores_file = os.path.join(experiment_cache_from_config(config), "predictions", "scores")
+    scores_file = os.path.join(
+            lidbox.models.keras_utils.experiment_cache_from_config(config),
+            "predictions",
+            "scores")
     os.makedirs(os.path.dirname(scores_file), exist_ok=True)
     logger.info("Writing predicted scores to '%s'", scores_file)
     if os.path.exists(scores_file):
@@ -317,8 +324,10 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
 
 
 def write_metrics(metrics, config):
-    from lidbox.models.keras_utils import experiment_cache_from_config
-    metrics_file = os.path.join(experiment_cache_from_config(config), "predictions", "metrics.json")
+    metrics_file = os.path.join(
+            lidbox.models.keras_utils.experiment_cache_from_config(config),
+            "predictions",
+            "metrics.json")
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     logger.info("Writing evaluated metrics to '%s'", metrics_file)
     with open(metrics_file, "w") as f:

@@ -10,6 +10,8 @@ properties:
     minItems: 1
     contains:
       $ref: '#/definitions/dataset'
+  meta:
+    $ref: '#/definitions/meta'
   user_script:
     $ref: '#/definitions/user_script'
   cache:

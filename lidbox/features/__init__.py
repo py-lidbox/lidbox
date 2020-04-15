@@ -1,3 +1,4 @@
+import kaldiio
 import tensorflow as tf
 
 
@@ -10,18 +11,28 @@ def feature_scaling(X, min, max, axis=None):
 
 
 @tf.function
+def mean_variance_normalization(X, axis=None, normalize_variance=True):
+    """
+    Standardize X over given axis, i.e. zero mean and unit variance normalization.
+    If normalize_variance is False, only center means to zero over given axis.
+    """
+    output = X - tf.math.reduce_mean(X, axis=axis, keepdims=True)
+    if normalize_variance:
+        output = tf.math.divide_no_nan(output, tf.math.reduce_std(X, axis=axis, keepdims=True))
+    return output
+
+
+@tf.function
 def window_normalization(X, window_len=-1, normalize_variance=True):
     """
     Apply mean and variance normalization on batches of features matrices X with a given window length.
-    By default normalize over whole tensor, i.e. wihtout a window.
+    By default normalize over whole tensor, i.e. without a window.
     """
     tf.debugging.assert_rank(X, 3, message="Input to window_normalization should be of shape (batch_size, timedim, channels)")
     output = tf.identity(X)
     if window_len == -1 or tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding window
-        output = X - tf.math.reduce_mean(X, axis=1, keepdims=True)
-        if normalize_variance:
-            output = tf.math.divide_no_nan(output, tf.math.reduce_std(X, axis=1, keepdims=True))
+        output = mean_variance_normalization(X, axis=1, normalize_variance=normalize_variance)
     else:
         # Pad boundaries by reflecting at most half of the window contents from X, e.g.
         # Left pad [              X              ] right pad
@@ -77,3 +88,11 @@ def window_normalization_numpy(X_t, window_len_t, normalize_variance_t):
             result[:,i] = centered
         return result
     return tf.numpy_function(f, [X_t, window_len_t, normalize_variance_t], tf.float32)
+
+
+def _kaldiio_load(key):
+    return kaldiio.load_mat(key.decode("utf-8")).astype("float32")
+
+@tf.function
+def load_tensor_from_kaldi_archive(ark_key):
+    return tf.numpy_function(_kaldiio_load, [ark_key], tf.float32)

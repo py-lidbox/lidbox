@@ -2,9 +2,10 @@
 
 * End-to-end spoken language identification (LID) on TensorFlow.
 * Parallel feature extraction using `tf.data.Dataset`, with STFT computations on the GPU using the `tf.signal` package.
+* Only metadata (e.g. utt2path, utt2speaker) is fully loaded into memory, rest is done in linear passes  over the dataset with the `tf.data.Dataset` iterator.
 * Model training with `tf.keras`, some model examples are available [here](./lidbox/models).
 * Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
-* Expect to do some debugging if (when) stuff does not work.
+* Expect to do some debugging when stuff does not work.
 
 ## Quickstart
 

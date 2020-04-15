@@ -41,8 +41,8 @@ def from_steps(steps):
             continue
         logger.info("Applying step number %d: '%s'.", step_num, step.key)
         ds = step_fn(ds, **step.kwargs)
-        if ds is None:
-            logger.critical("Failed to apply step '%s', stopping.", step.key)
+        if not isinstance(ds, tf.data.Dataset):
+            logger.critical("Failed to apply step '%s', it did not return a tf.data.Dataset instance but instead returned '%s'.", step.key, repr(ds))
             return
     return ds
 
@@ -109,7 +109,7 @@ def apply_filters(ds, config):
         logger.warning("No filters defined, skipping filtering")
         return ds
     def all_ok(x):
-        # This will be traced by tf autograph and coverted into a graph, we cannot use python's builtin 'all' at the moment
+        # This will be traced by tf autograph and converted into a graph, we cannot use python's builtin 'all' at the moment
         ok = True
         for fn, _ in filters:
             ok = ok and fn(x)
@@ -231,7 +231,7 @@ def compute_webrtc_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_l
     """
     vad_frame_length_sec = tf.constant(vad_frame_length_ms * 1e-3, tf.float32)
     min_non_speech_frames = tf.constant(min_non_speech_length_ms // vad_frame_length_ms, tf.int32)
-    logger.info("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
+    logger.info("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continuous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
     def append_vad_decisions(x):
         signal, sample_rate = x["signal"], x["sample_rate"]
         vad_frame_length = tf.cast(tf.cast(sample_rate, tf.float32) * vad_frame_length_sec, tf.int32)
@@ -253,6 +253,7 @@ def consume(ds, log_interval=-1):
     """
     Iterate over ds to exhaust the iterator and fully evaluate the preceding pipeline.
     """
+    logger.info("Exhausting the dataset iterator by iterating over all elements, log_interval = %d", log_interval)
     speed = 0
     last_update = 0
     counter = time.perf_counter()
@@ -285,7 +286,7 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
     num_batches = tf.constant(config.get("num_batches", -1), tf.int64)
 
     @tf.function
-    def inspect_batches(batch_idx, batch):
+    def _inspect_batches(batch_idx, batch):
         tf.debugging.assert_greater([tf.size(v) for v in batch.values()], 0, message="Empty batch given to tensorboard logger.")
         inputs = batch["input"][:max_outputs]
         targets = batch["target"][:max_outputs]
@@ -293,9 +294,16 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
         tf.summary.histogram("targets", targets, step=batch_idx)
         images = tf_utils.tensors_to_rgb_images(inputs, colors, image_size_multiplier)
         tf.summary.image("inputs/img", images, step=batch_idx, max_outputs=max_outputs)
-        if "signal" in batch and tf.size(batch["signal"]) > 0:
+        if "signal" in batch:
             sample_rates = batch["sample_rate"][:max_outputs]
-            tf.debugging.assert_equal(sample_rates, [sample_rates[0]], message="Unable to add audio to tensorboard summary due to signals in the batch having different sample rates")
+            tf.debugging.assert_equal(
+                    sample_rates,
+                    [sample_rates[0]],
+                    message="Unable to add audio to tensorboard summary due to signals in the batch having different sample rates")
+            tf.debugging.assert_greater(
+                    tf.size(batch["signal"]),
+                    0,
+                    message="Unable to add audio to tensorboard summary due to empty signals in the batch")
             signals = tf.expand_dims(batch["signal"][:max_outputs], -1)
             tf.summary.audio("utterances", signals, sample_rates[0], step=batch_idx, encoding="wav")
         enumerated_uttids = tf.strings.reduce_join(
@@ -448,6 +456,7 @@ def group_by_axis_length(ds, element_key, max_batch_size, min_batch_size=0, axis
     """
     Group elements such that every group is a batch where all tensors at key 'element_key' have the same length in a given dimension 'axis'.
     """
+    logger.info("Creating batches of min size %d and max size %d where elements '%s' have same length along axis %d", min_batch_size, max_batch_size, element_key, axis)
     max_batch_size = tf.constant(max_batch_size, tf.int64)
     min_batch_size = tf.constant(min_batch_size, tf.int64)
     axis = tf.constant(axis, tf.int32)
@@ -471,11 +480,15 @@ def initialize(ds, labels, init_data):
     if ds is not None:
         logger.warning("Step 'initialize' is being applied on an already initialized dataset, all state will be lost.")
     ds = None
-    init_data_tensors = {key: tf.convert_to_tensor(list(meta)) for key, meta in init_data.items()}
+    init_data = {k: list(v) for k, v in init_data.items()}
     logger.info(
-            "Initializing dataset from tensors with metadata keys:\n  %s",
-            '\n  '.join(sorted(init_data_tensors.keys())))
-    ds = tf.data.Dataset.from_tensor_slices(init_data_tensors)
+            "Initializing dataset from metadata:\n  %s",
+            '\n  '.join("{}: {}".format(k, len(init_data[k])) for k in sorted(init_data.keys())))
+    first_data = list(init_data.values())[0]
+    if not all(len(first_data) == len(data) for data in init_data.values()):
+        logger.error("Cannot initialize dataset from metadata dictionary that has values of different lengths")
+        return
+    ds = tf.data.Dataset.from_tensor_slices(init_data)
     label2int, _ = tf_utils.make_label2onehot(tf.constant(labels, tf.string))
     logger.info(
             "Generated label2target lookup table from indexes of array:\n  %s",
@@ -489,22 +502,24 @@ def load_audio(ds):
     Load signal from the 'path' key as WAV file for each element of ds.
     """
     logger.info("Reading audio files from the path of each element and appending the read signals and their sample rates to each element.")
-    def append_signals(x):
+    def _append_signals(x):
         signal, sample_rate = audio_features.read_wav(x["path"])
         return dict(x, signal=signal, sample_rate=sample_rate)
-    return ds.map(append_signals, num_parallel_calls=TF_AUTOTUNE)
+    return ds.map(_append_signals, num_parallel_calls=TF_AUTOTUNE)
 
 
 def normalize(ds, config):
     """
-    Apply normalization for all elements of ds for some key.
-    E.g. in case features were not normalized during feature extraction.
+    Apply mean-variance normalization for all elements of ds for some key.
+    Useful as a separate step e.g. if loading existing features from Kaldi archives.
     """
-    logger.info("Applying normalization with config:\n  %s".format(_pretty_dict(config)))
+    logger.info("Applying normalization with config:\n  %s", _pretty_dict(config))
     key = config["key"]
     def _normalize(x):
-        return dict(x, **{key: features.window_normalization(x[key], **config.get("kwargs", {}))})
-    return ds.map(_normalize, num_parallel_calls=TF_AUTOTUNE)
+        return dict(x, **{key: features.mean_variance_normalization(x[key], **config.get("kwargs", {}))})
+    return (ds.batch(config.get("batch_size", 1))
+              .map(_normalize, num_parallel_calls=TF_AUTOTUNE)
+              .unbatch())
 
 
 def lambda_fn(ds, fn):
@@ -512,6 +527,7 @@ def lambda_fn(ds, fn):
     For applying arbitrary logic on ds.
     Note that in this case it might be easier to write a custom pipeline and not use the from_steps function at all.
     """
+    logger.info("Applying function '%s' on dataset.", str(fn))
     return fn(ds)
 
 
@@ -550,6 +566,9 @@ def reduce_stats(ds, statistic, **kwargs):
                 for count in size_counts.numpy():
                     print("    {}".format(count), file=sstream)
             logger.info("%s", sstream.getvalue())
+    #TODO
+    #elif statistic == "duration_by_label":
+    #    pass
     else:
         logger.error("Unknown statistic type '%s', cannot compute stats for dataset.", statistic)
     return ds
@@ -560,6 +579,7 @@ def remap_keys(ds, new_keys):
     Given a dictionary 'new_keys' of key-to-key mappings, update the keys of every element in ds with the new keys, if the key is in 'new_keys'.
     If some key maps to None, that key (and value) is dropped from each element that contains the key.
     """
+    logger.info("Remapping keys of every element using config:\n  %s", _pretty_dict(new_keys))
     def remap_keys(x):
         return {new_keys.get(k, k): v for k, v in x.items() if new_keys.get(k, k) is not None}
     return ds.map(remap_keys, num_parallel_calls=TF_AUTOTUNE)
@@ -589,6 +609,9 @@ def show_all_elements(ds, shapes_only=True):
 
 
 def write_to_kaldi_files(ds, output_dir, element_key="input"):
+    """
+    For every element of ds, write the value at key element_key into utt2feat.scp and utt2feat.ark files to directory output_dir.
+    """
     from kaldiio import WriteHelper
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "utt2feat")

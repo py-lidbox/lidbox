@@ -116,6 +116,7 @@ class E2E(Command):
             print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2ds = lidbox.api.create_datasets(split2meta, labels, config)
+        assert not any(v is None for v in split2ds.values()), "Empty split, cannot continue"
         history = lidbox.api.run_training(split2ds, config)
         metrics = lidbox.api.evaluate_test_set(split2ds, split2meta, labels, config)
         lidbox.api.write_metrics(metrics, config)
@@ -127,7 +128,6 @@ class Evaluate(Command):
     """
     def run(self):
         import lidbox.api
-        import lidbox.dataset.pipelines
         super().run()
         args = self.args
         if args.verbosity:
@@ -141,11 +141,29 @@ class Evaluate(Command):
         lidbox.api.write_metrics(metrics, config)
 
 
+class Prepare(Command):
+    """
+    Run dataset iterator preparation without training.
+    """
+    def run(self):
+        import lidbox.api
+        super().run()
+        args = self.args
+        if args.verbosity:
+            print("Running dataset preparation with config file '{}'".format(args.lidbox_config_yaml_path))
+        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
+        print("Prepared iterators:")
+        for split, ds in split2ds.items():
+            print("   ", split, ds)
+
+
 class Utils(Command):
     """
     Simple utilities.
     """
     tasks = (
+        "load_and_show_meta",
         "validate_config_file",
     )
 
@@ -153,10 +171,23 @@ class Utils(Command):
     def create_argparser(cls, subparsers):
         parser = super().create_argparser(subparsers)
         optional = parser.add_argument_group("utils options")
+        optional.add_argument("--load-and-show-meta",
+            action="store_true",
+            help="Prepare config file for data pipeline evaluation and show the metadata that would be used.")
         optional.add_argument("--validate-config-file",
             action="store_true",
             help="Use a JSON schema to check the given config file is valid.")
         return parser
+
+    def load_and_show_meta(self):
+        import lidbox.api
+        args = self.args
+        split2meta, labels, _ = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        for split, meta in split2meta.items():
+            print(split)
+            for k, v in meta.items():
+                print("  ", k, ": ", len(v), " items", sep='')
+        print("Total number of labels:", len(labels))
 
     def validate_config_file(self):
         args = self.args
@@ -243,6 +274,7 @@ class Kaldi(Command):
 
 VALID_COMMANDS = (
     E2E,
+    Prepare,
     Evaluate,
     Kaldi,
     Utils,

@@ -94,8 +94,9 @@ def framewise_rms_energy_vad_decisions(signals, sample_rate, frame_length_ms=25,
 @tf.function
 def read_wav(path):
     file_contents = tf.io.read_file(path)
-    if tf.strings.length(file_contents) < 44:
-        # No PCM header, this cannot be a wav file
+    if tf.strings.length(file_contents) <= 44 or tf.strings.substr(file_contents, 0, 4) != "RIFF":
+        # This file does not contain PCM wave encoded data
+        # Return a null signal that can be easily dropped from a dataset iterator
         signal = tf.zeros([0])
         sample_rate = 0
     else:
@@ -110,7 +111,8 @@ def write_mono_wav(path, signal, sample_rate):
     tf.debugging.assert_rank(signal, 1, "write_wav expects 1-dim mono signals without channel dims.")
     signal = tf.expand_dims(signal, -1)
     wav = tf.audio.encode_wav(signal, sample_rate)
-    return tf.io.write_file(path, wav)
+    tf.io.write_file(path, wav)
+    return path
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
