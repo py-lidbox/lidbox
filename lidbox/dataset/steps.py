@@ -321,7 +321,7 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
         _ = (ds.batch(batch_size, drop_remainder=True)
                .take(num_batches)
                .enumerate()
-               .map(inspect_batches, num_parallel_calls=TF_AUTOTUNE)
+               .map(_inspect_batches, num_parallel_calls=TF_AUTOTUNE)
                .apply(consume))
     return ds
 

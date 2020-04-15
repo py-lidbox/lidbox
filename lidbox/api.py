@@ -59,12 +59,19 @@ def get_flat_dataset_config(config):
         for split in dataset["splits"]:
             split = dict(split)
             logger.info("Scanning dataset '%s' split '%s' for valid metadata files", dataset["key"], split["key"])
-            meta = {VALID_METADATA_FILES[p.name]: p.path for p in os.scandir(split.pop("path")) if p.name in VALID_METADATA_FILES}
-            logger.info("Using valid metadata files:\n  %s", '\n  '.join(meta.values()))
+            meta = {VALID_METADATA_FILES[p.name]: p for p in os.scandir(split.pop("path")) if p.name in VALID_METADATA_FILES}
+            logger.info("Found %d valid metadata files:\n  %s", len(meta), '\n  '.join(p.path for p in meta.values()))
+            enabled_datafiles = set(split.pop("datafiles", []))
+            if enabled_datafiles:
+                logger.info("Key 'datafiles' given for split '%s' and contains %d datafiles, filtering metadata files by given list", split["key"], len(enabled_datafiles))
+                meta = {k: v for k, v in meta.items() if v.name in enabled_datafiles}
+            else:
+                logger.info("Key 'datafiles' not given for split '%s', assuming all valid metadata files should be used", split["key"])
+            meta = {k: v.path for k, v in meta.items()}
+            logger.info("Using %d metadata files:\n  %s", len(meta), '\n  '.join(meta.values()))
             meta["dataset"] = dataset["key"]
             meta["kwargs"] = split
             split2datasets[split.pop("key")].append(meta)
-    #TODO assert amount of keys and all values of same length
     return dict(split2datasets), labels
 
 
