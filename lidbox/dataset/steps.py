@@ -634,7 +634,7 @@ def reduce_stats(ds, statistic, **kwargs):
                 lambda c, x: c + get_vad_ratio(x["vad_is_speech"]))
         kept, dropped = vad_ratio.numpy().tolist()
         logger.info(
-                "VAD frame statistics:\n  frame length %d ms\n  kept %d\n  dropped %d\n  total %d\n  kept ratio %.3f",
+                "VAD frame statistics:\n  frame length %d ms\n  kept    %15d\n  dropped %15d\n  total   %15d\n  kept ratio %.3f",
                 frame_length_ms, kept, dropped, kept + dropped, kept / ((kept + dropped) or 1))
     elif statistic == "size_counts":
         key = kwargs["key"]
