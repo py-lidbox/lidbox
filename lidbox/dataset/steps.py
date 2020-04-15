@@ -142,35 +142,42 @@ def as_supervised(ds):
     return ds.map(_as_supervised, num_parallel_calls=TF_AUTOTUNE)
 
 
-def augment_by_additive_noise(ds, noise_source_dir, snr_list):
+#TODO preload the whole noise dataset to allow caching or random access from memory instead of disk
+def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmented=True):
     """
-    Read all noise signals from $noise_source_dir/id2path and create new signals by mixing noise to each element of ds.
-    'snr_list' defines the noise labels, which is determined by $noise_source_dir/id2label, and the SNR dB range from which the noise level in the resulting signal will be chosen randomly.
+    Read all noise signals from $noise_datadir/id2path and create new signals by mixing noise to each element of ds.
+    'snr_list' defines the noise labels, which is determined by $noise_datadir/id2label, and the SNR dB range from which the noise level in the resulting signal will be chosen randomly.
     E.g. to choose 3 random noise signals from categories "noise", "speech" and "music" with 3 different SNR dB (low, high) ranges:
-        noise_source_dir = "/my/path/musan"
+        noise_datadir = "/my/path/musan"
         snr_list = [
             ("noise", 5, 15),
             ("speech", 15, 20),
             ("music", 10, 20)
         ]
     """
-    logger.info("Augmenting dataset with additive noise from '%s'.", noise_source_dir)
-    id2type = dict(lidbox.iter_metadata_file(os.path.join(noise_source_dir, "id2label"), 2))
+    logger.info("Augmenting dataset with additive noise from '%s'.", noise_datadir)
+    if not os.path.isdir(noise_datadir):
+        logger.error("Noise source dir '%s' does not exist.", noise_datadir)
+        return
+    id2type = dict(lidbox.iter_metadata_file(os.path.join(noise_datadir, "id2label"), 2))
     type2paths = collections.defaultdict(list)
-    for noise_id, path in lidbox.iter_metadata_file(os.path.join(noise_source_dir, "id2path"), 2):
+    for noise_id, path in lidbox.iter_metadata_file(os.path.join(noise_datadir, "id2path"), 2):
         type2paths[id2type[noise_id]].append(path)
     del id2type
     type2paths = {t: tf.constant(paths, tf.string) for t, paths in type2paths.items()}
-    def update_element_meta(new_id, mixed_signal, x):
-        return dict(x, id=new_id, signal=mixed_signal)
-    def add_random_noise_and_flatten(x):
+    def _update_element_meta(new_id, mixed_signal, x):
+        return dict(x, id=new_id, signal=mixed_signal, signal_is_augmented=True)
+    def _add_random_noise_and_flatten(x):
+        """
+        Using snr_list, choose len(snr_list) noise signals randomly and create new signal samples by mixing the chosen noise signals with x["signal"] using random SNR dB levels.
+        """
         # Random noise path indexes and random snr levels
         rand_noise = [
                 (noise_type,
-                 tf.random.uniform([], 0, tf.size(type2paths[noise_type]), tf.int64),
+                 tf.random.uniform([], 0, tf.size(type2paths[noise_type]), tf.int32),
                  tf.random.uniform([], snr_low, snr_high, tf.float32))
                 for noise_type, snr_low, snr_high in snr_list]
-        # Load random noise signals with drawn indexes
+        # Select random noise signals by drawn indexes and read contents from files
         rand_noise = [
                 (audio_features.read_wav(type2paths[noise_type][rand_index]), snr)
                 for noise_type, rand_index, snr in rand_noise]
@@ -178,28 +185,84 @@ def augment_by_additive_noise(ds, noise_source_dir, snr_list):
         # TODO maybe add inline resampling
         for (noise, sample_rate), snr in rand_noise:
             tf.debugging.assert_equal(sample_rate, x["sample_rate"], message="Invalid noise signals are being used, all noise signals must have same sample rate as speech signals that are being augmented")
-        # Fix noise signal length to match x["signal"] by repeating the noise signal if it is too short
+        # Fix noise signal length to match x["signal"] by repeating the noise signal if it is too short and then slicing it
         rand_noise = [
+                # How many multiples of `noise` fits in x["signal"]
                 (tf.cast(tf.size(x["signal"]) / tf.size(noise), tf.int32), noise, snr)
                 for (noise, _), snr in rand_noise]
         rand_noise = [
-                (tf.tile(noise, [1 + noise_length_ratio])[:tf.size(noise)], snr)
+                # Repeat noise and slice
+                (tf.tile(noise, [1 + noise_length_ratio])[:tf.size(x["signal"])], snr)
                 for noise_length_ratio, noise, snr in rand_noise]
+        # Mix x["signal"] and chosen noise signals
         mixed_signals = [audio_features.snr_mixer(x["signal"], noise, snr)[2] for noise, snr in rand_noise]
+        # Create new utterance ids that contain the mixed noise type and SNR level
         new_ids = [
-                tf.strings.join((x["id"], noise_type, tf.strings.as_string(snr, precision=2)), separator="-")
-                for noise_type, snr in rand_noise]
-        signal_ds = tf.data.Dataset.from_tensor_slices(mixed_signals)
-        repeat_x_ds = tf.data.Dataset.from_tensors(x).repeat(len(mixed_signals))
+                tf.strings.join((
+                        "augmented",
+                        x["id"],
+                        noise_type,
+                        tf.strings.join(("snr", tf.strings.as_string(snr, precision=2)))),
+                    separator="-")
+                for (noise_type, _, _), (_, snr) in zip(snr_list, rand_noise)]
+        # Create new elements from the mixed signals and return as dataset
         return (tf.data.Dataset
-                  .from_tensor_slices((new_ids, mixed_signals, len(mixed_signals) * [x]))
-                  .map(update_element_meta))
-    return ds.interleave(add_random_noise_and_flatten, num_parallel_calls=TF_AUTOTUNE)
+                  .zip((tf.data.Dataset.from_tensor_slices(new_ids),
+                        tf.data.Dataset.from_tensor_slices(mixed_signals),
+                        tf.data.Dataset.from_tensors(x).repeat(len(mixed_signals))))
+                  .map(_update_element_meta))
+    def _is_not_augmented(x):
+        return not (skip_already_augmented and x["signal_is_augmented"])
+    # Augment signals of all unaugmented elements (or all elements if skip_already_augmented is False)
+    augmented_ds = (ds.filter(_is_not_augmented)
+                      .interleave(
+                          _add_random_noise_and_flatten,
+                          block_length=len(snr_list),
+                          num_parallel_calls=TF_AUTOTUNE))
+    # Interleave augmented and original elements randomly
+    return tf.data.experimental.sample_from_datasets((ds, augmented_ds))
 
 
+def augment_by_random_resampling(ds, range, skip_already_augmented=True):
+    """
+    Create new samples by resampling signals of every element of ds with randomly chosen sample rate ratio from the given range.
+    E.g.
+        range = [0.8, 1.0]
+        all augmented samples will have signals at speed rate in [0.8, 1.0] of the original signal
+    Requires tensorflow-io-nightly
+    """
+    logger.info("Augmenting dataset with external TensorFlow IO library by random resampling with a random ratio chosen from %s", repr(range))
+    import tensorflow_io as tfio
+    # https://speex.org/docs/manual/speex-manual/node7.html
+    resampling_quality = 4
+    sample_rate_ratio_min = tf.constant(range[0], tf.float32)
+    sample_rate_ratio_max = tf.constant(range[1], tf.float32)
+    def _resample_randomly(x):
+        random_ratio = tf.random.uniform([], sample_rate_ratio_min, sample_rate_ratio_max)
+        sample_rate_in = tf.cast(random_ratio * tf.cast(x["sample_rate"], tf.float32), tf.int64)
+        sample_rate_out = tf.cast(x["sample_rate"], tf.int64)
+        resampled_signal = tfio.experimental.audio.resample(
+                tf.expand_dims(x["signal"], -1),
+                sample_rate_in,
+                sample_rate_out,
+                resampling_quality)
+        resampled_signal = tf.squeeze(resampled_signal, -1)
+        new_id = tf.strings.join(("augmented", x["id"], "rate", tf.strings.as_string(random_ratio, precision=3)), separator="-")
+        return dict(x, id=new_id, signal=resampled_signal, signal_is_augmented=True)
+    def _is_not_augmented(x):
+        return not (skip_already_augmented and x["signal_is_augmented"])
+    augmented_ds = (ds.filter(_is_not_augmented)
+                      .map(_resample_randomly, num_parallel_calls=TF_AUTOTUNE))
+    return tf.data.experimental.sample_from_datasets((ds, augmented_ds))
 
-def augment_by_random_resampling(ds, range):
-    pass
+
+def augment_prepare(ds):
+    """
+    Prepare unaugmented dataset for augmentation.
+    """
+    def _set_flag(x):
+        return dict(x, signal_is_augmented=False)
+    return ds.map(_set_flag, num_parallel_calls=TF_AUTOTUNE)
 
 
 def cache(ds, directory=None, batch_size=1, cache_key=None):
@@ -324,6 +387,13 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
                .map(_inspect_batches, num_parallel_calls=TF_AUTOTUNE)
                .apply(consume))
     return ds
+
+
+def convert_to_binary_classification(ds, positive_class):
+    logger.info("Converting all elements for binary classification, with positive class '%s' and all other classes as the negative class", positive_class)
+    def _convert(x):
+        return dict(x, target=tf.cast(x["label"] == positive_class, tf.int32))
+    return ds.map(_convert, num_parallel_calls=TF_AUTOTUNE)
 
 
 # TODO generalize and merge with create_signal_chunks
@@ -585,6 +655,26 @@ def remap_keys(ds, new_keys):
     return ds.map(remap_keys, num_parallel_calls=TF_AUTOTUNE)
 
 
+def repeat_too_short_signals(ds, min_length_ms):
+    """
+    For every element of ds, repeat each signal shorter than min_length_ms until it is equal to or longer than the given threshold.
+    E.g.
+        threshold equals 4 samples and x['signal'] length 3 < 4 is:
+            [0, 1, 2]
+        then new x['signal'] length 6 > 4 will be
+            [0, 1, 2, 0, 1, 2]
+    """
+    logger.info("Repeating all signals until they are at least %d ms", min_length_ms)
+    min_length_sec = tf.constant(1e-3 * min_length_ms, tf.float32)
+    def _repeat_signal(x):
+        repeat_ratio = tf.math.divide_no_nan(
+                min_length_sec * tf.cast(x["sample_rate"], tf.float32),
+                tf.cast(tf.size(x["signal"]), tf.float32))
+        repeated_signal = tf.tile(x["signal"], [tf.cast(tf.math.ceil(repeat_ratio), tf.int32)])
+        return dict(x, signal=repeated_signal)
+    return ds.map(_repeat_signal, num_parallel_calls=TF_AUTOTUNE)
+
+
 def show_all_elements(ds, shapes_only=True):
     """
     Iterate over ds printing shapes of every element.
@@ -606,6 +696,28 @@ def show_all_elements(ds, shapes_only=True):
         log(i, element)
     logger.info("All %d elements shown.", i)
     return ds
+
+
+def shuffle(ds, buffer_size):
+    logger.info("Shuffling dataset with buffer size %d", buffer_size)
+    return ds.shuffle(buffer_size)
+
+
+def load_kaldi_data(ds, shape):
+    """
+    Assuming ds has been initialized with kaldi_ark_key, then for each element of ds:
+        - Load the array from the Kaldi archive as a float32 tensor
+        - Set a statically known shape
+        - Store the tensor under 'input', dropping kaldi_ark_key
+    """
+    logger.info("Loading Kaldi data from external archives using ark keys stored in every element under 'kaldi_ark_key' and reshaping the data to shape %s", repr(shape))
+    def _load_ark(x):
+        data = features.load_tensor_from_kaldi_archive(x["kaldi_ark_key"])
+        data.set_shape(shape)
+        ret = dict(x, input=data)
+        del ret["kaldi_ark_key"]
+        return ret
+    return ds.map(_load_ark)
 
 
 def write_to_kaldi_files(ds, output_dir, element_key="input"):
@@ -630,10 +742,12 @@ VALID_STEP_FUNCTIONS = {
     "as_supervised": as_supervised,
     "augment_by_additive_noise": augment_by_additive_noise,
     "augment_by_random_resampling": augment_by_random_resampling,
+    "augment_prepare": augment_prepare,
     "cache": cache,
     "compute_webrtc_vad": compute_webrtc_vad,
     "consume": consume,
     "consume_to_tensorboard": consume_to_tensorboard,
+    "convert_to_binary_classification": convert_to_binary_classification,
     "create_input_chunks": create_input_chunks,
     "create_signal_chunks": create_signal_chunks,
     "drop_empty": drop_empty,
@@ -643,10 +757,13 @@ VALID_STEP_FUNCTIONS = {
     "initialize": initialize,
     "lambda": lambda_fn,
     "load_audio": load_audio,
+    "load_kaldi_data": load_kaldi_data,
     "normalize": normalize,
     "reduce_stats": reduce_stats,
     "remap_keys": remap_keys,
+    "repeat_too_short_signals": repeat_too_short_signals,
     "show_all_elements": show_all_elements,
+    "shuffle": shuffle,
     "write_to_kaldi_files": write_to_kaldi_files,
 }
 

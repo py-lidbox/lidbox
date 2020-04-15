@@ -145,10 +145,6 @@ def run_training(split2ds, config):
     # 2. batch the datasets
     # 3. drop all dictionary keys and convert each element to (inputs, targets) pairs
     train_ds = split2ds[split_conf["train"]["split"]]
-    shuffle_buffer_size = split_conf["train"].get("shuffle_buffer_size")
-    if shuffle_buffer_size is not None:
-        logger.info("Shuffling training dataset with buffer of size %d", shuffle_buffer_size)
-        train_ds = train_ds.shuffle(shuffle_buffer_size)
     train_ds = (train_ds
                     .batch(split_conf["train"]["batch_size"])
                     .apply(lidbox.dataset.steps.as_supervised))

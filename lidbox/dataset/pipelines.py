@@ -1,5 +1,6 @@
 import os
-import lidbox.api
+from lidbox.dataset.steps import Step
+from lidbox.models.keras_utils import experiment_cache_from_config
 
 
 def create_dataset(split, labels, init_data, config):
@@ -14,23 +15,38 @@ def create_dataset(split, labels, init_data, config):
         Contents of the lidbox config file, unmodified.
     """
     # Configure steps to create dataset iterator
-    Step = lidbox.api.Step
-    steps = []
-    steps.extend([
+    steps = [
         # Create a tf.data.Dataset that contains all metadata, e.g. paths from utt2path and labels from utt2label etc.
         Step("initialize", {"labels": labels, "init_data": init_data}),
-        # Load signals from all paths
-        Step("load_audio", {}),
-        # Drop empty signals
-        Step("drop_empty", {}),
-    ])
+    ]
+    if "meta" in config:
+        # "Pre-pre-process" all metadata before any signals are read
+        if "file_limit" in config["meta"]:
+            steps.append(Step("lambda", {"fn": lambda ds: ds.take(config["meta"]["file_limit"])}))
+        if "shuffle_buffer_size" in config["meta"]:
+            # Shuffle all files
+            steps.append(Step("shuffle", {"buffer_size": config["meta"]["shuffle_buffer_size"]}))
+        if "binary_classification" in config["meta"]:
+            # Convert all labels to binary classification
+            steps.append(Step("convert_to_binary_classification", {"positive_class": config["meta"]["binary_classification"]}))
+    if "features" in config and config["features"]["type"] == "kaldi":
+        # Features will be imported from Kaldi files, assume no signals should be loaded
+        pass
+    else:
+        # Assume all features will be extracted from signals
+        steps.extend([
+            # Load signals from all paths
+            Step("load_audio", {}),
+            # Drop empty signals
+            Step("drop_empty", {})])
     if "pre_process" in config:
         # Pre-processing before feature extraction has been defined in the config file
+        if "repeat_too_short_signals" in config["pre_process"]:
+            # Repeat all signals until they are of given length
+            steps.append(Step("repeat_too_short_signals", config["pre_process"]["repeat_too_short_signals"]))
         if "filters" in config["pre_process"]:
             # Drop unwanted signals
-            steps.extend([
-                Step("apply_filters", {"config": config["pre_process"]["filters"]}),
-            ])
+            steps.append(Step("apply_filters", {"config": config["pre_process"]["filters"]}))
         if "webrtcvad" in config["pre_process"]:
             # Voice activity detection
             steps.extend([
@@ -42,52 +58,48 @@ def create_dataset(split, labels, init_data, config):
                 # Some signals might contain only non-speech frames
                 Step("drop_empty", {}),
             ])
-        if "augment_by_additive_noise" in config["pre_process"]:
-            # Create new signals by mixing in random noise signals with random SNR dB levels into existing signals
-            steps.extend([
-                Step("augment_by_additive_noise", config["pre_process"]["augment_by_additive_noise"]),
-            ])
+        if "augment" in config["pre_process"] and any(d["split"] == split for d in config["pre_process"]["augment"]):
+            steps.append(Step("augment_prepare", {}))
+            # Create new signals by augmenting the existing signals
+            for conf in config["pre_process"]["augment"]:
+                augment_conf = dict(conf)
+                if augment_conf.pop("split") == split:
+                    augment_type = augment_conf.pop("type")
+                    # Mix random noise signals with random SNR dB levels into existing signals
+                    if augment_type == "additive_noise":
+                        steps.append(Step("augment_by_additive_noise", augment_conf))
+                    elif augment_type == "random_resampling":
+                        steps.append(Step("augment_by_random_resampling", augment_conf))
         if "chunks" in config["pre_process"]:
             # Dividing signals into fixed length chunks
-            steps.extend([
-                Step("create_signal_chunks", config["pre_process"]["chunks"]),
-            ])
+            steps.append(Step("create_signal_chunks", config["pre_process"]["chunks"]))
         # TODO not yet supported
         # if "random_chunks" in config["pre_process"]:
     if "features" in config:
         # Load features
         if config["features"]["type"] == "kaldi":
             # Pre-extracted Kaldi features will be used as input
-            steps.extend([
-                # Use data under 'kaldi_ark' as 'input' and drop ark metadata
-                Step("remap_keys", {"new_keys": {"input": "kaldi_ark", "kaldi_ark": None, "kaldi_ark_key": None}}),
-            ])
+            steps.append(
+                # Use the 'kaldi_ark_key' to load contents from an external Kaldi archive file and drop Kaldi metadata
+                Step("load_kaldi_data", {"shape": config["features"]["kaldi"]["shape"]}))
         else:
             # Features will be extracted from 'signal' and stored under 'input'
-            steps.extend([
-                # Apply feature extraction, uses GPU by default, change with 'device' key
-                Step("extract_features", {"config": config["features"]}),
-            ])
+            # Uses GPU by default, can be changed with the 'device' key
+            steps.append(Step("extract_features", {"config": config["features"]}))
     if "post_process" in config:
         if "filters" in config["post_process"]:
             # Drop unwanted features
-            steps.extend([
-                Step("apply_filters", {"config": config["post_process"]["filters"]}),
-            ])
+            steps.append(Step("apply_filters", {"config": config["post_process"]["filters"]}))
         if "chunks" in config["post_process"]:
             # Dividing inputs into fixed length chunks
-            steps.extend([
-                Step("create_input_chunks", config["post_process"]["chunks"]),
-            ])
+            steps.append(Step("create_input_chunks", config["post_process"]["chunks"]))
         if "remap_keys" in config["post_process"]:
             # Reordering or dropping keys
-            steps.extend([
-                Step("remap_keys", {"new_keys": config["post_process"]["remap_keys"]}),
-            ])
+            steps.append(Step("remap_keys", {"new_keys": config["post_process"]["remap_keys"]}))
         if "normalize" in config["post_process"]:
-            steps.extend([
-                Step("normalize", {"config": config["post_process"]["normalize"]}),
-            ])
+            steps.append(Step("normalize", {"config": config["post_process"]["normalize"]}))
+        if "shuffle_buffer_size" in config["post_process"]:
+            steps.append(Step("shuffle", {"buffer_size": config["post_process"]["shuffle_buffer_size"]}))
     if "cache" in config:
         cache_root = config["cache"]["directory"]
         cache_config = {
@@ -97,12 +109,23 @@ def create_dataset(split, labels, init_data, config):
         # Serialize all elements to disk and eagerly evaluate whole pipeline
         steps.extend([
             Step("cache", cache_config),
-            Step("consume", {"log_interval": 10000}),
+            Step("consume", {"log_interval": config["cache"].get("log_interval", -1)}),
         ])
         if "show_samples" in config:
-            tensorboard_summary_dir = os.path.join(cache_root, "dataset_tensorboard", split)
+            tensorboard_config = {
+                    "summary_dir": os.path.join(
+                        experiment_cache_from_config(config),
+                        "tensorboard",
+                        "dataset",
+                        split),
+                    "config": config["show_samples"]}
             # Add some samples to TensorBoard for inspection
-            steps.extend([
-                Step("consume_to_tensorboard", {"summary_dir": tensorboard_summary_dir, "config": config["show_samples"]}),
-            ])
+            steps.append(Step("consume_to_tensorboard", tensorboard_config))
+    # TODO convert to binary classification here
+    # TODO pre_training config key
+    # Check this split should be shuffled before training
+    for experiment_conf in config["experiment"]["data"].values():
+        if experiment_conf["split"] == split and "shuffle_buffer_size" in experiment_conf:
+            steps.append(Step("shuffle", {"buffer_size": experiment_conf["shuffle_buffer_size"]}))
+            break
     return steps
