@@ -33,7 +33,7 @@ After downloading, the directory should contain the following files:
 2. Run
 
         bash scripts/prepare.bash
-    This will convert all mp3-files to wav-files, which creates about 4G of data into directory `./data`.
+    This will extract all mp3-files and convert them to 16k mono wav-files, which creates about 4G of data into directory `./data`.
     The script is very inefficient and the amount of file IO latency makes it unusable for larger datasets, but it will do for this small example.
     After the command completes, the mp3-files are no longer needed.
     It is not necessary to delete them, but you can do it if you want to:
@@ -46,21 +46,15 @@ After downloading, the directory should contain the following files:
     You can enable debug mode by setting the environment variable `LIDBOX_DEBUG=true`, but note that this generates a lot of output.
     It also disables most of the parallel execution.
 
-4. Inspect the extracted features in TensorBoard by running:
+4. Inspect extracted features and training progress in TensorBoard by running:
 
-        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/dataset_tensorboard
+        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/commonvoice-lang4/tensorboard
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
-    The event logs of training metrics are stored separately in `./lidbox-cache/xvector/xvector-adam/tensorboard`.
-    Use e.g.
-
-        tensorboard --logdir ./lidbox-cache/xvector/xvector-adam/tensorboard
-
-
 ## Notes
 
-* You can include any kind of dataset by using Kaldi-like metadata files, see contents of `./data/{train,test}` (`utt2dur` not really needed).
+* You can include any kind of dataset by using Kaldi-like metadata files, see contents of `./data/{train,test}` after running step 2.
 * If you don't want to use a GPU, you can e.g. prefix all commands with `env CUDA_VISIBLE_DEVICES=-1`.
 * Debug mode can be enabled by using the env var `LIDBOX_DEBUG=true`.
 * Keep an eye on the memory usage if you are using large feature extraction batches, there's no kill switch for using too large batches.
