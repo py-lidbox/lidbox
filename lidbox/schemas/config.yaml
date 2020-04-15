@@ -10,19 +10,15 @@ properties:
     minItems: 1
     contains:
       $ref: '#/definitions/dataset'
-  meta:
-    $ref: '#/definitions/meta'
+  post_initialize:
+    $ref: '#/definitions/post_initialize'
   user_script:
     $ref: '#/definitions/user_script'
-  cache:
-    $ref: '#/definitions/cache'
   pre_process:
     $ref: '#/definitions/pre_process'
   features:
     $ref: '#/definitions/features'
   post_process:
     $ref: '#/definitions/post_process'
-  show_samples:
-    $ref: '#/definitions/show_samples'
   experiment:
     $ref: '#/definitions/experiment'

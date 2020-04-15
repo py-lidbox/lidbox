@@ -1,6 +1,19 @@
+"""
+Default data pipelines constructed from dataset steps.
+This module can be replaced by a custom script using key 'user_script' in the config file.
+"""
 import os
 from lidbox.dataset.steps import Step
 from lidbox.models.keras_utils import experiment_cache_from_config
+
+
+def _get_cache_steps(config, split):
+    cache_config = {
+            "directory": os.path.join(config["directory"], "dataset", split),
+            "cache_key": config.get("key"),
+            "batch_size": config["batch_size"]}
+    yield Step("cache", cache_config)
+    yield Step("consume", {"log_interval": config.get("log_interval", -1)})
 
 
 def create_dataset(split, labels, init_data, config):
@@ -19,16 +32,18 @@ def create_dataset(split, labels, init_data, config):
         # Create a tf.data.Dataset that contains all metadata, e.g. paths from utt2path and labels from utt2label etc.
         Step("initialize", {"labels": labels, "init_data": init_data}),
     ]
-    if "meta" in config:
+    if "post_initialize" in config:
         # "Pre-pre-process" all metadata before any signals are read
-        if "file_limit" in config["meta"]:
-            steps.append(Step("lambda", {"fn": lambda ds: ds.take(config["meta"]["file_limit"])}))
-        if "shuffle_buffer_size" in config["meta"]:
+        if "file_limit" in config["post_initialize"]:
+            steps.append(Step("lambda", {"fn": lambda ds: ds.take(config["post_initialize"]["file_limit"])}))
+        if "shuffle_buffer_size" in config["post_initialize"]:
             # Shuffle all files
-            steps.append(Step("shuffle", {"buffer_size": config["meta"]["shuffle_buffer_size"]}))
-        if "binary_classification" in config["meta"]:
+            steps.append(Step("shuffle", {"buffer_size": config["post_initialize"]["shuffle_buffer_size"]}))
+        if "binary_classification" in config["post_initialize"]:
             # Convert all labels to binary classification
-            steps.append(Step("convert_to_binary_classification", {"positive_class": config["meta"]["binary_classification"]}))
+            steps.append(Step("convert_to_binary_classification", {"positive_class": config["post_initialize"]["binary_classification"]}))
+        if config["post_initialize"].get("check_wav_headers", False):
+            steps.append(Step("drop_invalid_wavs", {}))
     if "features" in config and config["features"]["type"] == "kaldi":
         # Features will be imported from Kaldi files, assume no signals should be loaded
         pass
@@ -75,6 +90,8 @@ def create_dataset(split, labels, init_data, config):
             steps.append(Step("create_signal_chunks", config["pre_process"]["chunks"]))
         # TODO not yet supported
         # if "random_chunks" in config["pre_process"]:
+        if "cache" in config["pre_process"]:
+            steps.extend(_get_cache_steps(config["pre_process"]["cache"], split))
     if "features" in config:
         # Load features
         if config["features"]["type"] == "kaldi":
@@ -93,34 +110,24 @@ def create_dataset(split, labels, init_data, config):
         if "chunks" in config["post_process"]:
             # Dividing inputs into fixed length chunks
             steps.append(Step("create_input_chunks", config["post_process"]["chunks"]))
-        if "remap_keys" in config["post_process"]:
-            # Reordering or dropping keys
-            steps.append(Step("remap_keys", {"new_keys": config["post_process"]["remap_keys"]}))
         if "normalize" in config["post_process"]:
             steps.append(Step("normalize", {"config": config["post_process"]["normalize"]}))
         if "shuffle_buffer_size" in config["post_process"]:
             steps.append(Step("shuffle", {"buffer_size": config["post_process"]["shuffle_buffer_size"]}))
-    if "cache" in config:
-        cache_root = config["cache"]["directory"]
-        cache_config = {
-                "directory": os.path.join(cache_root, "features", split),
-                "cache_key": config["cache"].get("key"),
-                "batch_size": config["cache"]["batch_size"]}
-        # Serialize all elements to disk and eagerly evaluate whole pipeline
-        steps.extend([
-            Step("cache", cache_config),
-            Step("consume", {"log_interval": config["cache"].get("log_interval", -1)}),
-        ])
-        if "show_samples" in config:
+        if "tensorboard" in config["post_process"]:
             tensorboard_config = {
                     "summary_dir": os.path.join(
                         experiment_cache_from_config(config),
                         "tensorboard",
                         "dataset",
                         split),
-                    "config": config["show_samples"]}
+                    "config": config["post_process"]["tensorboard"]}
             # Add some samples to TensorBoard for inspection
             steps.append(Step("consume_to_tensorboard", tensorboard_config))
+        if "remap_keys" in config["post_process"]:
+            steps.append(Step("remap_keys", {"new_keys": config["post_process"]["remap_keys"]}))
+        if "cache" in config["post_process"]:
+            steps.extend(_get_cache_steps(config["post_process"]["cache"], split))
     # TODO convert to binary classification here
     # TODO pre_training config key
     # Check this split should be shuffled before training

@@ -18,7 +18,7 @@ MODELS_IMPORT_PATH = "lidbox.models."
 
 def experiment_cache_from_config(config):
     return os.path.join(
-            config["cache"]["directory"],
+            config["experiment"]["cache_directory"],
             config["experiment"]["model"]["key"],
             config["experiment"]["name"])
 

@@ -224,6 +224,7 @@ experiment:
   type: object
   description: 'Model training pipeline configuration'
   required:
+    - cache_directory
     - callbacks
     - data
     - input_shape
@@ -253,6 +254,8 @@ experiment:
         validation:
           $ref: '#/definitions/split'
           description: 'Validation/development set configuration'
+    cache_directory:
+      type: string
     callbacks:
       type: array
       contains:
@@ -331,6 +334,16 @@ post_process:
   properties:
     shuffle_buffer_size:
       $ref: '#/definitions/shuffle_buffer_size'
+    tensorboard:
+      type: object
+      additionalProperties: false
+      properties:
+        num_batches:
+          type: integer
+          exclusiveMinimum: 0
+        batch_size:
+          type: integer
+          exclusiveMinimum: 0
     normalize:
       type: object
     filters:
@@ -375,6 +388,8 @@ post_process:
               exclusiveMaximum: 1.0
     remap_keys:
       type: object
+    cache:
+      $ref: '#/definitions/cache'
 
 user_script:
   type: string
@@ -405,6 +420,8 @@ pre_process:
         anyOf:
           - $ref: '#/definitions/augment_config_additive_noise'
           - $ref: '#/definitions/augment_config_random_resampling'
+    cache:
+      $ref: '#/definitions/cache'
 
 filters:
   type: object
@@ -435,17 +452,6 @@ shape:
       - type: integer
         minimum: 0
       - type: 'null'
-
-show_samples:
-  type: object
-  additionalProperties: false
-  properties:
-    num_batches:
-      type: integer
-      exclusiveMinimum: 0
-    batch_size:
-      type: integer
-      exclusiveMinimum: 0
 
 augment_config_random_resampling:
   type: object
@@ -516,7 +522,7 @@ signal_chunks:
       description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
       minimum: 0
 
-meta:
+post_initialize:
   type: object
   description: 'Pre-pre-process configuration of the metadata iterator'
   additionalProperties: false
@@ -527,6 +533,8 @@ meta:
       type: string
     file_limit:
       type: integer
+    check_wav_headers:
+      type: boolean
 
 shuffle_buffer_size:
   type: integer
