@@ -8,7 +8,6 @@ from tensorflow.keras.layers import (
     LSTM,
 )
 from tensorflow.keras.models import Model
-import numpy as np
 import tensorflow as tf
 
 
@@ -19,6 +18,3 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", num_units=
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="lstm")
-
-def predict(model, utterances):
-    return np.stack([model.predict(frames).mean(axis=0) for frames in utterances.unbatch()])

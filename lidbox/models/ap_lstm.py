@@ -14,6 +14,7 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 import tensorflow as tf
 
+
 def loader(input_shape, num_outputs):
     inputs = Input(shape=input_shape, name="input")
     blstm_1 = Bidirectional(LSTM(256, return_sequences=True), name="blstm_1")(inputs)
@@ -22,6 +23,3 @@ def loader(input_shape, num_outputs):
     # TODO L2 normalization
     outputs = GlobalAveragePooling1D(name="avg_over_time")(concat)
     return Model(inputs=inputs, outputs=outputs, name="angular_proximity_lstm")
-
-def predict(model, utterances):
-    return model.predict(utterances)

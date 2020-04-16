@@ -12,7 +12,7 @@ from tensorflow.keras.layers import (
     Input,
 )
 from tensorflow.keras import Model
-import numpy as np
+
 
 def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024, batch_normalize=False):
     inputs = Input(shape=input_shape, name="input")
@@ -25,6 +25,3 @@ def loader(input_shape, num_outputs, merge_mode="concat", num_gru_units=1024, ba
         fc_relu1 = BatchNormalization(name="fc_relu_bn")(fc_relu1)
     outputs = Dense(num_outputs, activation="softmax", name="output")(fc_relu1)
     return Model(inputs=inputs, outputs=outputs, name="BGRU")
-
-def predict(model, utterances):
-    return np.stack([model.predict(frames).mean(axis=0) for frames in utterances.unbatch()])

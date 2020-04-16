@@ -40,7 +40,3 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="x-vector-extended")
-
-
-def predict(model, inputs):
-    return model.predict(inputs)

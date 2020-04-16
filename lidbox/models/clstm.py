@@ -26,7 +26,6 @@ from .xvector import (
 )
 from tensorflow.keras.models import Model
 import tensorflow as tf
-import numpy as np
 
 
 def frequency_attention(H, d_a=64, d_f=16):
@@ -74,7 +73,3 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", use_attent
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="CLSTM")
-
-
-def predict(model, inputs):
-    return model.predict(inputs)

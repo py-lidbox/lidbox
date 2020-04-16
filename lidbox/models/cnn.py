@@ -14,6 +14,7 @@ from tensorflow.keras.layers import (
 from tensorflow.keras import Model
 import tensorflow as tf
 
+
 def loader(input_shape, num_outputs, output_activation="softmax", padding="same"):
     inputs = Input(shape=input_shape, name="input")
     conv_1 = Conv1D(500, 5, 1, padding=padding, activation="relu", name="conv_1")(inputs)
@@ -27,6 +28,3 @@ def loader(input_shape, num_outputs, output_activation="softmax", padding="same"
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="MGB-3_CNN")
-
-def predict(model, samples):
-    return model.predict(samples)

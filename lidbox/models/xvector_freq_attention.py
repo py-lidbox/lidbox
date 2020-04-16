@@ -14,7 +14,6 @@ from .xvector import (
 from .clstm import frequency_attention
 from tensorflow.keras.models import Model
 import tensorflow as tf
-import numpy as np
 
 
 def loader(input_shape, num_outputs, output_activation="log_softmax", freq_attention_bins=60):
@@ -33,7 +32,3 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", freq_atten
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="x-vector-frequency-attention")
-
-
-def predict(model, inputs):
-    return model.predict(inputs)

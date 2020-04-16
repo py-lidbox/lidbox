@@ -19,7 +19,6 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras import Model
 import tensorflow as tf
-import numpy as np
 
 
 def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0.001):
@@ -51,7 +50,3 @@ def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="CRNN")
-
-
-def predict(model, utterances):
-    return model.predict(utterances)
