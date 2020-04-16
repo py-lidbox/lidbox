@@ -1,3 +1,5 @@
+import logging
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
 import matplotlib.pyplot as plt
 # Plot text as text, not curves
 plt.rcParams["svg.fonttype"] = "none"
