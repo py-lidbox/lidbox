@@ -1,6 +1,5 @@
 """
-x-vector with 2D-convolutions instead of 1D.
-The last convolution before stats pooling has 512 units instead of 1500.
+x-vector with 2D CNN frontend for gathering frequency channel information.
 """
 from tensorflow.keras.layers import (
     Activation,
@@ -16,6 +15,7 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 from .xvector import (
+    FrameLayer,
     GlobalMeanStddevPooling1D,
     SegmentLayer,
 )
@@ -65,13 +65,17 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     if channel_dropout_rate > 0:
         x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
     x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
-    x = FrameLayer2D(512, 5, 1, name="frame1")(x)
-    x = FrameLayer2D(512, 3, 2, name="frame2")(x)
-    x = FrameLayer2D(512, 3, 3, name="frame3")(x)
-    x = FrameLayer2D(512, 1, 1, name="frame4")(x)
-    x = FrameLayer2D(512, 1, 1, name="frame5")(x)
+    x = FrameLayer2D(256, (1, 5), (1, 1), name="frame2d_1")(x)
+    x = FrameLayer2D(128, (1, 3), (1, 2), name="frame2d_2")(x)
+    x = FrameLayer2D(64, (1, 3), (1, 3), name="frame2d_3")(x)
+    x = FrameLayer2D(32, (1, 3), (1, 3), name="frame2d_4")(x)
     rows, cols, channels = x.shape[1:]
     x = Reshape((rows or -1, cols * channels), name="flatten_channels")(x)
+    x = FrameLayer(512, 5, 1, name="frame1")(x)
+    x = FrameLayer(512, 3, 2, name="frame2")(x)
+    x = FrameLayer(512, 3, 3, name="frame3")(x)
+    x = FrameLayer(512, 1, 1, name="frame4")(x)
+    x = FrameLayer(1500, 1, 1, name="frame5")(x)
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
     x = SegmentLayer(512, name="segment1")(x)
     x = SegmentLayer(512, name="segment2")(x)
