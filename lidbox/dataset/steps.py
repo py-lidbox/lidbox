@@ -2,7 +2,7 @@ import collections
 import io
 import logging
 import os
-# import random
+import shutil
 import time
 
 logger = logging.getLogger("dataset")
@@ -143,7 +143,7 @@ def as_supervised(ds):
 
 
 #TODO preload the whole noise dataset to allow caching or random access from memory instead of disk
-def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmented=True):
+def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmented=True, copy_noise_files_to_tmpdir=False):
     """
     Read all noise signals from $noise_datadir/id2path and create new signals by mixing noise to each element of ds.
     'snr_list' defines the noise labels, which is determined by $noise_datadir/id2label, and the SNR dB range from which the noise level in the resulting signal will be chosen randomly.
@@ -164,6 +164,18 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmente
     for noise_id, path in lidbox.iter_metadata_file(os.path.join(noise_datadir, "id2path"), 2):
         type2paths[id2type[noise_id]].append(path)
     del id2type
+    if copy_noise_files_to_tmpdir:
+        tmpdir = os.path.join(os.environ.get("TMPDIR", "/tmp"), "lidbox_noise_signals")
+        logger.info("Copying all noise files to TMPDIR '%s'", tmpdir)
+        for noise_type, paths in list(type2paths.items()):
+            new_paths = []
+            for src in paths:
+                dst = os.path.join(tmpdir, noise_type, os.path.basename(src))
+                logger.debug("%s -> %s", src, dst)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(src, dst)
+                new_paths.append(dst)
+            type2paths[noise_type] = new_paths
     type2paths = {t: tf.constant(paths, tf.string) for t, paths in type2paths.items()}
     def _update_element_meta(new_id, mixed_signal, x):
         return dict(x, id=new_id, signal=mixed_signal, signal_is_augmented=True)

@@ -493,6 +493,8 @@ augment_config_additive_noise:
       type: string
     skip_already_augmented:
       type: boolean
+    copy_noise_files_to_tmpdir:
+      type: boolean
     snr_list:
       type: array
       contains:
