@@ -42,7 +42,7 @@ After downloading, the directory should contain the following files:
 
 3. Run the `lidbox` end-to-end pipeline
 
-        lidbox e2e config.yaml
+        lidbox e2e -v config.yaml
     You can enable debug mode by setting the environment variable `LIDBOX_DEBUG=true`, but note that this generates a lot of output.
     It also disables most of the parallel execution.
 

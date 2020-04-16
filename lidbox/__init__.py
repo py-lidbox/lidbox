@@ -14,12 +14,17 @@ random.seed(int(os.environ.get("LIDBOX_RANDOM_SEED", "42")))
 
 DEBUG = os.environ.get("LIDBOX_DEBUG") not in (None, "False", "false", "0")
 
-logging.basicConfig(
-        level=logging.DEBUG if DEBUG else logging.INFO,
-        style="{",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        format="{asctime:s}.{msecs:03.0f} {levelname[0]:s} {name:s}: {message:s}")
 
+def reset_loglevel(level):
+    for handler in list(logging.root.handlers):
+        logging.root.removeHandler(handler)
+    logging.basicConfig(
+            level=level,
+            style="{",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            format="{asctime:s}.{msecs:03.0f} {levelname[0]:s} {name:s}: {message:s}")
+
+reset_loglevel(logging.DEBUG if DEBUG else logging.INFO)
 
 def get_package_root():
     from . import __path__

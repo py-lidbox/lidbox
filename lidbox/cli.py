@@ -3,12 +3,15 @@ lidbox command line interface.
 """
 import argparse
 import itertools
+import logging
 import os
 import sys
 
 import lidbox
 import lidbox.schemas
 
+
+VERBOSITY_TO_LOGLEVEL = [logging.WARNING, logging.INFO, logging.DEBUG]
 
 def create_argparser():
     """Root argparser for all lidbox command line interface commands"""
@@ -68,7 +71,7 @@ class Command:
         optional.add_argument("--verbosity", "-v",
             action="count",
             default=0,
-            help="Increases output verbosity.")
+            help="Increases output verbosity. " + ", ".join("{:d} = {:s}".format(i, logging.getLevelName(l)) for i, l in enumerate(VERBOSITY_TO_LOGLEVEL)))
         return parser
 
     def __init__(self, args):
@@ -97,6 +100,11 @@ class Command:
 
     def run(self):
         args = self.args
+        max_loglevel = len(VERBOSITY_TO_LOGLEVEL) - 1
+        if lidbox.DEBUG:
+            print("lidbox.DEBUG is True, overriding given --verbosity setting {} with maximum log level {}".format(args.verbosity, max_loglevel))
+            args.verbosity = max_loglevel
+        lidbox.reset_loglevel(VERBOSITY_TO_LOGLEVEL[min(max_loglevel, max(0, args.verbosity))])
         if args.verbosity > 1:
             print("Running lidbox command '{}' with arguments:".format(self.__class__.__name__.lower()))
             lidbox.yaml_pprint(vars(args))
