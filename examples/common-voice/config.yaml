@@ -88,6 +88,7 @@ post_process:
     batch_size: 1000
     # Unique key for naming cache directories to distinguish other caches (if other caches are used)
     key: logmelspectrogram
+    log_interval: 2000
   # Show 16 first samples of 50 first batches in TensorBoard for inspection
   tensorboard:
     num_batches: 50
@@ -127,7 +128,7 @@ experiment:
       from_logits: true
   keras_fit_kwargs:
     epochs: 50
-  input_shape: [192, 64]
+  input_shape: [198, 64]
   output_shape: [4]
   # Which splits to use for training, validation and testing
   data:
