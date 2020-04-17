@@ -26,7 +26,7 @@ Step = collections.namedtuple("Step", ("key", "kwargs"))
 
 
 def from_steps(steps):
-    logger.info("Initializing dataset from %d steps:\n  %s", len(steps), "\n  ".join(s.key for s in steps))
+    logger.info("Initializing and preparing tf.data.Dataset instance from %d steps:\n  %s", len(steps), "\n  ".join(s.key for s in steps))
     ds = None
     if steps[0].key != "initialize":
         logger.critical("When constructing a dataset, the first step must be 'initialize' but it was '%s'. The 'initialize' step is needed for first loading all metadata such as the utterance_id to wavpath mappings.", steps[0].key)
@@ -44,6 +44,7 @@ def from_steps(steps):
         if not isinstance(ds, tf.data.Dataset):
             logger.critical("Failed to apply step '%s', it did not return a tf.data.Dataset instance but instead returned '%s'.", step.key, repr(ds))
             return
+    logger.info("All %d steps completed, returning prepared tf.data.Dataset instance.", len(steps))
     return ds
 
 
@@ -736,7 +737,7 @@ def load_kaldi_data(ds, shape):
     """
     Assuming ds has been initialized with kaldi_ark_key, then for each element of ds:
         - Load the array from the Kaldi archive as a float32 tensor
-        - Set a statically known shape
+        - Set a statically known shape (use None for variable length dimensions)
         - Store the tensor under 'input', dropping kaldi_ark_key
     """
     logger.info("Loading Kaldi data from external archives using ark keys stored in every element under 'kaldi_ark_key' and reshaping the data to shape %s", repr(shape))
