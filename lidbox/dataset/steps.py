@@ -672,6 +672,24 @@ def reduce_stats(ds, statistic, batch_size=1, **kwargs):
     #TODO
     #elif statistic == "duration_by_label":
     #    pass
+    elif statistic == "num_non_finite":
+        key = kwargs["key"]
+        axis = kwargs.get("axis")
+        logger.info("Computing frequency of non-finite tensors for key '%s' over axis %s in batches of %d.", key, str(axis), batch_size)
+        count_non_finite = lambda t, axis=axis: tf.cast(not tf.math.reduce_any(tf.math.is_finite(t), axis=axis), tf.int64)
+        accumulate_batches = lambda c, x: (c[0] + 1, c[1] + count_non_finite(x[key]))
+        num_batches, num_non_finite = (ds
+                .batch(batch_size, drop_remainder=True)
+                .reduce((tf.constant(0, tf.int64), tf.zeros([batch_size], tf.int64)), accumulate_batches))
+        accumulate_rest = lambda c, x: c + count_non_finite(x[key], axis=None)
+        num_elements = tf.constant(batch_size, tf.int64) * num_batches
+        num_non_finite_rest = ds.skip(num_elements).reduce(tf.zeros([], tf.int64), accumulate_rest)
+        num_non_finite = tf.math.reduce_sum(num_non_finite) + num_non_finite_rest
+        logger.info(
+                "Dataset has %d tensors in total under key '%s' of which %d tensors have one or more non-finite values (NaN or inf).",
+                num_elements.numpy(),
+                key,
+                num_non_finite.numpy())
     else:
         logger.error("Unknown statistic type '%s', cannot compute stats for dataset.", statistic)
     return ds
