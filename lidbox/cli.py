@@ -172,6 +172,7 @@ class Utils(Command):
     """
     tasks = (
         "load_and_show_meta",
+        "run_script",
         "validate_config_file",
     )
 
@@ -185,6 +186,10 @@ class Utils(Command):
         optional.add_argument("--validate-config-file",
             action="store_true",
             help="Use a JSON schema to check the given config file is valid.")
+        optional.add_argument("--run-script",
+            type=str,
+            action=ExpandAbspath,
+            help="Create a dataset iterator by running the given user script.")
         return parser
 
     def load_and_show_meta(self):
@@ -205,6 +210,13 @@ class Utils(Command):
             return 1
         elif args.verbosity:
             print("File '{}' ok".format(args.lidbox_config_yaml_path))
+
+    def run_script(self):
+        import lidbox.api
+        args = self.args
+        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        config["user_script"] = args.run_script
+        _ = lidbox.api.create_datasets(split2meta, labels, config)
 
     def run(self):
         return self.run_tasks()
