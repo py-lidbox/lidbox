@@ -631,17 +631,20 @@ def lambda_fn(ds, fn):
     return fn(ds)
 
 
-def reduce_stats(ds, statistic, **kwargs):
+def reduce_stats(ds, statistic, batch_size=1, **kwargs):
     """
     Reduce ds into a single statistic.
-    This requires evaluating the full, preceding pipeline.
+    This requires iterating over ds fully one time.
     """
     logger.info(
-            "Iterating over whole dataset to compute statistic '%s'%s",
+            "Iterating over whole dataset to compute statistic '%s' with batch size %d%s",
             statistic,
+            batch_size,
             " using kwargs:\n  {}".format(_pretty_dict(kwargs)) if kwargs else '')
     if statistic == "num_elements":
-        num_elements = ds.reduce(0, lambda c, x: c + 1)
+        tmp_ds = ds.batch(batch_size, drop_remainder=True)
+        num_elements = tf.constant(batch_size, tf.int64) * tmp_ds.reduce(tf.constant(0, tf.int64), lambda c, x: c + 1)
+        num_elements += ds.skip(num_elements).reduce(0, lambda c, x: c + 1)
         logger.info("Num elements: %d.", int(num_elements.numpy()))
     elif statistic == "vad_ratio":
         def get_vad_ratio(vad_decisions):
