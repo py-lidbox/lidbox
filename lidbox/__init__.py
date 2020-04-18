@@ -16,13 +16,12 @@ DEBUG = os.environ.get("LIDBOX_DEBUG") not in (None, "False", "false", "0")
 
 
 def reset_loglevel(level):
-    for handler in list(logging.root.handlers):
-        logging.root.removeHandler(handler)
     logging.basicConfig(
             level=level,
             style="{",
             datefmt="%Y-%m-%d %H:%M:%S",
             format="{asctime:s}.{msecs:03.0f} {levelname[0]:s} {name:s}: {message:s}")
+    logging.getLogger().setLevel(level)
 
 reset_loglevel(logging.DEBUG if DEBUG else logging.INFO)
 

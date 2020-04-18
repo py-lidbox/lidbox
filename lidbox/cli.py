@@ -190,12 +190,21 @@ class Utils(Command):
             type=str,
             action=ExpandAbspath,
             help="Create a dataset iterator by running the given user script.")
+        optional.add_argument("--split",
+            type=str,
+            help="Use a single, specific split, e.g. 'train', 'test'.")
         return parser
+
+    def _filter_by_splitarg(self, split2meta):
+        if self.args.split:
+            split2meta = {s: m for s, m in split2meta.items() if s == self.args.split}
+        return split2meta
 
     def load_and_show_meta(self):
         import lidbox.api
         args = self.args
         split2meta, labels, _ = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta = self._filter_by_splitarg(split2meta)
         for split, meta in split2meta.items():
             print(split)
             for k, v in meta.items():
@@ -215,10 +224,12 @@ class Utils(Command):
         import lidbox.api
         args = self.args
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta = self._filter_by_splitarg(split2meta)
         config["user_script"] = args.run_script
         _ = lidbox.api.create_datasets(split2meta, labels, config)
 
     def run(self):
+        super().run()
         return self.run_tasks()
 
 

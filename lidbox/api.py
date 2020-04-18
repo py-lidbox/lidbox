@@ -39,14 +39,26 @@ VALID_METADATA_FILES = {
 def create_datasets(split2meta, labels, config):
     from lidbox.dataset import from_steps
     create_dataset = None
+    modify_steps = None
     if "user_script" in config:
-        create_dataset = getattr(load_user_script_as_module(config["user_script"]), "create_dataset")
+        user_script = load_user_script_as_module(config["user_script"])
+        create_dataset = getattr(user_script, "create_dataset", None)
+        modify_steps = getattr(user_script, "modify_steps", None)
     if create_dataset is None:
         from lidbox.dataset.pipelines import create_dataset
+    else:
+        logger.info("User has defined a 'create_dataset' function, will use it to create dataset steps")
+    if modify_steps is None:
+        modify_steps = lambda steps, *args: steps
+    else:
+        logger.info("User has defined a 'modify_steps' function, the created dataset will be given to the function for modification")
     split2ds = {}
     for split, split_meta in split2meta.items():
         logger.info("Creating dataset iterator for split '%s' with metadata containing %d keys", split, len(split_meta))
-        split2ds[split] = from_steps(create_dataset(split, labels, split_meta, config))
+        args = split, labels, split_meta, config
+        steps = create_dataset(*args)
+        steps = modify_steps(steps, *args)
+        split2ds[split] = from_steps(steps)
     return split2ds
 
 
