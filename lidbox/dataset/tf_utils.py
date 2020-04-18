@@ -118,6 +118,25 @@ def count_dim_sizes(ds, element_key=0, ndims=1):
         axis=2)
 
 
+def reduce_min_max_num_sum(ds, key, batch_size):
+    """
+    Given a dataset 'ds', reduce all tensors at element index 'element_key' over the whole dataset into scalar values: minimum, maximum, count, sum.
+    Reductions can be computed in batches.
+    """
+    def _accumulate_batch(c, x):
+        min = tf.math.minimum(c[0], tf.cast(tf.math.reduce_min(x[key]), tf.float64))
+        max = tf.math.maximum(c[1], tf.cast(tf.math.reduce_max(x[key]), tf.float64))
+        num = c[2] + tf.size(x[key], tf.int64)
+        sum = c[3] + tf.cast(tf.math.reduce_sum(x[key]), tf.float64)
+        return min, max, num, sum
+    min = tf.constant(tf.float64.max)
+    max = tf.constant(tf.float64.min)
+    num = tf.constant(0, tf.int64)
+    sum = tf.constant(0, tf.float64)
+    return (ds.batch(batch_size)
+              .reduce((min, max, num, sum), _accumulate_batch))
+
+
 @tf.function
 def extract_features(signals, sample_rates, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, window_norm_kwargs):
     tf.debugging.assert_rank(signals, 2, message="Input signals for feature extraction must be batches of mono signals without channels, i.e. of shape [B, N] where B is batch size and N number of samples.")

@@ -63,7 +63,7 @@ def _feature_extraction_kwargs_to_args(config):
 def _element_shapes_dict(x):
     return {k: list(tf.shape(v).numpy()) for k, v in x.items()}
 
-def _pretty_dict(d):
+def _dict_to_logstring(d):
     return "\n  ".join("{}: {}".format(k, p) for k, p in d.items())
 
 
@@ -83,7 +83,7 @@ def apply_filters(ds, config):
     """
     Drop all elements from ds which do not satisfy all filter conditions given in config.
     """
-    logger.info("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _pretty_dict(config))
+    logger.info("Applying filters on every element in the dataset, keeping only elements which match the given config:\n  %s", _dict_to_logstring(config))
     filters = []
     if "equal" in config:
         key = config["equal"]["key"]
@@ -613,7 +613,7 @@ def normalize(ds, config):
     Apply mean-variance normalization for all elements of ds for some key.
     Useful as a separate step e.g. if loading existing features from Kaldi archives.
     """
-    logger.info("Applying normalization with config:\n  %s", _pretty_dict(config))
+    logger.info("Applying normalization with config:\n  %s", _dict_to_logstring(config))
     key = config["key"]
     def _normalize(x):
         return dict(x, **{key: features.mean_variance_normalization(x[key], **config.get("kwargs", {}))})
@@ -640,20 +640,25 @@ def reduce_stats(ds, statistic, batch_size=1, **kwargs):
             "Iterating over whole dataset to compute statistic '%s' with batch size %d%s",
             statistic,
             batch_size,
-            " using kwargs:\n  {}".format(_pretty_dict(kwargs)) if kwargs else '')
+            " using kwargs:\n  {}".format(_dict_to_logstring(kwargs)) if kwargs else '')
+    batch_size = tf.constant(batch_size, tf.int64)
     if statistic == "num_elements":
         tmp_ds = ds.batch(batch_size, drop_remainder=True)
-        num_elements = tf.constant(batch_size, tf.int64) * tmp_ds.reduce(tf.constant(0, tf.int64), lambda c, x: c + 1)
-        num_elements += ds.skip(num_elements).reduce(0, lambda c, x: c + 1)
-        logger.info("Num elements: %d.", int(num_elements.numpy()))
+        num_batches = tmp_ds.reduce(tf.constant(0, tf.int64), lambda c, x: c + 1)
+        num_batched = batch_size * num_batches
+        num_remainder = ds.skip(num_batched).reduce(tf.zeros([], tf.int64), lambda c, x: c + 1)
+        logger.info(
+                "Num batches %d, batch_size %d, num batched elements %d, num remainder %d, total num elements: %d.",
+                num_batches.numpy(), batch_size.numpy(), num_batched.numpy(), num_remainder.numpy(), (num_batched + num_remainder).numpy())
     elif statistic == "vad_ratio":
         def get_vad_ratio(vad_decisions):
             num_speech = tf.math.reduce_sum(tf.cast(vad_decisions, tf.int64))
             num_not_speech = tf.math.reduce_sum(tf.cast(~vad_decisions, tf.int64))
             return tf.stack((num_speech, num_not_speech))
+        # Peek VAD frame length from first element
         frame_length_ms = list(ds.take(1).as_numpy_iterator())[0]["vad_frame_length_ms"]
         vad_ratio = ds.reduce(
-                tf.constant([0, 0], tf.int64),
+                tf.zeros([2], tf.int64),
                 lambda c, x: c + get_vad_ratio(x["vad_is_speech"]))
         kept, dropped = vad_ratio.numpy().tolist()
         logger.info(
@@ -662,9 +667,10 @@ def reduce_stats(ds, statistic, batch_size=1, **kwargs):
     elif statistic == "size_counts":
         key = kwargs["key"]
         ndims = kwargs["ndims"]
-        logger.info("Compute frequencies of sizes in all dimensions for key '%s' of every element of ds. Assuming ndims %d.", key, ndims)
+        logger.info("Computing frequencies of sizes in all dimensions for key '%s' of every element of ds. Assuming ndims %d.", key, ndims)
+        size_counts_by_axis = tf_utils.count_dim_sizes(ds.batch(batch_size), key, ndims)
         with io.StringIO() as sstream:
-            for axis, size_counts in enumerate(tf_utils.count_dim_sizes(ds, key, ndims)):
+            for axis, size_counts in enumerate(size_counts_by_axis):
                 print("\n  axis/dim {:d}:\n    [freq dim-size]".format(axis), file=sstream)
                 for count in size_counts.numpy():
                     print("    {}".format(count), file=sstream)
@@ -675,21 +681,36 @@ def reduce_stats(ds, statistic, batch_size=1, **kwargs):
     elif statistic == "num_non_finite":
         key = kwargs["key"]
         axis = kwargs.get("axis")
-        logger.info("Computing frequency of non-finite tensors for key '%s' over axis %s in batches of %d.", key, str(axis), batch_size)
+        logger.info(
+                "Computing frequency of non-finite tensors for key '%s' over axis %s in batches of %d.",
+                key, str(axis), batch_size.numpy())
         count_non_finite = lambda t, axis=axis: tf.cast(not tf.math.reduce_any(tf.math.is_finite(t), axis=axis), tf.int64)
         accumulate_batches = lambda c, x: (c[0] + 1, c[1] + count_non_finite(x[key]))
         num_batches, num_non_finite = (ds
                 .batch(batch_size, drop_remainder=True)
-                .reduce((tf.constant(0, tf.int64), tf.zeros([batch_size], tf.int64)), accumulate_batches))
-        accumulate_rest = lambda c, x: c + count_non_finite(x[key], axis=None)
-        num_elements = tf.constant(batch_size, tf.int64) * num_batches
-        num_non_finite_rest = ds.skip(num_elements).reduce(tf.zeros([], tf.int64), accumulate_rest)
-        num_non_finite = tf.math.reduce_sum(num_non_finite) + num_non_finite_rest
+                .reduce((tf.zeros([], tf.int64), tf.zeros([batch_size], tf.int64)), accumulate_batches))
+        num_batched = batch_size * num_batches
+        num_remainder, num_non_finite_remainder = (ds
+                .skip(num_batched)
+                .batch(1)
+                .reduce((tf.zeros([], tf.int64), tf.zeros([], tf.int64)), accumulate_batches))
+        num_non_finite = tf.math.reduce_sum(num_non_finite) + num_non_finite_remainder
+        logger.debug(
+                "\n  num_batches %d\n  batch_size %d\n  num_batched %d\n  num_remainder %d\n  total num elements %d\n  num_non_finite %d\n  num_non_finite_remainder %d",
+                *[t.numpy() for t in (num_batches, batch_size, num_batched, num_remainder, num_batched + num_remainder, num_non_finite, num_non_finite_remainder)])
         logger.info(
                 "Dataset has %d tensors in total under key '%s' of which %d tensors have one or more non-finite values (NaN or inf).",
-                num_elements.numpy(),
-                key,
-                num_non_finite.numpy())
+                (num_batched + num_remainder).numpy(), key, num_non_finite.numpy())
+    elif statistic == "min_max_mean":
+        key = kwargs["key"]
+        logger.info(
+                "Computing minimum, maximum and mean scalar values over all tensors under key '%s' in batches of %d.",
+                key, batch_size.numpy())
+        min, max, num, sum = tf_utils.reduce_min_max_num_sum(ds, key, batch_size)
+        mean = tf.math.divide_no_nan(sum, tf.cast(num, tf.float64))
+        logger.info(
+                "\n  key '%s'\n  total num scalars %s\n  min %.6f\n  max %.6f\n  mean %.6f\n  sum %.6f",
+                key, format(num.numpy(), ","), min.numpy(), max.numpy(), mean.numpy(), sum.numpy())
     else:
         logger.error("Unknown statistic type '%s', cannot compute stats for dataset.", statistic)
     return ds
@@ -700,7 +721,7 @@ def remap_keys(ds, new_keys):
     Given a dictionary 'new_keys' of key-to-key mappings, update the keys of every element in ds with the new keys, if the key is in 'new_keys'.
     If some key maps to None, that key (and value) is dropped from each element that contains the key.
     """
-    logger.info("Remapping keys of every element using config:\n  %s", _pretty_dict(new_keys))
+    logger.info("Remapping keys of every element using config:\n  %s", _dict_to_logstring(new_keys))
     def remap_keys(x):
         return {new_keys.get(k, k): v for k, v in x.items() if new_keys.get(k, k) is not None}
     return ds.map(remap_keys, num_parallel_calls=TF_AUTOTUNE)
@@ -732,19 +753,19 @@ def show_all_elements(ds, shapes_only=True):
     If shapes_only is False, print also summary of contents.
     """
     if shapes_only:
-        log = lambda i, e: logger.info(
+        log_print = lambda i, e: logger.info(
                 "Element %d:\nshapes:\n  %s",
-                i, _pretty_dict(_element_shapes_dict(e)))
+                i, _dict_to_logstring(_element_shapes_dict(e)))
     else:
-        log = lambda i, e: logger.info(
+        log_print = lambda i, e: logger.info(
                 "Element %d:\nshapes:\n  %s\ncontents:\n  %s",
-                i, _pretty_dict(_element_shapes_dict(e)), _pretty_dict(e))
+                i, _dict_to_logstring(_element_shapes_dict(e)), _dict_to_logstring(e))
     logger.info("Showing all elements.")
     i = 0
     for i, element in ds.enumerate(start=1).as_numpy_iterator():
         if not isinstance(element, dict):
             element = dict(enumerate(element))
-        log(i, element)
+        log_print(i, element)
     logger.info("All %d elements shown.", i)
     return ds
 
