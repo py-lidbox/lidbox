@@ -52,6 +52,10 @@ After downloading, the directory should contain the following files:
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
+5. Use the custom script to compute some stats on the test set:
+
+        lidbox utils -v config.yaml --split test --run-script compute_stats.py
+
 ## Notes
 
 * You can include any kind of dataset by using Kaldi-like metadata files, see contents of `./data/{train,test}` after running step 2.

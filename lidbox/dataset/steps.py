@@ -651,19 +651,23 @@ def reduce_stats(ds, statistic, batch_size=1, **kwargs):
                 "Num batches %d, batch_size %d, num batched elements %d, num remainder %d, total num elements: %d.",
                 num_batches.numpy(), batch_size.numpy(), num_batched.numpy(), num_remainder.numpy(), (num_batched + num_remainder).numpy())
     elif statistic == "vad_ratio":
-        def get_vad_ratio(vad_decisions):
-            num_speech = tf.math.reduce_sum(tf.cast(vad_decisions, tf.int64))
-            num_not_speech = tf.math.reduce_sum(tf.cast(~vad_decisions, tf.int64))
-            return tf.stack((num_speech, num_not_speech))
         # Peek VAD frame length from first element
-        frame_length_ms = list(ds.take(1).as_numpy_iterator())[0]["vad_frame_length_ms"]
-        vad_ratio = ds.reduce(
-                tf.zeros([2], tf.int64),
-                lambda c, x: c + get_vad_ratio(x["vad_is_speech"]))
-        kept, dropped = vad_ratio.numpy().tolist()
+        vad_frame_length_ms = list(ds.take(1).as_numpy_iterator())[0]["vad_frame_length_ms"]
+        num, num_speech, num_not_speech, speech_ratio = tf_utils.compute_vad_decision_stats(ds, batch_size)
         logger.info(
-                "VAD frame statistics:\n  frame length %d ms\n  kept    %15d\n  dropped %15d\n  total   %15d\n  kept ratio %.3f",
-                frame_length_ms, kept, dropped, kept + dropped, kept / ((kept + dropped) or 1))
+                ("VAD frame statistics:\n  "
+                 "num signals   %15d\n  "
+                 "vad frame len %15d ms\n  "
+                 "kept          %15d\n  "
+                 "dropped       %15d\n  "
+                 "total         %15d\n  "
+                 "kept ratio    %15.3f"),
+                num.numpy(),
+                vad_frame_length_ms,
+                num_speech.numpy(),
+                num_not_speech.numpy(),
+                (num_speech + num_not_speech).numpy(),
+                speech_ratio.numpy())
     elif statistic == "size_counts":
         key = kwargs["key"]
         ndims = kwargs["ndims"]

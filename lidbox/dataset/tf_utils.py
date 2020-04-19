@@ -137,6 +137,32 @@ def reduce_min_max_num_sum(ds, key, batch_size):
               .reduce((min, max, num, sum), _accumulate_batch))
 
 
+def compute_vad_decision_stats(original_ds, batch_size):
+    def _accumulate_vad_batches(c, vad_decisions):
+        num_speech = tf.math.reduce_sum(tf.cast(vad_decisions, tf.int64), axis=-1)
+        num_not_speech = tf.math.reduce_sum(tf.cast(~vad_decisions, tf.int64), axis=-1)
+        return c[0] + 1, c[1] + num_speech, c[2] + num_not_speech
+    def _make_init_reduce_values(n):
+        return tf.constant(0, tf.int64), tf.zeros([n], tf.int64), tf.zeros([n], tf.int64)
+    # Drop all unnecessary data
+    ds = original_ds.map(lambda x: x["vad_is_speech"])
+    num_batches, num_speech_batch, num_not_speech_batch = (ds
+            .batch(batch_size, drop_remainder=True)
+            .reduce(_make_init_reduce_values(batch_size), _accumulate_vad_batches))
+    num_batched = batch_size * num_batches
+    num_remainder, num_speech_r, num_not_speech_r = (ds
+            .skip(num_batched)
+            .batch(1)
+            .reduce(_make_init_reduce_values(1), _accumulate_vad_batches))
+    num = num_batched + num_remainder
+    num_speech = tf.math.reduce_sum(num_speech_batch) + tf.math.reduce_sum(num_speech_r)
+    num_not_speech = tf.math.reduce_sum(num_not_speech_batch) + tf.math.reduce_sum(num_not_speech_r)
+    speech_ratio = tf.math.divide_no_nan(
+            tf.cast(num_speech, tf.float64),
+            tf.cast(num_not_speech + num_speech, tf.float64))
+    return num, num_speech, num_not_speech, speech_ratio
+
+
 @tf.function
 def extract_features(signals, sample_rates, feattype, spec_kwargs, melspec_kwargs, mfcc_kwargs, db_spec_kwargs, feat_scale_kwargs, window_norm_kwargs):
     tf.debugging.assert_rank(signals, 2, message="Input signals for feature extraction must be batches of mono signals without channels, i.e. of shape [B, N] where B is batch size and N number of samples.")

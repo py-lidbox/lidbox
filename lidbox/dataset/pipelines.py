@@ -67,7 +67,6 @@ def create_dataset(split, labels, init_data, config):
             steps.extend([
                 # Compute WebRTC VAD decisions
                 Step("compute_webrtc_vad", config["pre_process"]["webrtcvad"]),
-                Step("reduce_stats", {"statistic": "vad_ratio"}),
                 # Drop non-speech frames using computed decisions
                 Step("apply_vad", {}),
                 # Some signals might contain only non-speech frames
