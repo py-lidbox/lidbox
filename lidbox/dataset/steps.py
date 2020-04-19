@@ -613,15 +613,17 @@ def initialize(ds, labels, init_data):
     return ds.map(append_labels_as_targets, num_parallel_calls=TF_AUTOTUNE)
 
 
-def load_audio(ds):
+def load_audio(ds, num_prefetch=1):
     """
     Load signal from the 'path' key as WAV file for each element of ds.
+    num_prefetch specifies how many signals to pre-load into main memory to reduce downstream latency.
     """
-    logger.info("Reading audio files from the path of each element and appending the read signals and their sample rates to each element.")
+    logger.info("Reading audio files from the path of each element and appending the read signals and their sample rates to each element. Number of signals to prefetch: %d.", num_prefetch)
     def _append_signals(x):
         signal, sample_rate = audio_features.read_wav(x["path"])
         return dict(x, signal=signal, sample_rate=sample_rate)
-    return ds.map(_append_signals, num_parallel_calls=TF_AUTOTUNE)
+    return (ds.map(_append_signals, num_parallel_calls=TF_AUTOTUNE)
+              .prefetch(num_prefetch))
 
 
 def normalize(ds, config):

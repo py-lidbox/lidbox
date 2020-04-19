@@ -26,7 +26,10 @@ datasets:
 # After loading all metadata, drop invalid wav files and shuffle all files
 post_initialize:
   check_wav_headers: true
-  shuffle_buffer_size: 100000
+  shuffle_buffer_size: 200000
+  # Try to keep 10000 signals in main memory by prefetching them to a buffer
+  # This might reduce latency from file io
+  num_prefetched_signals: 10000
 
 # Pre-processing operations on signals, applied before feature extraction
 pre_process:
