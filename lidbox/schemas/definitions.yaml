@@ -99,6 +99,24 @@ webrtcvad:
       description: 'Minimum non-speech length in milliseconds that can be dropped'
       minimum: 0
 
+rms_vad:
+  description: 'Voice activity detection by mean RMS values'
+  required:
+    - strength
+    - vad_frame_length_ms
+    - min_non_speech_length_ms
+  additionalProperties: false
+  properties:
+    strength:
+      type: number
+      exclusiveMinimum: 0
+    vad_frame_length_ms:
+      type: integer
+      exclusiveMinimum: 0
+    min_non_speech_length_ms:
+      type: integer
+      minimum: 0
+
 features:
   type: object
   description: 'Feature extraction pipeline configuration for all splits'

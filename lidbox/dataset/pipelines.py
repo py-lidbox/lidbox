@@ -62,11 +62,15 @@ def create_dataset(split, labels, init_data, config):
         if "filters" in config["pre_process"]:
             # Drop unwanted signals
             steps.append(Step("apply_filters", {"config": config["pre_process"]["filters"]}))
-        if "webrtcvad" in config["pre_process"]:
+        if "webrtcvad" in config["pre_process"] or "rms_vad" in config["pre_process"]:
             # Voice activity detection
-            steps.extend([
+            if "webrtcvad" in config["pre_process"]:
                 # Compute WebRTC VAD decisions
-                Step("compute_webrtc_vad", config["pre_process"]["webrtcvad"]),
+                steps.append(Step("compute_webrtc_vad", config["pre_process"]["webrtcvad"]))
+            elif "rms_vad" in config["pre_process"]:
+                # Compute VAD decisions by comparing the RMS value of each VAD frame to the mean RMS value over each signal
+                steps.append(Step("compute_rms_vad", config["pre_process"]["rms_vad"]))
+            steps.extend([
                 # Drop non-speech frames using computed decisions
                 Step("apply_vad", {}),
                 # Some signals might contain only non-speech frames

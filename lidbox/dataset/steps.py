@@ -301,14 +301,30 @@ def cache(ds, directory=None, batch_size=1, cache_key=None):
               .unbatch())
 
 
+def compute_rms_vad(ds, strength, vad_frame_length_ms, min_non_speech_length_ms=0):
+    """
+    Compute root mean square based voice activity detection.
+    """
+    logger.info("Computing voice activity detection decisions by mean RMS values on %d ms long windows.\nMinimum length of continuous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
+    def _append_vad_decisions(x):
+        vad_decisions = audio_features.framewise_rms_energy_vad_decisions(
+                x["signal"],
+                x["sample_rate"],
+                vad_frame_length_ms,
+                min_non_speech_ms=min_non_speech_length_ms,
+                strength=strength)
+        return dict(x, vad_is_speech=vad_decisions, vad_frame_length_ms=vad_frame_length_ms)
+    return ds.map(_append_vad_decisions, num_parallel_calls=TF_AUTOTUNE)
+
+
 def compute_webrtc_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_length_ms):
     """
     Compute voice activity detection with WebRTC VAD.
     """
     vad_frame_length_sec = tf.constant(vad_frame_length_ms * 1e-3, tf.float32)
     min_non_speech_frames = tf.constant(min_non_speech_length_ms // vad_frame_length_ms, tf.int32)
-    logger.info("Computing voice activity detection decisions on %d ms long windows.\nMinimum length of continuous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
-    def append_vad_decisions(x):
+    logger.info("Computing voice activity detection decisions with WebRTC VAD on %d ms long windows.\nMinimum length of continuous non-speech segment before it is marked as non-speech is %d ms.", vad_frame_length_ms, min_non_speech_length_ms)
+    def _append_vad_decisions(x):
         signal, sample_rate = x["signal"], x["sample_rate"]
         vad_frame_length = tf.cast(tf.cast(sample_rate, tf.float32) * vad_frame_length_sec, tf.int32)
         frames = tf.signal.frame(signal, vad_frame_length, vad_frame_length, axis=0)
@@ -322,7 +338,7 @@ def compute_webrtc_vad(ds, aggressiveness, vad_frame_length_ms, min_non_speech_l
         vad_decisions = tf.numpy_function(audio_features.numpy_fn_get_webrtcvad_decisions, args, tf.bool)
         vad_decisions = tf.reshape(vad_decisions, [tf.shape(frames)[0]])
         return dict(x, vad_is_speech=vad_decisions, vad_frame_length_ms=vad_frame_length_ms)
-    return ds.map(append_vad_decisions, num_parallel_calls=TF_AUTOTUNE)
+    return ds.map(_append_vad_decisions, num_parallel_calls=TF_AUTOTUNE)
 
 
 def consume(ds, log_interval=-1):
@@ -820,6 +836,7 @@ VALID_STEP_FUNCTIONS = {
     "augment_by_random_resampling": augment_by_random_resampling,
     "augment_prepare": augment_prepare,
     "cache": cache,
+    "compute_rms_vad": compute_rms_vad,
     "compute_webrtc_vad": compute_webrtc_vad,
     "consume": consume,
     "consume_to_tensorboard": consume_to_tensorboard,
