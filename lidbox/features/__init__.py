@@ -23,27 +23,27 @@ def mean_variance_normalization(X, axis=None, normalize_variance=True):
 
 
 @tf.function
-def window_normalization(X, window_len=-1, normalize_variance=True):
+def window_normalization(X, axis=1, window_len=-1, normalize_variance=True):
     """
-    Apply mean and variance normalization on batches of features matrices X with a given window length.
+    Apply mean and variance normalization over the time dimension on batches of features matrices X with a given window length.
     By default normalize over whole tensor, i.e. without a window.
     """
     tf.debugging.assert_rank(X, 3, message="Input to window_normalization should be of shape (batch_size, timedim, channels)")
     output = tf.identity(X)
     if window_len == -1 or tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding window
-        output = mean_variance_normalization(X, axis=1, normalize_variance=normalize_variance)
+        output = mean_variance_normalization(X, axis=axis, normalize_variance=normalize_variance)
     else:
         # Pad boundaries by reflecting at most half of the window contents from X, e.g.
         # Left pad [              X              ] right pad
         # 2, 1, 0, [ 0, 1, 2, ..., N-3, N-2, N-1 ] N-1, N-2, N-3, ...
         padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
         X_padded = tf.pad(X, padding, mode="REFLECT")
-        windows = tf.signal.frame(X_padded, window_len, 1, axis=1)
+        windows = tf.signal.frame(X_padded, window_len, 1, axis=axis)
         tf.debugging.assert_equal(tf.shape(windows)[1], tf.shape(X)[1], message="Mismatching amount of output windows and time steps in the input")
-        output = X - tf.math.reduce_mean(windows, axis=2)
+        output = X - tf.math.reduce_mean(windows, axis=axis+1)
         if normalize_variance:
-            output = tf.math.divide_no_nan(output, tf.math.reduce_std(windows, axis=2))
+            output = tf.math.divide_no_nan(output, tf.math.reduce_std(windows, axis=axis+1))
     return output
 
 
