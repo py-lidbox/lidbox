@@ -154,15 +154,14 @@ def run_training(split2ds, config):
     from lidbox.models.keras_utils import best_model_checkpoint_from_config
     split_conf = config["experiment"]["data"]
     # 1. get the training and validation splits as defined by the user
-    # 2. batch the datasets
-    # 3. drop all dictionary keys and convert each element to (inputs, targets) pairs
-    train_ds = split2ds[split_conf["train"]["split"]]
-    train_ds = (train_ds
-                    .batch(split_conf["train"]["batch_size"])
-                    .apply(lidbox.dataset.steps.as_supervised))
+    # 2. drop all dictionary keys and convert each element to (inputs, targets) pairs
+    # 3. batch the datasets
+    train_ds = (split2ds[split_conf["train"]["split"]]
+            .apply(lidbox.dataset.steps.as_supervised)
+            .batch(split_conf["train"]["batch_size"]))
     validation_ds = (split2ds[split_conf["validation"]["split"]]
-                        .batch(split_conf["validation"]["batch_size"])
-                        .apply(lidbox.dataset.steps.as_supervised))
+            .apply(lidbox.dataset.steps.as_supervised)
+            .batch(split_conf["validation"]["batch_size"]))
     #TODO split
     history = None
     if "user_script" in config:
