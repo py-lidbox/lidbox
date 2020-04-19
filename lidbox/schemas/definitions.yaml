@@ -42,6 +42,7 @@ split:
   type: object
   required:
     - split
+    - batch_size
   additionalProperties: false
   properties:
     split:
@@ -53,6 +54,8 @@ split:
       $ref: '#/definitions/group_by_input_length'
     shuffle_buffer_size:
       $ref: '#/definitions/shuffle_buffer_size'
+    only_full_batches:
+      type: boolean
     evaluate_metrics:
       type: array
       contains:
@@ -421,6 +424,8 @@ pre_process:
       $ref: '#/definitions/filters'
     webrtcvad:
       $ref: '#/definitions/webrtcvad'
+    rms_vad:
+      $ref: '#/definitions/rms_vad'
     chunks:
       $ref: '#/definitions/signal_chunks'
     repeat_too_short_signals:
