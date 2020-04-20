@@ -51,7 +51,7 @@ def create_dataset(split, labels, init_data, config):
         # Assume all features will be extracted from signals
         steps.extend([
             # Load signals from all paths
-            Step("load_audio", {"num_prefetch": config["post_initialize"].get("num_prefetched_signals", 1)}),
+            Step("load_audio", {"num_prefetch": config["post_initialize"].get("num_prefetched_signals")}),
             # Drop empty signals
             Step("drop_empty", {})])
     if "pre_process" in config:

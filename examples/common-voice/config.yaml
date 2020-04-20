@@ -27,9 +27,9 @@ datasets:
 post_initialize:
   check_wav_headers: true
   shuffle_buffer_size: 200000
-  # Try to keep 10000 signals in main memory by prefetching them to a buffer
-  # This might reduce latency from file io
-  num_prefetched_signals: 10000
+  # Try to keep 5000 signals in main memory by prefetching them to a buffer
+  # This might reduce latency from file IO
+  num_prefetched_signals: 5000
 
 # Pre-processing operations on signals, applied before feature extraction
 pre_process:
@@ -58,17 +58,22 @@ pre_process:
     vad_frame_length_ms: 10
     # Do not drop non-speech segments that are shorter than 500 ms
     min_non_speech_length_ms: 500
-  # Alternative VAD:
-  # RMS based VAD, dropping every frame for which rms(frame) <= strength * mean_rms
-  # This is much faster than WebRTC VAD because its done with TF ops
+  # # Alternative VAD:
+  # # RMS based VAD, dropping every frame for which rms(frame) <= strength * mean_rms
+  # # This is much faster than WebRTC VAD because its done with TF ops
   # rms_vad:
-    # strength: 0.1
-    # vad_frame_length_ms: 25
-    # min_non_speech_length_ms: 500
+  #   strength: 0.1
+  #   vad_frame_length_ms: 25
+  #   min_non_speech_length_ms: 500
   # Partition all signals into non-overlapping chunks of 2 second
   chunks:
     length_ms: 2000
     step_ms: 2000
+  cache:
+    directory: ./lidbox-cache
+    batch_size: 100
+    key: signal_chunks
+    log_interval: 10000
 
 # Configuration of the feature extraction pipeline
 features:
@@ -92,14 +97,6 @@ features:
 
 # Post-processing operations on extracted features before training
 post_process:
-  # Persistent cache for extracted features
-  cache:
-    directory: ./lidbox-cache
-    # Store elements in large batches
-    batch_size: 1000
-    # Unique key for naming cache directories to distinguish other caches (if other caches are used)
-    key: logmelspectrogram
-    log_interval: 2000
   # Show 16 first samples of 50 first batches in TensorBoard for inspection
   tensorboard:
     num_batches: 50
