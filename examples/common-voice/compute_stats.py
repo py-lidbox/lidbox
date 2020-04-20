@@ -12,7 +12,7 @@ def modify_steps(steps, split, labels, init_data, config):
     i = [i for i, s in enumerate(steps) if s.key == "compute_webrtc_vad"][-1]
     # Compute frequency of dropped and kept frames by the VAD decisions
     steps.insert(i + 1, Step("reduce_stats", {"statistic": "vad_ratio"}))
-    # Find the step where features are cached
+    # Find the step where features are extracted
     i = [i for i, s in enumerate(steps) if s.key == "extract_features"][-1]
     # Compute frequency of NaN and inf values in the features
     steps.insert(i + 1, Step("reduce_stats", {"statistic": "num_non_finite", "key": "input", "axis": [1, 2], "batch_size": batch_size}))
