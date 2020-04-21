@@ -27,6 +27,11 @@ def create_dataset(split, labels, init_data, config):
     config:
         Contents of the lidbox config file, unmodified.
     """
+    if "post_initialize" in config and config["post_initialize"].get("shuffle_utterances", False):
+        index2id = list(enumerate(init_data["path"]))
+        from random import shuffle
+        shuffle(index2id)
+        init_data = {k: [v[i] for i, _ in index2id] for k, v in init_data.items()}
     # Configure steps to create dataset iterator
     steps = [
         # Create a tf.data.Dataset that contains all metadata, e.g. paths from utt2path and labels from utt2label etc.
@@ -51,7 +56,7 @@ def create_dataset(split, labels, init_data, config):
         # Assume all features will be extracted from signals
         steps.extend([
             # Load signals from all paths
-            Step("load_audio", {"num_prefetch": config["post_initialize"].get("num_prefetched_signals")}),
+            Step("load_audio", {"num_prefetch": config.get("post_initialize", {"num_prefetched_signals": None})["num_prefetched_signals"]}),
             # Drop empty signals
             Step("drop_empty", {})])
     if "pre_process" in config:

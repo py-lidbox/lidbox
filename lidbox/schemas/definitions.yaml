@@ -554,10 +554,15 @@ post_initialize:
   properties:
     shuffle_buffer_size:
       $ref: '#/definitions/shuffle_buffer_size'
+    shuffle_utterances:
+      type: boolean
     binary_classification:
       type: string
     file_limit:
       type: integer
+    num_prefetched_signals:
+      type: integer
+      minimum: 0
     check_wav_headers:
       type: boolean
 
