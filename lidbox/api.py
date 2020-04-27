@@ -219,6 +219,31 @@ def format_confusion_matrix(cm, labels):
     return '\n'.join(cm_lines)
 
 
+def zip_and_sort_utt2vector(ds, vectors):
+    def _id_only(x):
+        return x["id"]
+    #TODO it's unnecessary to evaluate the full pipeline (e.g. extract features twice)
+    ids = [uttid.decode("utf-8") for uttid in ds.map(_id_only).as_numpy_iterator()]
+    if vectors.shape[0] != len(ids):
+        logger.error("Cannot combine %d ids with %d vectors", len(ids), vectors.shape[0])
+        return
+    return sorted(zip(ids, vectors), key=lambda t: t[0])
+
+
+def extract_embeddings(dataset, config, batch_size=128):
+    keras_wrapper = KerasWrapper.from_config(config)
+    logger.info("Model initialized:\n%s", str(keras_wrapper))
+    best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
+    logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
+    keras_wrapper.load_weights(best_checkpoint)
+    keras_wrapper.to_embedding_extractor()
+    logger.info("Extracting embeddings with model '%s' in batches of %d", keras_wrapper.model_key, batch_size)
+    embeddings = keras_wrapper.keras_model.predict(
+            dataset.batch(batch_size).apply(lidbox.dataset.steps.as_supervised))
+    logger.info("Model returned embeddings of shape %s, combining vectors with utterance ids", repr(embeddings.shape))
+    return zip_and_sort_utt2vector(dataset, embeddings)
+
+
 #TODO simplify and divide into manageable pieces
 #TODO check user script before calling this
 def evaluate_test_set(split2ds, split2meta, labels, config):
@@ -244,10 +269,14 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         keras_wrapper.load_weights(best_checkpoint)
         logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
         predictions = keras_wrapper.keras_model.predict(test_ds)
-    logger.info("Model returned predictions of shape %s, now gathering all test set ids", repr(predictions.shape))
-    test_ids = [x["id"].decode("utf-8") for x in split2ds[test_conf["split"]].as_numpy_iterator()]
-    utt2prediction = sorted(zip(test_ids, predictions), key=lambda t: t[0])
-    del test_ids
+    logger.info("Model returned predictions of shape %s, now combining predictions with correct utterance ids.", repr(predictions.shape))
+    utt2prediction = zip_and_sort_utt2vector(split2ds[test_conf["split"]], predictions)
+    if predictions.shape[1] > len(labels):
+        logger.warning(
+                "The model predicted %d labels when %d correct labels were expected. All predictions are sliced up to index %d.",
+                predictions.shape[1], len(labels), len(labels))
+        utt2prediction = [(u, p[:len(labels)]) for u, p in utt2prediction]
+        predictions = np.stack([p for _, p in utt2prediction])
     has_chunks = False
     if "chunks" in config.get("pre_process", {}):
         logger.info("Original signals were divided into chunks, merging chunk scores by averaging")
@@ -257,7 +286,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         has_chunks = True
     if has_chunks:
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
-        predictions = np.array([p for _, p in utt2prediction])
+        predictions = np.stack([p for _, p in utt2prediction])
     # Collect targets from the test set iterator
     test_meta_ds = lidbox.dataset.steps.initialize(None, labels, split2meta[test_conf["split"]])
     utt2target = {x["id"].decode("utf-8"): x["target"] for x in test_meta_ds.as_numpy_iterator()}
@@ -266,20 +295,20 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     max_score = np.amax(predictions)
     if missed_utterances:
         logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
-        utt2prediction.extend([(utt, np.array([min_score for _ in labels])) for utt in sorted(missed_utterances)])
+        utt2prediction.extend([(utt, np.array(len(labels) * [min_score])) for utt in sorted(missed_utterances)])
     scores_file = os.path.join(
             lidbox.models.keras_utils.experiment_cache_from_config(config),
             "predictions",
             "scores")
     os.makedirs(os.path.dirname(scores_file), exist_ok=True)
-    logger.info("Writing predicted scores to '%s'", scores_file)
+    logger.info("Writing predicted scores of shape %s to '%s'", predictions.shape, scores_file)
     if os.path.exists(scores_file):
         logger.warning("Overwriting existing '%s'", scores_file)
     with open(scores_file, "w") as scores_f:
         print_predictions(utt2prediction, labels, file=scores_f)
     metric_results = []
     # Ensure true labels are always in the same order as in predictions
-    predictions = np.array([p for _, p in utt2prediction])
+    predictions = np.stack([p for _, p in utt2prediction])
     true_labels_sparse = np.array([utt2target[u] for u, _ in utt2prediction])
     pred_labels_sparse = np.argmax(predictions, axis=1)
     logger.info("Evaluating metrics on true labels of shape %s and predicted labels of shape %s", true_labels_sparse.shape, pred_labels_sparse.shape)

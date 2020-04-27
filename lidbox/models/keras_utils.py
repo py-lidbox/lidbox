@@ -155,6 +155,12 @@ class KerasWrapper:
         self.keras_model.save(model_path, overwrite=True)
         return model_path
 
+    #TODO currently hardcoded for x-vector
+    def to_embedding_extractor(self, embedding_layer_name="segment1"):
+        embedding_layer = self.keras_model.get_layer(name=embedding_layer_name)
+        embedding_layer.activation = None
+        self.keras_model = tf.keras.models.Model(inputs=self.keras_model.inputs, outputs=embedding_layer.output)
+
     def load_weights(self, path):
         self.initial_epoch = int(parse_checkpoint_value(path, key="epoch"))
         self.keras_model.load_weights(path)
