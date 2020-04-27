@@ -1,3 +1,8 @@
+"""
+Dataset steps are functions that can be applied on tf.data.Dataset instances using tf.data.Dataset.apply.
+They are designed to do as much constant time pre-processing as possible when called, but do not evaluate the given dataset, except for some 'consume' and 'debug' steps.
+See lidbox.dataset.pipelines.create_dataset for creating an end-to-end tf.data.Dataset pipeline from metadata.
+"""
 import collections
 import io
 import logging

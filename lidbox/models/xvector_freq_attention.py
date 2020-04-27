@@ -18,8 +18,7 @@ import tensorflow as tf
 
 def loader(input_shape, num_outputs, output_activation="log_softmax", freq_attention_bins=60):
     inputs = Input(shape=input_shape, name="input")
-    x = inputs
-    x = FrameLayer(512, 5, 1, name="frame1")(x)
+    x = FrameLayer(512, 5, 1, name="frame1")(inputs)
     x = FrameLayer(512, 3, 2, name="frame2")(x)
     x = FrameLayer(512, 3, 3, name="frame3")(x)
     x = FrameLayer(512, 1, 1, name="frame4")(x)
