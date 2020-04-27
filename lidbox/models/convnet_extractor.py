@@ -17,7 +17,7 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 
-def loader(input_shape, num_outputs, core="resnet50_v2", output_activation="log_softmax", channel_dropout_rate=0):
+def loader(input_shape, num_outputs, core="resnet50_v2", embedding_dim=512, output_activation="log_softmax", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     if channel_dropout_rate > 0:
@@ -31,7 +31,8 @@ def loader(input_shape, num_outputs, core="resnet50_v2", output_activation="log_
     # Embedding layer with timesteps
     rows, cols, channels = convnet.output.shape[1:]
     x = Reshape((rows or -1, cols * channels), name="flatten_channels")(convnet.output)
-    x = Dense(128, activation="sigmoid", name="embedding")(x)
+    x = Dense(embedding_dim, activation=None, name="embedding")(x)
+    x = Activation("relu", name="embedding_relu")(x)
     x = BatchNormalization(name="embedding_bn")(x)
     # Pooling and output
     x = GlobalAveragePooling1D(name="timesteps_pooling")(x)

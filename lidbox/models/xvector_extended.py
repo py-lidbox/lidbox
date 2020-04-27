@@ -6,6 +6,7 @@ url: https://pdfs.semanticscholar.org/00a4/e57e9189162dc9875a1cdca527711f373b53.
 from tensorflow.keras.layers import (
     Activation,
     Dense,
+    Dropout,
     Input,
 )
 from tensorflow.keras.models import Model
@@ -32,7 +33,7 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     x = FrameLayer(512, 3, 4, name="frame7")(x)
     x = FrameLayer(512, 1, 1, name="frame8")(x)
     x = FrameLayer(512, 1, 1, name="frame9")(x)
-    x = FrameLayer(512, 1, 1, name="frame10")(x)
+    x = FrameLayer(1500, 1, 1, name="frame10")(x)
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
     x = SegmentLayer(512, name="segment1")(x)
     x = SegmentLayer(512, name="segment2")(x)
