@@ -48,6 +48,39 @@ def from_steps(steps):
     return ds
 
 
+def pre_initialize(meta, config, labels):
+    index2id = list(enumerate(meta["id"]))
+    modified = False
+    if not config.get("allow_unknown_labels", False):
+        logger.info("'allow_unknown_labels' is False, dropping all utterances which are not in the set of all labels.")
+        all_labels = set(labels)
+        label2invalid = collections.defaultdict(list)
+        for i, u in index2id:
+            l = meta["label"][i]
+            if l not in all_labels:
+                label2invalid[l].append(u)
+        if label2invalid:
+            logger.warning(
+                    "%d invalid labels were found, with amount of utterances per label:\n  %s",
+                    len(label2invalid),
+                    "\n  ".join("{:12s}: {:12d}".format(l, len(u)) for l, u in label2invalid.items()))
+            invalid_utts = {u for utts in label2invalid.values() for u in utts}
+            logger.info("Dropping %d invalid utterances.", len(invalid_utts))
+            index2id = [(i, u) for i, u in index2id if u not in invalid_utts]
+            modified = True
+        else:
+            logger.info("All utterances have valid labels.")
+    if config.get("shuffle_utterances", False):
+        logger.info("'shuffle_utterances' is True, shuffling utterance id list.")
+        from random import shuffle
+        shuffle(index2id)
+        modified = True
+    if modified:
+        logger.info("Utterance id list was modified, updating all metadata to ensure correct order.")
+        meta = {k: [v[i] for i, _ in index2id] for k, v in meta.items()}
+    return meta
+
+
 def _feature_extraction_kwargs_to_args(config):
     valid_args = [
         "type",

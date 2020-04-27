@@ -237,6 +237,8 @@ cache:
       exclusiveMinimum: 0
     key:
       type: string
+    consume:
+      type: boolean
     log_interval:
       type: integer
       exclusiveMinimum: 0
@@ -547,6 +549,16 @@ signal_chunks:
       description: 'Maximum amount of padding in milliseconds that can be added to the last chunk of each utterance in order to make one more chunk of length length_ms'
       minimum: 0
 
+pre_initialize:
+  type: object
+  description: 'Update metadata before creating dataset iterator'
+  additionalProperties: false
+  properties:
+    shuffle_utterances:
+      type: boolean
+    allow_unknown_labels:
+      type: boolean
+
 post_initialize:
   type: object
   description: 'Pre-pre-process configuration of the metadata iterator'
@@ -554,8 +566,6 @@ post_initialize:
   properties:
     shuffle_buffer_size:
       $ref: '#/definitions/shuffle_buffer_size'
-    shuffle_utterances:
-      type: boolean
     binary_classification:
       type: string
     file_limit:

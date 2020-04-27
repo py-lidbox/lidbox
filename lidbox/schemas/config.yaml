@@ -10,6 +10,8 @@ properties:
     minItems: 1
     contains:
       $ref: '#/definitions/dataset'
+  pre_initialize:
+    $ref: '#/definitions/pre_initialize'
   post_initialize:
     $ref: '#/definitions/post_initialize'
   user_script:

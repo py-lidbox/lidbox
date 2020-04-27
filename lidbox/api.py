@@ -55,6 +55,10 @@ def create_datasets(split2meta, labels, config):
     split2ds = {}
     for split, split_meta in split2meta.items():
         logger.info("Creating dataset iterator for split '%s' with metadata containing %d keys", split, len(split_meta))
+        if "pre_initialize" in config:
+            logger.info("'pre_initialize' defined in config, updating metadata before creating dataset iterator.")
+            from lidbox.dataset.steps import pre_initialize
+            split_meta = pre_initialize(split_meta, config["pre_initialize"], labels)
         args = split, labels, split_meta, config
         steps = create_dataset(*args)
         steps = modify_steps(steps, *args)
