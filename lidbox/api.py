@@ -211,7 +211,8 @@ def format_confusion_matrix(cm, labels):
     labels_padded = [label_format.format(l) for l in labels]
     num_pred_labels = cm.sum(axis=0)
     num_true_labels = cm.sum(axis=1)
-    cm_lines = str(cm).splitlines()
+    str_max_len = np.iinfo(cm.dtype).max
+    cm_lines = np.array2string(cm, threshold=str_max_len, max_line_width=str_max_len).splitlines()
     cm_lines = [label + " " + cm_line + " " + str(num_true)
                 for label, cm_line, num_true in zip(labels_padded, cm_lines, num_true_labels)]
     cm_lines = [label_format.format('') + ' '.join(labels)] + cm_lines
