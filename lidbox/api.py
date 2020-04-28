@@ -278,14 +278,12 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
                 predictions.shape[1], len(labels), len(labels))
         utt2prediction = [(u, p[:len(labels)]) for u, p in utt2prediction]
         predictions = np.stack([p for _, p in utt2prediction])
-    has_chunks = False
-    if "chunks" in config.get("pre_process", {}):
-        logger.info("Original signals were divided into chunks, merging chunk scores by averaging")
-        has_chunks = True
     if "chunks" in config.get("post_process", {}):
-        logger.info("Extracted features were divided into chunks, merging chunk scores by averaging")
-        has_chunks = True
-    if has_chunks:
+        logger.info("Extracted features were divided into chunks, merging feature chunk scores by averaging")
+        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
+        predictions = np.stack([p for _, p in utt2prediction])
+    if "chunks" in config.get("pre_process", {}):
+        logger.info("Original signals were divided into chunks, merging signal chunk scores by averaging")
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
         predictions = np.stack([p for _, p in utt2prediction])
     # Collect targets from the test set iterator
@@ -313,6 +311,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
     true_labels_sparse = np.array([utt2target[u] for u, _ in utt2prediction])
     pred_labels_sparse = np.argmax(predictions, axis=1)
     logger.info("Evaluating metrics on true labels of shape %s and predicted labels of shape %s", true_labels_sparse.shape, pred_labels_sparse.shape)
+    #TODO move to separate function and allow batches
     for metric in test_conf["evaluate_metrics"]:
         result = None
         if metric["name"].endswith("average_detection_cost"):
