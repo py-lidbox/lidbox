@@ -220,15 +220,21 @@ def format_confusion_matrix(cm, labels):
     return '\n'.join(cm_lines)
 
 
-def zip_and_sort_utt2vector(ds, vectors):
+def zip_utt2vector(ds, vectors):
     def _id_only(x):
         return x["id"]
     #TODO it's unnecessary to evaluate the full pipeline (e.g. extract features twice)
     ids = [uttid.decode("utf-8") for uttid in ds.map(_id_only).as_numpy_iterator()]
     if vectors.shape[0] != len(ids):
         logger.error("Cannot combine %d ids with %d vectors", len(ids), vectors.shape[0])
-        return
-    return sorted(zip(ids, vectors), key=lambda t: t[0])
+        return []
+    return zip(ids, vectors)
+
+
+def collect_targets(labels, meta):
+    meta_ds = lidbox.dataset.steps.initialize(None, labels, meta)
+    for x in meta_ds.as_numpy_iterator():
+        yield x["id"].decode("utf-8"), x["target"]
 
 
 def extract_embeddings(dataset, config, batch_size=128):
@@ -242,7 +248,7 @@ def extract_embeddings(dataset, config, batch_size=128):
     embeddings = keras_wrapper.keras_model.predict(
             dataset.batch(batch_size).apply(lidbox.dataset.steps.as_supervised))
     logger.info("Model returned embeddings of shape %s, combining vectors with utterance ids", repr(embeddings.shape))
-    return zip_and_sort_utt2vector(dataset, embeddings)
+    return zip_utt2vector(dataset, embeddings)
 
 
 #TODO simplify and divide into manageable pieces
@@ -271,7 +277,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
         predictions = keras_wrapper.keras_model.predict(test_ds)
     logger.info("Model returned predictions of shape %s, now combining predictions with correct utterance ids.", repr(predictions.shape))
-    utt2prediction = zip_and_sort_utt2vector(split2ds[test_conf["split"]], predictions)
+    utt2prediction = sorted(zip_utt2vector(split2ds[test_conf["split"]], predictions), key=lambda t: t[0])
     if predictions.shape[1] > len(labels):
         logger.warning(
                 "The model predicted %d labels when %d correct labels were expected. All predictions are sliced up to index %d.",
@@ -287,8 +293,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
         predictions = np.stack([p for _, p in utt2prediction])
     # Collect targets from the test set iterator
-    test_meta_ds = lidbox.dataset.steps.initialize(None, labels, split2meta[test_conf["split"]])
-    utt2target = {x["id"].decode("utf-8"): x["target"] for x in test_meta_ds.as_numpy_iterator()}
+    utt2target = dict(collect_targets(labels, split2meta[test_conf["split"]]))
     missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
     min_score = np.amin(predictions)
     max_score = np.amax(predictions)
