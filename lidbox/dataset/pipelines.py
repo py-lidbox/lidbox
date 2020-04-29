@@ -13,7 +13,8 @@ def _get_cache_steps(config, split):
             "cache_key": config.get("key"),
             "batch_size": config["batch_size"]}
     yield Step("cache", cache_config)
-    yield Step("consume", {"log_interval": config.get("log_interval", -1)})
+    if config.get("consume", True):
+        yield Step("consume", {"log_interval": config.get("log_interval", -1)})
 
 
 def create_dataset(split, labels, init_data, config):
