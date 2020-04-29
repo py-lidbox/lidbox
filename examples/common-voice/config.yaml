@@ -23,10 +23,15 @@ datasets:
           - utt2path
           - utt2label
 
-# After loading all metadata, drop invalid wav files and shuffle all files
+# Modifying the loaded metadata
+pre_initialize:
+  # Shuffle metadata before reading wav files
+  shuffle_utterances: true
+
+# Pre-pre processing, after all metadata has been loaded into a dataset instance
 post_initialize:
+  # Check header of each wav file and drop all non-wav files
   check_wav_headers: true
-  shuffle_buffer_size: 200000
   # Try to keep 5000 signals in main memory by prefetching them to a buffer
   # This might reduce latency from file IO
   num_prefetched_signals: 5000
@@ -42,7 +47,7 @@ pre_process:
   repeat_too_short_signals:
     min_length_ms: 2000
   # Create new training set signals by naive speed modifications
-  # NOTE resampling requires tensorflow-io-nightly
+  # NOTE random_resampling requires tensorflow-io-nightly
   # augment:
     # - type: random_resampling
       # split: train
@@ -60,25 +65,30 @@ pre_process:
     min_non_speech_length_ms: 500
   # # Alternative VAD:
   # # RMS based VAD, dropping every frame for which rms(frame) <= strength * mean_rms
-  # # This is much faster than WebRTC VAD because its done with TF ops
+  # # This is much faster than WebRTC VAD because its done with TF ops,
+  # # but high energy non-speech signals will be counted as speech
   # rms_vad:
   #   strength: 0.1
   #   vad_frame_length_ms: 25
   #   min_non_speech_length_ms: 500
-  # Partition all signals into non-overlapping chunks of 2 second
+  # Partition all signals into chunks of 2 second, overlapping by 0.5 seconds
   chunks:
     length_ms: 2000
-    step_ms: 2000
+    step_ms: 1500
+  # Serialize all pre-processed, 2 second signal chunks into a single binary file to avoid
+  # repeated file IO from reading wav files
   cache:
     directory: ./lidbox-cache
     batch_size: 100
     key: signal_chunks
     log_interval: 10000
+    # consume: false
 
 # Configuration of the feature extraction pipeline
 features:
   # How many signals to process in one batch.
-  # This is quite conservative, increasing this might help increase CPU or GPU usage
+  # This is quite conservative,
+  # if memory usage is low, increasing this might help increase CPU or GPU usage
   batch_size: 200
   # Configuration for 1024-point STFT and log-scale Mel-spectrograms (or Mel filter banks)
   type: logmelspectrogram
@@ -90,9 +100,9 @@ features:
     num_mel_bins: 64
     fmin: 20
     fmax: 7000
-  # Mean-normalization with sliding window over 100 feature frames (i.e. 1 second with 10 ms frame step)
+  # Center all frequency channels to zero mean within each 2 second signal chunk, leave variances untouched
   window_normalization:
-    window_len: 100
+    window_len: -1
     normalize_variance: false
 
 # Post-processing operations on extracted features before training
@@ -101,6 +111,13 @@ post_process:
   tensorboard:
     num_batches: 50
     batch_size: 16
+  # Cache extracted features into /tmp after first epoch
+  # NOTE be careful with large datasets if you have mounted /tmp to RAM
+  cache:
+    directory: /tmp/tensorflow-features/xvector
+    batch_size: 100
+    key: logmelspectrogram
+    consume: false
 
 # Experiment configuration for training a model
 experiment:
@@ -114,7 +131,7 @@ experiment:
   optimizer:
     cls: Adam
     kwargs:
-      learning_rate: 0.0001
+      learning_rate: 0.00001
   callbacks:
     - cls: TensorBoard
     - cls: ModelCheckpoint
@@ -146,10 +163,10 @@ experiment:
       shuffle_buffer_size: 10000
     validation:
       split: test
-      batch_size: 16
+      batch_size: 64
     test:
       split: test
-      batch_size: 16
+      batch_size: 64
       evaluate_metrics:
         - name: sparse_average_detection_cost
         - name: sklearn_classification_report
