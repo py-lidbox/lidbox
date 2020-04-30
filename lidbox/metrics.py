@@ -56,7 +56,7 @@ class AverageDetectionCost(tf.keras.metrics.Metric):
         label_indices = tf.expand_dims(tf.math.argmax(true_positives, axis=-1), -1)
         true_positives = tf.expand_dims(true_positives, -1)
         true_negatives = tf.cast(~tf.cast(true_positives, tf.bool), tf.float32)
-        predictions = tf.expand_dims(predictions, -1)
+        predictions = tf.expand_dims(tf.cast(predictions, tf.float32), -1)
         pred_positives = tf.cast(predictions >= self.thresholds, tf.float32)
         pred_negatives = tf.cast(predictions < self.thresholds, tf.float32)
         # Update false negative counters for P_miss
@@ -115,7 +115,7 @@ class SparseAverageDetectionCost(AverageDetectionCost):
 
     def update_state(self, true_positives, predictions, **kwargs):
         N = tf.shape(self.fn)[0]
-        true_positives_dense = tf.one_hot(tf.cast(tf.squeeze(true_positives, -1), tf.int32), N)
+        true_positives_dense = tf.one_hot(tf.cast(true_positives, tf.int32), N)
         super().update_state(true_positives_dense, predictions, **kwargs)
 
 
