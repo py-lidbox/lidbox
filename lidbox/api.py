@@ -243,12 +243,13 @@ def extract_embeddings(dataset, config, batch_size=128):
     best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
     logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
     keras_wrapper.load_weights(best_checkpoint)
+    # Drop all layers after the embedding layer, making the embedding layer the new output layer
     keras_wrapper.to_embedding_extractor()
     logger.info("Extracting embeddings with model '%s' in batches of %d", keras_wrapper.model_key, batch_size)
-    embeddings = keras_wrapper.keras_model.predict(
-            dataset.batch(batch_size).apply(lidbox.dataset.steps.as_supervised))
-    logger.info("Model returned embeddings of shape %s, combining vectors with utterance ids", repr(embeddings.shape))
-    return zip_utt2vector(dataset, embeddings)
+    # Not the most efficient way to predict from a tf.data.Dataset, but we want to make sure the metadata of output predictions matches the input
+    for batch in dataset.batch(batch_size).as_numpy_iterator():
+        embeddings = keras_wrapper.keras_model.predict_on_batch(batch["input"])
+        yield batch, embeddings
 
 
 #TODO simplify and divide into manageable pieces
