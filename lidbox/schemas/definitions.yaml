@@ -222,10 +222,12 @@ features:
           exclusiveMinimum: 0
         normalize_variance:
           type: boolean
+    tf_device:
+      type: string
 
 cache:
   type: object
-  description: 'Persistent cache'
+  description: 'Persistent cache on disk'
   required:
     - directory
   additionalProperties: false
@@ -303,12 +305,7 @@ experiment:
         type: integer
         minimum: 0
     input_shape:
-      type: array
-      contains:
-        anyOf:
-          - type: integer
-            minimum: 0
-          - type: 'null'
+      $ref: '#/definitions/shape'
     loss:
       type: object
       description: 'Keras loss function'
@@ -350,6 +347,23 @@ experiment:
         type: object
         required:
           - cls
+
+embeddings:
+  type: object
+  description: 'Extracting embeddings with trained model'
+  required:
+    - extractor
+  additionalProperties: false
+  properties:
+    extractor:
+      $ref: '#/definitions/embedding_extractor'
+    cache:
+      $ref: '#/definitions/cache'
+    tf_device:
+      type: string
+    batch_size:
+      type: integer
+      exclusiveMinimum: 0
 
 post_process:
   type: object
@@ -579,3 +593,35 @@ post_initialize:
 shuffle_buffer_size:
   type: integer
   exclusiveMinimum: 0
+
+embedding_extractor:
+  type: object
+  required:
+    - model
+    - experiment_name
+    - cache_directory
+    - input_shape
+    - output_shape
+  additionalProperties: false
+  properties:
+    cache_directory:
+      type: string
+    output_shape:
+      type: array
+      contains:
+        type: integer
+        minimum: 0
+    input_shape:
+      $ref: '#/definitions/shape'
+    model:
+      type: object
+      required:
+        - key
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        kwargs:
+          type: object
+    name:
+      type: string

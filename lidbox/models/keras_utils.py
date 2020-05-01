@@ -76,6 +76,12 @@ def init_callback_from_config(config, cache_dir):
     return callback
 
 
+def as_xvector_extractor(keras_model, embedding_layer_name="segment1"):
+    embedding_layer = keras_model.get_layer(name=embedding_layer_name)
+    embedding_layer.activation = None
+    return tf.keras.models.Model(inputs=keras_model.inputs, outputs=embedding_layer.dense.output)
+
+
 class LearningRateDateLogger(tf.keras.callbacks.Callback):
     def __init__(self, output_stream=sys.stdout, **kwargs):
         self.output_stream = output_stream
@@ -144,6 +150,31 @@ class KerasWrapper:
         callbacks = [init_callback_from_config(c, experiment_cache) for c in config["experiment"].get("callbacks", [])]
         return cls(keras_model, model_key, callbacks)
 
+    @classmethod
+    def from_config_as_embedding_extractor_fn(cls, config):
+        experiment_cache = experiment_cache_from_config({"experiment":
+            {"cache_directory": config["cache_directory"],
+             "model": config["model"],
+             "name": config["experiment_name"]}})
+        model_key = config["model"]["key"]
+        model_module = importlib.import_module(MODELS_IMPORT_PATH + model_key)
+        input_shape = config["input_shape"]
+        output_shape = tf.squeeze(config["output_shape"])
+        loader_kwargs = config["model"].get("kwargs", {})
+        keras_model = model_module.loader(input_shape, output_shape, **loader_kwargs)
+        keras_model.load_weights(cls.get_best_checkpoint_path(
+            os.path.join(experiment_cache, "checkpoints"),
+            key=config["best_checkpoint"]["monitor"],
+            mode=config["best_checkpoint"]["mode"]))
+        as_extractor = getattr(model_module, "as_embedding_extractor", as_xvector_extractor)
+        keras_model = as_extractor(keras_model)
+        keras_model.trainable = False
+        model_input = keras_model.inputs[0]
+        extractor_fn = tf.function(
+                lambda x: keras_model(x, training=False),
+                input_signature=[tf.TensorSpec(model_input.shape, model_input.dtype)])
+        return extractor_fn.get_concrete_function()
+
     def __init__(self, keras_model, model_key, callbacks):
         self.model_key = model_key
         self.keras_model = keras_model
@@ -154,12 +185,6 @@ class KerasWrapper:
         model_path = self.get_model_filepath(basedir, self.model_key)
         self.keras_model.save(model_path, overwrite=True)
         return model_path
-
-    #TODO currently hardcoded for x-vector
-    def to_embedding_extractor(self, embedding_layer_name="segment1"):
-        embedding_layer = self.keras_model.get_layer(name=embedding_layer_name)
-        embedding_layer.activation = None
-        self.keras_model = tf.keras.models.Model(inputs=self.keras_model.inputs, outputs=embedding_layer.output)
 
     def load_weights(self, path):
         self.initial_epoch = int(parse_checkpoint_value(path, key="epoch"))

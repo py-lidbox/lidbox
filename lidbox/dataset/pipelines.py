@@ -134,9 +134,14 @@ def create_dataset(split, labels, init_data, config):
             steps.extend(_get_cache_steps(config["post_process"]["cache"], split))
     # TODO convert to binary classification here
     # TODO pre_training config key
-    # Check this split should be shuffled before training
-    for experiment_conf in config["experiment"]["data"].values():
-        if experiment_conf["split"] == split and "shuffle_buffer_size" in experiment_conf:
-            steps.append(Step("shuffle", {"buffer_size": experiment_conf["shuffle_buffer_size"]}))
-            break
+    if "experiment" in config:
+        # Check this split should be shuffled before training
+        for experiment_conf in config["experiment"]["data"].values():
+            if experiment_conf["split"] == split and "shuffle_buffer_size" in experiment_conf:
+                steps.append(Step("shuffle", {"buffer_size": experiment_conf["shuffle_buffer_size"]}))
+                break
+    if "embeddings" in config:
+        steps.append(Step("extract_embeddings", {"config": config["embeddings"]}))
+        if "cache" in config["embeddings"]:
+            steps.extend(_get_cache_steps(config["embeddings"]["cache"], split))
     return steps

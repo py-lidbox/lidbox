@@ -104,6 +104,15 @@ def _element_shapes_dict(x):
 def _dict_to_logstring(d):
     return "\n  ".join("{}: {}".format(k, p) for k, p in d.items())
 
+def _get_device_or_default(config):
+    tf_device = "/CPU:0"
+    gpu_devices = tf.config.experimental.list_physical_devices("GPU")
+    if "device" in config:
+        tf_device = config["device"]
+    elif gpu_devices:
+        tf_device = "/GPU:0"
+    return tf_device
+
 
 def append_predictions(ds, predictions):
     """
@@ -561,6 +570,26 @@ def drop_invalid_wavs(ds):
               .map(_drop_flag, num_parallel_calls=TF_AUTOTUNE))
 
 
+def extract_embeddings(ds, config):
+    """
+    Use a trained keras model instance to extract embeddings to key 'embedding' from key 'input' of each element in ds.
+    """
+    from lidbox.models.keras_utils import KerasWrapper
+    tf_device = _get_device_or_default(config)
+    logger.info("Extracting embeddings on device '%s'", tf_device)
+    extractor_fn = KerasWrapper.from_config_as_embedding_extractor_fn(config["extractor"])
+    logger.info("Using extractor %s", extractor_fn.graph)
+    def _append_embeddings(x):
+        with tf.device(tf_device):
+            return dict(x, embedding=extractor_fn(x["input"]))
+    batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
+    logger.info("Batching signals with batch size %s, extracting embeddings in batches.", batch_size.numpy())
+    return (ds.batch(batch_size)
+              .prefetch(TF_AUTOTUNE)
+              .map(_append_embeddings, num_parallel_calls=TF_AUTOTUNE)
+              .unbatch())
+
+
 def extract_features(ds, config):
     """
     Extract features from signals of each element in ds and add them under 'input' key to each element.
@@ -568,16 +597,10 @@ def extract_features(ds, config):
     """
     feature_type = tf.constant(config["type"], tf.string)
     args = _feature_extraction_kwargs_to_args(config)
-    gpu_devices = tf.config.experimental.list_physical_devices("GPU")
-    if "device" in config:
-        tf_device = config["device"]
-    elif gpu_devices:
-        tf_device = "/GPU:0"
-    else:
-        tf_device = "/CPU:0"
+    tf_device = _get_device_or_default(config)
     logger.info("Extracting '%s' features on device '%s' with arguments:\n  %s", config["type"], tf_device, "\n  ".join(repr(a) for a in args[1:]))
 
-    def append_features(x):
+    def _append_features(x):
         with tf.device(tf_device):
             features = tf_utils.extract_features(x["signal"], x["sample_rate"], *args)
         feature_types = tf.repeat(feature_type, tf.shape(features)[0])
@@ -592,7 +615,7 @@ def extract_features(ds, config):
         logger.info("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
         ds = ds.batch(batch_size)
     return (ds.prefetch(TF_AUTOTUNE)
-              .map(append_features, num_parallel_calls=TF_AUTOTUNE)
+              .map(_append_features, num_parallel_calls=TF_AUTOTUNE)
               .unbatch())
 
 
@@ -887,6 +910,7 @@ VALID_STEP_FUNCTIONS = {
     "create_signal_chunks": create_signal_chunks,
     "drop_empty": drop_empty,
     "drop_invalid_wavs": drop_invalid_wavs,
+    "extract_embeddings": extract_embeddings,
     "extract_features": extract_features,
     "filter_keys_in_set": filter_keys_in_set,
     "group_by_axis_length": group_by_axis_length,

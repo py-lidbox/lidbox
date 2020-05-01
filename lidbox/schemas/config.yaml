@@ -24,3 +24,5 @@ properties:
     $ref: '#/definitions/post_process'
   experiment:
     $ref: '#/definitions/experiment'
+  embeddings:
+    $ref: '#/definitions/embeddings'
