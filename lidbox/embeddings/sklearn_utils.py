@@ -17,6 +17,9 @@ import lidbox.metrics
 
 logger = logging.getLogger("sklearn_utils")
 
+categorical_cmap = colorcet.glasbey_category10
+plt.rcParams["font.size"] = 28
+
 
 class PLDA(PLDAClassifier):
     def transform(self, X):
@@ -29,18 +32,21 @@ class PLDA(PLDAClassifier):
 
 def pca_scatterplot_by_label(label2sample, pca):
     assert pca.n_components in (2, 3), "PCA plot with n_components = %d not implemented, must be 2 or 3".format(pca.n_components)
+    scatter_kw = dict(s=100, alpha=0.7)
     if pca.n_components == 2:
         fig, ax = plt.subplots(figsize=(20, 20))
-        for (label, vecs), color in zip(label2sample.items(), colorcet.glasbey_bw):
+        for (label, vecs), color in zip(label2sample.items(), categorical_cmap):
             vecs = pca.transform(vecs)
-            ax.scatter(vecs[:,0], vecs[:,1], c=[color], alpha=0.8, edgecolors='none', label=label)
-        ax.set_frame_on(False)
+            ax.scatter(vecs[:,0], vecs[:,1], c=[color], label=label, edgecolors='none', **scatter_kw)
+            ax.set_title("PCA 2-dim")
+        # ax.set_frame_on(False)
     else:
-        fig = plt.figure()
+        fig = plt.figure(figsize=(20, 20))
         ax = Axes3D(fig)
-        for (label, vecs), color in zip(label2sample.items(), colorcet.glasbey_bw):
+        for (label, vecs), color in zip(label2sample.items(), categorical_cmap):
             vecs = pca.transform(vecs)
-            ax.scatter3D(vecs[:,0], vecs[:,1], zs=vecs[:,2], c=[color], alpha=0.8, label=label)
+            ax.scatter3D(vecs[:,0], vecs[:,1], zs=vecs[:,2], c=[color], label=label, **scatter_kw)
+        ax.text2D(0.5, 1.0, "PCA 3-dim", transform=ax.transAxes)
     ax.legend()
     return fig
 
@@ -48,11 +54,11 @@ def pca_scatterplot_by_label(label2sample, pca):
 def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample):
     def _write_and_close(fig, name):
         path = os.path.join(output_figure_dir, name)
-        fig.savefig(path, bbox_inches="tight", dpi=100)
+        fig.savefig(path, bbox_inches="tight", dpi=150)
         plt.close('all')
         logger.info("Wrote embedding demo to '%s'", path)
     labels = list(label2sample.keys())
-    assert len(labels) <= len(colorcet.glasbey_bw), "too many labels ({}) for colormap {} ({})".format(len(labels), "colorcet.glasbey_bw", len(colorcet.glasbey_bw))
+    assert len(labels) <= len(categorical_cmap), "too many labels ({}) for colormap {} ({})".format(len(labels), repr(categorical_cmap), len(categorical_cmap))
     pixel_scaler = mcolors.Normalize(data["X"].min(), data["X"].max())
     if sum(vecs.shape[0] for vecs in label2sample.values()) > sum(vecs.shape[1] for vecs in label2sample.values()):
         subplot_kw = dict(nrows=1, ncols=len(labels), sharex=False, sharey=True)
@@ -62,9 +68,9 @@ def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample
     for (label, vecs), ax in zip(label2sample.items(), axes):
         ax.set_yticks([])
         ax.set_xticks([])
-        ax.set_ylabel(label)
+        ax.set_title(label)
         ax.set_frame_on(False)
-        im = ax.imshow(vecs, cmap=colorcet.m_coolwarm, norm=pixel_scaler)
+        im = ax.imshow(vecs, cmap="RdBu_r", norm=pixel_scaler)
     fig.subplots_adjust(bottom=0.1, top=0.9, left=0.1, right=0.8, wspace=0.02, hspace=0.02)
     cbar = fig.colorbar(
             im,
@@ -72,7 +78,7 @@ def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample
             ticks=[pixel_scaler.vmin, 0, pixel_scaler.vmax])
     cbar.outline.set_visible(False)
     os.makedirs(output_figure_dir, exist_ok=True)
-    _write_and_close(fig, "embeddings.png")
+    _write_and_close(fig, "embeddings-PLDA-model-space.png")
     _write_and_close(pca_scatterplot_by_label(label2sample, pca["2D"]), "embeddings-PCA-2D.png")
     _write_and_close(pca_scatterplot_by_label(label2sample, pca["3D"]), "embeddings-PCA-3D.png")
 
@@ -143,7 +149,11 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
             # "3D_whitened": sklearn.decomposition.PCA(n_components=3, whiten=True),
     }
     if plda_gridsearch_size is not None:
-        dim_reducer = fit_plda_gridsearch(train, test, np.random.choice(np.arange(len(labels), train["X"].shape[1]), size=plda_gridsearch_size, replace=False))
+        coef_grid = np.random.choice(
+                np.arange(len(labels), train["X"].shape[1]),
+                size=plda_gridsearch_size,
+                replace=False)
+        dim_reducer = fit_plda_gridsearch(train, test, np.sort(coef_grid))
     else:
         dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
     logger.info("Reducing dimensions with:\n  %s", dim_reducer)

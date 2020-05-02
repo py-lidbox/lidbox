@@ -21,6 +21,8 @@ setuptools.setup(
         "matplotlib ~= 3.1",
         "scikit-learn ~= 0.22.2",
         "webrtcvad ~= 2.0.10",
+        "colorcet ~= 2.0.2",
+        "plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0",
     ],
     packages=[
         "lidbox",
