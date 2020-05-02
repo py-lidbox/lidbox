@@ -16,6 +16,7 @@ from .xvector import (
     FrameLayer,
     GlobalMeanStddevPooling1D,
     SegmentLayer,
+    as_embedding_extractor,
 )
 from .xvector_2d import FrameLayer2D
 

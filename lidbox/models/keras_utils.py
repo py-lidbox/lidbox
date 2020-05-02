@@ -76,12 +76,6 @@ def init_callback_from_config(config, cache_dir):
     return callback
 
 
-def as_xvector_extractor(keras_model, embedding_layer_name="segment1"):
-    embedding_layer = keras_model.get_layer(name=embedding_layer_name)
-    embedding_layer.activation = None
-    return tf.keras.models.Model(inputs=keras_model.inputs, outputs=embedding_layer.dense.output)
-
-
 class LearningRateDateLogger(tf.keras.callbacks.Callback):
     def __init__(self, output_stream=sys.stdout, **kwargs):
         self.output_stream = output_stream
@@ -166,7 +160,7 @@ class KerasWrapper:
             os.path.join(experiment_cache, "checkpoints"),
             key=config["best_checkpoint"]["monitor"],
             mode=config["best_checkpoint"]["mode"]))
-        as_extractor = getattr(model_module, "as_embedding_extractor", as_xvector_extractor)
+        as_extractor = getattr(model_module, "as_embedding_extractor")
         keras_model = as_extractor(keras_model)
         keras_model.trainable = False
         model_input = keras_model.inputs[0]

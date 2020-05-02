@@ -10,6 +10,7 @@ from .xvector import (
     FrameLayer,
     GlobalMeanStddevPooling1D,
     SegmentLayer,
+    as_embedding_extractor,
 )
 from .clstm import frequency_attention
 from tensorflow.keras.models import Model

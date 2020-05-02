@@ -15,6 +15,12 @@ from tensorflow.keras import Model
 import tensorflow as tf
 
 
+def as_embedding_extractor(keras_model):
+    fc = keras_model.get_layer(name="fc_2")
+    fc.activation = None
+    return tf.keras.models.Model(inputs=keras_model.inputs, outputs=fc.output)
+
+
 def loader(input_shape, num_outputs, output_activation="softmax", padding="same"):
     inputs = Input(shape=input_shape, name="input")
     conv_1 = Conv1D(500, 5, 1, padding=padding, activation="relu", name="conv_1")(inputs)

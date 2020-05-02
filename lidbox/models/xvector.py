@@ -101,6 +101,12 @@ class SegmentLayer(Layer):
         return cls(**config)
 
 
+def as_embedding_extractor(keras_model):
+    segment_layer = keras_model.get_layer(name="segment1")
+    segment_layer.dense.activation = None
+    return tf.keras.models.Model(inputs=keras_model.inputs, outputs=segment_layer.dense.output)
+
+
 def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
