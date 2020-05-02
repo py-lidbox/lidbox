@@ -130,7 +130,7 @@ def draw_random_sample(train, test, labels, target2label, sample_size=100):
     return label2sample
 
 
-def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None):
+def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None):
     scaler = sklearn.preprocessing.StandardScaler()
     logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
     scaler.fit(train["X"])
@@ -142,7 +142,10 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
             # "2D_whitened": sklearn.decomposition.PCA(n_components=2, whiten=True),
             # "3D_whitened": sklearn.decomposition.PCA(n_components=3, whiten=True),
     }
-    dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
+    if plda_gridsearch_size is not None:
+        dim_reducer = fit_plda_gridsearch(train, test, np.random.choice(np.arange(len(labels), train["X"].shape[1]), size=plda_gridsearch_size, replace=False))
+    else:
+        dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
     logger.info("Reducing dimensions with:\n  %s", dim_reducer)
     train["X"] = dim_reducer.transform(train["X"])
     test["X"] = dim_reducer.transform(test["X"])
