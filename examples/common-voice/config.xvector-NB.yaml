@@ -65,7 +65,7 @@ experiment:
   model:
     key: naive_bayes
     kwargs:
-      n_plda_coefs: 60
+      n_plda_coefs: 120
   data:
     train:
       split: train

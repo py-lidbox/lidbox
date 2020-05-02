@@ -38,7 +38,7 @@ def pca_scatterplot_by_label(label2sample, pca):
         for (label, vecs), color in zip(label2sample.items(), categorical_cmap):
             vecs = pca.transform(vecs)
             ax.scatter(vecs[:,0], vecs[:,1], c=[color], label=label, edgecolors='none', **scatter_kw)
-            ax.set_title("PCA 2-dim")
+            ax.set_title("x-vectors in PLDA model space, projected with 2-dim PCA")
         # ax.set_frame_on(False)
     else:
         fig = plt.figure(figsize=(20, 20))
@@ -46,7 +46,7 @@ def pca_scatterplot_by_label(label2sample, pca):
         for (label, vecs), color in zip(label2sample.items(), categorical_cmap):
             vecs = pca.transform(vecs)
             ax.scatter3D(vecs[:,0], vecs[:,1], zs=vecs[:,2], c=[color], label=label, **scatter_kw)
-        ax.text2D(0.5, 1.0, "PCA 3-dim", transform=ax.transAxes)
+        ax.text2D(0.5, 1.0, "x-vectors in PLDA model space, projected with 3-dim PCA", transform=ax.transAxes)
     ax.legend()
     return fig
 
