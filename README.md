@@ -24,3 +24,7 @@ lidbox -h
 If not, make sure the `setuptools` entry point scripts (e.g. directory `$HOME/.local/bin`) are on your path.
 
 If everything is working, see [this](./examples/common-voice) for a simple example to get started.
+
+### X-vector embeddings from a trained model for 4 languages
+
+![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./examples/common-voice/img/embeddings-PCA-2D.png)

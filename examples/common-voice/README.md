@@ -62,11 +62,11 @@ After downloading, the directory should contain the following files:
 
         lidbox train-embeddings -v config.xvector-NB.yaml
 
-Randomly chosen x-vectors in the PLDA model space:
+#### Randomly chosen x-vectors in the PLDA model space
 
 ![Heatmap plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PLDA-model-space.png)
 
-2-dim PCA projection:
+#### 2-dim PCA projection
 
 ![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PCA-2D.png)
 
