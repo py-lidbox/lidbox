@@ -39,13 +39,14 @@ class Command:
     """
     Base command class for options shared by all lidbox commands.
     """
+    command_name = None
     # All commands have tasks that can be executed, depending on given arguments
     tasks = ()
 
     @classmethod
     def create_argparser(cls, subparsers):
         parser = subparsers.add_parser(
-            cls.__name__.lower(),
+            cls.command_name or cls.__name__.lower(),
             description=cls.__doc__,
             add_help=False
         )
@@ -116,9 +117,9 @@ class E2E(Command):
     Run everything end-to-end as specified in the config file and user script.
     """
     def run(self):
-        # These imports are here to avoid importing TensorFlow when the user e.g. requests just the help string from the command
-        import lidbox.api
         super().run()
+        # Input dynamically to avoid importing TensorFlow when the user e.g. requests just the help string from the command
+        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
@@ -135,8 +136,8 @@ class Evaluate(Command):
     Evaluate the test set with a trained model.
     """
     def run(self):
-        import lidbox.api
         super().run()
+        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running evaluation with config file '{}'".format(args.lidbox_config_yaml_path))
@@ -154,8 +155,8 @@ class Prepare(Command):
     Run dataset iterator preparation without training.
     """
     def run(self):
-        import lidbox.api
         super().run()
+        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running dataset preparation with config file '{}'".format(args.lidbox_config_yaml_path))
