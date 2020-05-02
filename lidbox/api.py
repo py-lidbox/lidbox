@@ -333,10 +333,10 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
         result = None
         if metric["name"].endswith("average_detection_cost"):
             logger.info("Evaluating minimum average detection cost")
-            thresholds = np.linspace(min_score, max_score, metric.get("num_thresholds", 200))
+            thresholds = np.linspace(min_score, max_score, metric.get("num_thresholds", 50))
             if metric["name"].startswith("sparse_"):
                 cavg = lidbox.metrics.SparseAverageDetectionCost(len(labels), thresholds)
-                cavg.update_state(np.expand_dims(true_labels_sparse, -1), predictions)
+                cavg.update_state(true_labels_sparse, predictions)
             else:
                 cavg = lidbox.metrics.AverageDetectionCost(len(labels), thresholds)
                 cavg.update_state(true_labels, predictions)
