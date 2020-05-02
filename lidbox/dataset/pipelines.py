@@ -142,6 +142,8 @@ def create_dataset(split, labels, init_data, config):
                 break
     if "embeddings" in config:
         steps.append(Step("extract_embeddings", {"config": config["embeddings"]}))
+        if "remap_keys" in config["embeddings"]:
+            steps.append(Step("remap_keys", {"new_keys": config["embeddings"]["remap_keys"]}))
         if "cache" in config["embeddings"]:
             steps.extend(_get_cache_steps(config["embeddings"]["cache"], split))
     return steps

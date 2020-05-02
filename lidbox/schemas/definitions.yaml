@@ -352,18 +352,25 @@ embeddings:
   type: object
   description: 'Extracting embeddings with trained model'
   required:
-    - extractor
+    - extractors
   additionalProperties: false
   properties:
-    extractor:
-      $ref: '#/definitions/embedding_extractor'
+    extractors:
+      type: array
+      minItems: 1
+      contains:
+        $ref: '#/definitions/embedding_extractor'
     cache:
       $ref: '#/definitions/cache'
+    remap_keys:
+      type: object
     tf_device:
       type: string
     batch_size:
       type: integer
       exclusiveMinimum: 0
+    no_unbatch:
+      type: boolean
 
 post_process:
   type: object

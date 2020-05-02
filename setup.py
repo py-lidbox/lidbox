@@ -19,15 +19,20 @@ setuptools.setup(
         "kaldiio ~= 2.13",
         "librosa ~= 0.7",
         "matplotlib ~= 3.1",
+        "scikit-learn ~= 0.22.2",
         "webrtcvad ~= 2.0.10",
     ],
     packages=[
         "lidbox",
         "lidbox.dataset",
+        "lidbox.embeddings",
         "lidbox.features",
         "lidbox.models",
         "lidbox.schemas",
     ],
+    package_data={
+        "schemas": ["*.yaml"]
+    },
     entry_points={
         "console_scripts": [
             "lidbox = lidbox.__main__:main",

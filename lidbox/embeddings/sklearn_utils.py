@@ -1,0 +1,178 @@
+import collections
+import logging
+import os
+
+from mpl_toolkits.mplot3d import Axes3D
+from plda import Classifier as PLDAClassifier
+import colorcet
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import sklearn.naive_bayes
+import sklearn.preprocessing
+import tensorflow as tf
+
+import lidbox.metrics
+
+
+logger = logging.getLogger("sklearn_utils")
+
+
+class PLDA(PLDAClassifier):
+    def transform(self, X):
+        return self.model.transform(X, from_space='D', to_space='U_model')
+    def __str__(self):
+        return "PLDA: {:d} -> {:d} -> {:d} -> {:d} (PCA preprocessing with {} coefs)".format(
+                *[self.model.get_dimensionality(space) for space in ("D", "X", "U", "U_model")],
+                self.model.pca.n_components if self.model.pca else None)
+
+
+def pca_scatterplot_by_label(label2sample, pca):
+    assert pca.n_components in (2, 3), "PCA plot with n_components = %d not implemented, must be 2 or 3".format(pca.n_components)
+    if pca.n_components == 2:
+        fig, ax = plt.subplots(figsize=(20, 20))
+        for (label, vecs), color in zip(label2sample.items(), colorcet.glasbey_bw):
+            vecs = pca.transform(vecs)
+            ax.scatter(vecs[:,0], vecs[:,1], c=[color], alpha=0.8, edgecolors='none', label=label)
+        ax.set_frame_on(False)
+    else:
+        fig = plt.figure()
+        ax = Axes3D(fig)
+        for (label, vecs), color in zip(label2sample.items(), colorcet.glasbey_bw):
+            vecs = pca.transform(vecs)
+            ax.scatter3D(vecs[:,0], vecs[:,1], zs=vecs[:,2], c=[color], alpha=0.8, label=label)
+    ax.legend()
+    return fig
+
+
+def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample):
+    def _write_and_close(fig, name):
+        path = os.path.join(output_figure_dir, name)
+        fig.savefig(path, bbox_inches="tight", dpi=100)
+        plt.close('all')
+        logger.info("Wrote embedding demo to '%s'", path)
+    labels = list(label2sample.keys())
+    assert len(labels) <= len(colorcet.glasbey_bw), "too many labels ({}) for colormap {} ({})".format(len(labels), "colorcet.glasbey_bw", len(colorcet.glasbey_bw))
+    pixel_scaler = mcolors.Normalize(data["X"].min(), data["X"].max())
+    if sum(vecs.shape[0] for vecs in label2sample.values()) > sum(vecs.shape[1] for vecs in label2sample.values()):
+        subplot_kw = dict(nrows=1, ncols=len(labels), sharex=False, sharey=True)
+    else:
+        subplot_kw = dict(nrows=len(labels), ncols=1, sharex=True, sharey=False)
+    fig, axes = plt.subplots(figsize=(20, 20), gridspec_kw=dict(hspace=0.01, wspace=0.01), **subplot_kw)
+    for (label, vecs), ax in zip(label2sample.items(), axes):
+        ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_ylabel(label)
+        ax.set_frame_on(False)
+        im = ax.imshow(vecs, cmap=colorcet.m_coolwarm, norm=pixel_scaler)
+    fig.subplots_adjust(bottom=0.1, top=0.9, left=0.1, right=0.8, wspace=0.02, hspace=0.02)
+    cbar = fig.colorbar(
+            im,
+            cax=fig.add_axes([0.83, 0.1, 0.02, 0.8]),
+            ticks=[pixel_scaler.vmin, 0, pixel_scaler.vmax])
+    cbar.outline.set_visible(False)
+    os.makedirs(output_figure_dir, exist_ok=True)
+    _write_and_close(fig, "embeddings.png")
+    _write_and_close(pca_scatterplot_by_label(label2sample, pca["2D"]), "embeddings-PCA-2D.png")
+    _write_and_close(pca_scatterplot_by_label(label2sample, pca["3D"]), "embeddings-PCA-3D.png")
+
+
+def get_lda_scores(lda, test):
+    if isinstance(lda, PLDA):
+        pred, log_pred = lda.predict(test["X"])
+    else:
+        pred, log_pred = lda.predict(test["X"]), lda.predict_log_proba(test["X"])
+    cce = tf.keras.losses.sparse_categorical_crossentropy(test["y"], log_pred, from_logits=True)
+    cce = tf.math.reduce_mean(cce)
+    accuracy = (pred == test["y"]).mean()
+    return accuracy, cce.numpy()
+
+
+def fit_plda(train, test, n_components=None):
+    logger.info("Fitting PLDA" + (
+                " using {} PCA components".format(n_components) if n_components
+                else " using as many PCA as possible") + " for preprocessing.")
+    plda = PLDA()
+    plda.fit_model(train["X"], train["y"], n_principal_components=n_components)
+    logger.info(
+            "Done: %s\n  accuracy %.3f\n  categorical crossentropy %.3f",
+            plda,
+            *get_lda_scores(plda, test))
+    return plda
+
+
+def fit_plda_gridsearch(train, test, grid):
+    logger.info("Performing grid search over %d different principal components for PLDA: %s", len(grid), ', '.join(str(n) for n in grid))
+    best_plda, best_loss = None, float("inf")
+    for n in grid:
+        plda = fit_plda(train, test, n_components=n)
+        _, cce = get_lda_scores(plda, test)
+        if cce < best_loss:
+            logger.info("New best at categorical crossentropy %.3f with:\n  %s", cce, plda)
+            best_plda, best_loss = plda, cce
+    return best_plda
+
+
+def draw_random_sample(train, test, labels, target2label, sample_size=100):
+    logger.info("Choosing %d random demo utterances per label for %d labels from train_X %s and test_X %s",
+            sample_size,
+            len(labels),
+            train["X"].shape,
+            test["X"].shape)
+    label2sample = {}
+    for split, data in (("train", train), ("test", test)):
+        label2vecs = collections.defaultdict(list)
+        for x, y in zip(data["X"], data["y"]):
+            label2vecs[target2label[y]].append(x)
+        label2vecs = {l: np.stack(vecs) for l, vecs in label2vecs.items()}
+        label2vecs = {l: vecs[np.random.choice(np.arange(0, vecs.shape[0]), size=sample_size, replace=False)] for l, vecs in label2vecs.items()}
+        label2sample[split] = collections.OrderedDict((l, label2vecs[l]) for l in sorted(labels) if l in label2vecs)
+    return label2sample
+
+
+def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None):
+    scaler = sklearn.preprocessing.StandardScaler()
+    logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
+    scaler.fit(train["X"])
+    train["X"] = scaler.transform(train["X"])
+    test["X"] = scaler.transform(test["X"])
+    pca = {
+            "2D": sklearn.decomposition.PCA(n_components=2, whiten=False),
+            "3D": sklearn.decomposition.PCA(n_components=3, whiten=False),
+            # "2D_whitened": sklearn.decomposition.PCA(n_components=2, whiten=True),
+            # "3D_whitened": sklearn.decomposition.PCA(n_components=3, whiten=True),
+    }
+    dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
+    logger.info("Reducing dimensions with:\n  %s", dim_reducer)
+    train["X"] = dim_reducer.transform(train["X"])
+    test["X"] = dim_reducer.transform(test["X"])
+    logger.info("After dimension reduction: train_X %s, test_X %s", train["X"].shape, test["X"].shape)
+    for p in pca.values():
+        logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
+        p.fit(train["X"])
+    train["X"] = sklearn.preprocessing.normalize(train["X"])
+    test["X"] = sklearn.preprocessing.normalize(test["X"])
+    label2sample = draw_random_sample(train, test, labels, target2label)
+    demo_dir = os.path.join(config["experiment"]["cache_directory"], "figures")
+    plot_embedding_demo(os.path.join(demo_dir, "train"), train, target2label, pca, label2sample["train"])
+    plot_embedding_demo(os.path.join(demo_dir, "test"), test, target2label, pca, label2sample["test"])
+    classifiers = [
+          sklearn.naive_bayes.GaussianNB(),
+    ]
+    logger.info("Training %d classifiers", len(classifiers))
+    for classifier in classifiers:
+        logger.info("Fitting with train_X %s and train_y %s classifier:\n  %s",
+             train["X"].shape,
+             train["y"].shape,
+             classifier)
+        classifier.fit(train["X"], train["y"])
+        pred = classifier.predict_log_proba(test["X"])
+        pred = np.maximum(pred, -100)
+        cavg = lidbox.metrics.SparseAverageDetectionCost(len(labels), np.linspace(pred.min(), pred.max(), 20))
+        cavg.update_state(test["y"], pred)
+        logger.info("Evaluating classifier with test_X %s and test_y %s\n  classifier score %.6f\n  C_avg %.6f\n  classifier was %s",
+             test["X"].shape,
+             test["y"].shape,
+             classifier.score(test["X"], test["y"]),
+             cavg.result(),
+             classifier)

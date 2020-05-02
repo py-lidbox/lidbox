@@ -104,6 +104,9 @@ def _element_shapes_dict(x):
 def _dict_to_logstring(d):
     return "\n  ".join("{}: {}".format(k, p) for k, p in d.items())
 
+def _left_pad_lines(s, pad):
+    return '\n'.join(pad * ' ' + line for line in s.splitlines())
+
 def _get_device_or_default(config):
     tf_device = "/CPU:0"
     gpu_devices = tf.config.experimental.list_physical_devices("GPU")
@@ -572,22 +575,31 @@ def drop_invalid_wavs(ds):
 
 def extract_embeddings(ds, config):
     """
-    Use a trained keras model instance to extract embeddings to key 'embedding' from key 'input' of each element in ds.
+    Use trained keras model instances to extract embeddings to key 'embedding' from key 'input' of each element in ds.
     """
     from lidbox.models.keras_utils import KerasWrapper
-    tf_device = _get_device_or_default(config)
-    logger.info("Extracting embeddings on device '%s'", tf_device)
-    extractor_fn = KerasWrapper.from_config_as_embedding_extractor_fn(config["extractor"])
-    logger.info("Using extractor %s", extractor_fn.graph)
+    extractors = [(KerasWrapper.from_config_as_embedding_extractor_fn(e), _get_device_or_default(e))
+                  for e in config["extractors"]]
+    # ConcreteFunctions will be pretty-formatted starting from TF 2.3
+    # https://www.tensorflow.org/guide/concrete_function#changes_for_tensorflow_23
+    logger.info("Using %d extractors:\n  %s",
+            len(extractors),
+            '\n  '.join("on device '{:s}':\n    {}".format(d, _left_pad_lines(str(e), 6)) for e, d in extractors))
     def _append_embeddings(x):
-        with tf.device(tf_device):
-            return dict(x, embedding=extractor_fn(x["input"]))
+        embeddings = []
+        for extractor_fn, device in extractors:
+            with tf.device(device):
+                embeddings.append(extractor_fn(x["input"]))
+        return dict(x, embedding=tf.concat(embeddings, axis=1))
     batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
-    logger.info("Batching signals with batch size %s, extracting embeddings in batches.", batch_size.numpy())
-    return (ds.batch(batch_size)
-              .prefetch(TF_AUTOTUNE)
-              .map(_append_embeddings, num_parallel_calls=TF_AUTOTUNE)
-              .unbatch())
+    logger.info("Batching inputs with batch size %s, extracting embeddings in batches.", batch_size.numpy())
+    ds = (ds.batch(batch_size)
+            .prefetch(TF_AUTOTUNE)
+            .map(_append_embeddings, num_parallel_calls=TF_AUTOTUNE))
+    if not config.get("no_unbatch", False):
+        logger.info("Unbatching after embedding extraction")
+        ds = ds.unbatch()
+    return ds
 
 
 def extract_features(ds, config):

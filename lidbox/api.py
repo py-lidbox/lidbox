@@ -20,6 +20,7 @@ import lidbox.dataset.steps
 import lidbox.models.keras_utils
 from lidbox.dataset.steps import Step
 from lidbox.models.keras_utils import KerasWrapper
+from lidbox.dataset.tf_utils import make_label2onehot
 
 
 # When scanning a datadir for valid metadata files, these filenames will be accepted, all others are ignored
@@ -237,19 +238,29 @@ def collect_targets(labels, meta):
         yield x["id"].decode("utf-8"), x["target"]
 
 
-def extract_embeddings(dataset, config, batch_size=128):
-    keras_wrapper = KerasWrapper.from_config(config)
-    logger.info("Model initialized:\n%s", str(keras_wrapper))
-    best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
-    logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
-    keras_wrapper.load_weights(best_checkpoint)
-    # Drop all layers after the embedding layer, making the embedding layer the new output layer
-    keras_wrapper.to_embedding_extractor()
-    logger.info("Extracting embeddings with model '%s' in batches of %d", keras_wrapper.model_key, batch_size)
-    # Not the most efficient way to predict from a tf.data.Dataset, but we want to make sure the metadata of output predictions matches the input
-    for batch in dataset.batch(batch_size).as_numpy_iterator():
-        embeddings = keras_wrapper.keras_model.predict_on_batch(batch["input"])
-        yield batch, embeddings
+def extract_embeddings(split2ds, labels):
+    import tensorflow as tf
+    label2target, _ = make_label2onehot(labels)
+    target2label = {label2target.lookup(tf.convert_to_tensor(l)).numpy(): l for l in labels}
+    def _assert_valid_targets(x):
+        tf.debugging.assert_equal(
+                label2target.lookup(x["label"]),
+                x["target"],
+                message="Sample had mismatching labels and targets")
+        return x
+    split2numpy_ds = {s: {} for s in split2ds}
+    for split, ds in split2ds.items():
+        logger.info("Extracting embeddings from split %s, collecting to numpy arrays", split)
+        batch_X, batch_y, batch_ids = [], [], []
+        for x in ds.map(_assert_valid_targets).as_numpy_iterator():
+            batch_X.append(x["embedding"])
+            batch_y.append(x["target"])
+            batch_ids.append(x["id"])
+        split2numpy_ds[split] = {
+                "X": np.concatenate(batch_X),
+                "y": np.concatenate(batch_y),
+                "ids": np.concatenate(batch_ids).astype(str)}
+    return split2numpy_ds, target2label
 
 
 #TODO simplify and divide into manageable pieces
