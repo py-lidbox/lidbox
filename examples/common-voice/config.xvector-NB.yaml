@@ -1,0 +1,73 @@
+datasets:
+  - key: common-voice
+    labels:
+      - br
+      - et
+      - mn
+      - tr
+    splits:
+      - key: train
+        path: ./data/train
+        datafiles:
+          - utt2path
+          - utt2label
+      - key: test
+        path: ./data/test
+        datafiles:
+          - utt2path
+          - utt2label
+
+# No need to gather signals, use the cache instead
+pre_process:
+  cache:
+    directory: ./lidbox-cache
+    batch_size: 100
+    key: signal_chunks
+    consume: false
+
+# Extract features for input to the xvector extractor
+features:
+  batch_size: 200
+  type: logmelspectrogram
+  spectrogram:
+    frame_length_ms: 25
+    frame_step_ms: 10
+    fft_length: 1024
+  melspectrogram:
+    num_mel_bins: 64
+    fmin: 20
+    fmax: 7000
+  window_normalization:
+    window_len: -1
+    normalize_variance: false
+
+# Specify one or more trained models to extract xvectors from
+embeddings:
+  extractors:
+    # This is the experiment we performed using config.yaml
+    - experiment_name: commonvoice-lang4
+      model:
+        key: xvector
+      cache_directory: ./lidbox-cache
+      input_shape: [198, 64]
+      output_shape: [4]
+      best_checkpoint:
+        monitor: val_loss
+        mode: min
+  batch_size: 200
+  no_unbatch: true
+
+# Fit Gaussian Naive Bayes from scikit-learn on extracted xvectors
+# See lidbox.embeddings.sklearn_utils
+experiment:
+  cache_directory: ./lidbox-cache
+  name: commonvoice-lang4-embeddings
+  model:
+    key: naive_bayes
+    kwargs:
+      n_plda_coefs: 60
+  data:
+    train:
+      split: train
+    test:
+      split: test

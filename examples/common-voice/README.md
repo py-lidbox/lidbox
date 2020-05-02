@@ -23,6 +23,8 @@ Python 3.8.2 with TensorFlow 2.2.0-rc2 has also been tested.
 
 ## Steps
 
+### Prepare
+
 1. Download the datasets from the [Common Voice](https://voice.mozilla.org/en/datasets) website into `./downloads`.
 After downloading, the directory should contain the following files:
     * `br.tar.gz`
@@ -40,6 +42,8 @@ After downloading, the directory should contain the following files:
 
         rm -r ./data/??/clips
 
+### Train an x-vector model on log-scale Mel-spectrograms
+
 3. Run the `lidbox` end-to-end pipeline
 
         lidbox e2e -v config.yaml
@@ -52,7 +56,24 @@ After downloading, the directory should contain the following files:
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
-5. Use the custom script to compute some stats on the test set:
+### Extract x-vector embeddings from the trained model and fit Gaussian Naive Bayes
+
+5.
+
+        lidbox train-embeddings -v config.xvector-NB.yaml
+
+Randomly chosen x-vectors in the PLDA model space:
+
+![Heatmap plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PLDA-model-space.png)
+
+2-dim PCA projection:
+
+![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PCA-2D.png)
+
+
+### Extra
+
+6. Use a custom script to compute some stats on the test set:
 
         lidbox utils -v config.yaml --split test --run-script compute_stats.py
 

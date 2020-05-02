@@ -55,8 +55,10 @@ pre_process:
     # - type: random_resampling
       # split: train
       # range: [1.0, 1.2]
-  # Apply voice activity detection with WebRTC using aggressiveness level 0
-  # Very slow because we need to use tf.numpy_function for webrtcvad.Vad
+  # Apply voice activity detection with WebRTC using aggressiveness level 0.
+  # Very slow because we need to use tf.numpy_function outside the graph
+  # to use Python object webrtcvad.Vad.
+  # You can try rms_vad below for an energy-based VAD if WebRTC VAD is too slow.
   webrtcvad:
     aggressiveness: 0
     # WebRTC VAD requires VAD windows to be 10, 20, or 30 ms
@@ -68,8 +70,11 @@ pre_process:
   # # This is much faster than WebRTC VAD because its done with TF ops,
   # # but high energy non-speech signals will be counted as speech
   # rms_vad:
+  #   # Higher values will drop more frames
   #   strength: 0.1
+  #   # Frame length for VAD decisions
   #   vad_frame_length_ms: 25
+  #   # Minimum continous section of VAD frames marked as non-speech before they are dropped
   #   min_non_speech_length_ms: 500
   # Partition all signals into chunks of 2 second, overlapping by 0.5 seconds
   chunks:
