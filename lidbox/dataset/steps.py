@@ -584,7 +584,7 @@ def extract_embeddings(ds, config):
     # https://www.tensorflow.org/guide/concrete_function#changes_for_tensorflow_23
     logger.info("Using %d extractors:\n  %s",
             len(extractors),
-            '\n  '.join("on device '{:s}':\n    {}".format(d, _left_pad_lines(str(e), 6)) for e, d in extractors))
+            '\n  '.join("on device '{:s}':\n  {}".format(d, _left_pad_lines(str(e), 2)) for e, d in extractors))
     def _append_embeddings(x):
         embeddings = []
         for extractor_fn, device in extractors:

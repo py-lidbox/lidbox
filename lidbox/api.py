@@ -149,7 +149,7 @@ def load_splits_from_config_file(config_file_path):
     config = lidbox.load_yaml(config_file_path)
     logger.info("Reading all metadata from %d different datasets.", len(config["datasets"]))
     split2datasets, labels = get_flat_dataset_config(config)
-    logger.info("Merged all metadata into %d splits, set of all labels is:\n  %s", len(split2datasets), '\n  '.join(labels))
+    logger.info("Merged all metadata into %d splits, amount of all labels %s, set of all labels:\n  %s", len(split2datasets), len(labels), '\n  '.join(labels))
     logger.info("Loading metadata from all files and merging metadata of all datasets")
     split2meta = merge_dataset_metadata(load_all_metadata_from_paths(split2datasets))
     return split2meta, labels, config
