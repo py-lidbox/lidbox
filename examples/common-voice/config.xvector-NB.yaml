@@ -64,8 +64,6 @@ experiment:
   name: commonvoice-lang4-embeddings
   model:
     key: naive_bayes
-    kwargs:
-      n_plda_coefs: 120
   data:
     train:
       split: train

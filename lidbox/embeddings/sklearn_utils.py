@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.naive_bayes
 import sklearn.preprocessing
+import sklearn.discriminant_analysis
 import tensorflow as tf
 
 import lidbox.metrics
@@ -94,10 +95,23 @@ def get_lda_scores(lda, test):
     return accuracy, cce.numpy()
 
 
+def fit_lda(train, test):
+    logger.info("Fitting LDA to train_X %s train_y %s", train["X"].shape, train["y"].shape)
+    lda = sklearn.discriminant_analysis.LinearDiscriminantAnalysis()
+    lda.fit(train["X"], train["y"])
+    logger.info(
+            "Done: %s\n  accuracy %.3f\n  categorical crossentropy %.3f",
+            lda,
+            *get_lda_scores(lda, test))
+    return lda
+
+
 def fit_plda(train, test, n_components=None):
-    logger.info("Fitting PLDA" + (
-                " using {} PCA components".format(n_components) if n_components
-                else " using as many PCA as possible") + " for preprocessing.")
+    logger.info("Fitting PLDA to train_X %s train_y %s, using "
+                + ("{} PCA components".format(n_components) if n_components else "as many PCA components as possible")
+                + " for preprocessing.",
+                train["X"].shape,
+                train["y"].shape)
     plda = PLDA()
     plda.fit_model(train["X"], train["y"], n_principal_components=n_components)
     logger.info(
@@ -119,6 +133,16 @@ def fit_plda_gridsearch(train, test, grid):
     return best_plda
 
 
+def reduce_dimensions(train, test, dim_reducer):
+    logger.info("Reducing train_X %s and test_X %s dimensions with:\n  %s",
+            train["X"].shape,
+            test["X"].shape,
+            dim_reducer)
+    train["X"] = dim_reducer.transform(train["X"])
+    test["X"] = dim_reducer.transform(test["X"])
+    logger.info("After dimension reduction: train_X %s, test_X %s", train["X"].shape, test["X"].shape)
+
+
 def draw_random_sample(train, test, labels, target2label, sample_size=100):
     logger.info("Choosing %d random demo utterances per label for %d labels from train_X %s and test_X %s",
             sample_size,
@@ -136,7 +160,7 @@ def draw_random_sample(train, test, labels, target2label, sample_size=100):
     return label2sample
 
 
-def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None):
+def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
     scaler = sklearn.preprocessing.StandardScaler()
     logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
     scaler.fit(train["X"])
@@ -148,6 +172,8 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
             # "2D_whitened": sklearn.decomposition.PCA(n_components=2, whiten=True),
             # "3D_whitened": sklearn.decomposition.PCA(n_components=3, whiten=True),
     }
+    if use_lda_preprocessing:
+        reduce_dimensions(train, test, fit_lda(train, test))
     if plda_gridsearch_size is not None:
         coef_grid = np.random.choice(
                 np.arange(len(labels), train["X"].shape[1]),
@@ -156,15 +182,12 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
         dim_reducer = fit_plda_gridsearch(train, test, np.sort(coef_grid))
     else:
         dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
-    logger.info("Reducing dimensions with:\n  %s", dim_reducer)
-    train["X"] = dim_reducer.transform(train["X"])
-    test["X"] = dim_reducer.transform(test["X"])
-    logger.info("After dimension reduction: train_X %s, test_X %s", train["X"].shape, test["X"].shape)
+    reduce_dimensions(train, test, dim_reducer)
+    train["X"] = sklearn.preprocessing.normalize(train["X"])
+    test["X"] = sklearn.preprocessing.normalize(test["X"])
     for p in pca.values():
         logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
         p.fit(train["X"])
-    train["X"] = sklearn.preprocessing.normalize(train["X"])
-    test["X"] = sklearn.preprocessing.normalize(test["X"])
     label2sample = draw_random_sample(train, test, labels, target2label)
     demo_dir = os.path.join(config["experiment"]["cache_directory"], "figures")
     plot_embedding_demo(os.path.join(demo_dir, "train"), train, target2label, pca, label2sample["train"])
