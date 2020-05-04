@@ -1,7 +1,7 @@
 """
-x-vector.py with ResNet50V2 frontend for gathering frequency channel information.
+x-vector.py with MobileNetV2 frontend for gathering frequency channel information.
 """
-from tensorflow.keras.applications import ResNet50V2
+from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import (
     Activation,
     Dense,
@@ -26,9 +26,9 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     if channel_dropout_rate > 0:
         x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
     x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
-    resnet = ResNet50V2(include_top=False, weights=None, input_tensor=x)
-    rows, cols, channels = resnet.output.shape[1:]
-    x = Reshape((rows or -1, cols * channels), name="flatten_channels")(resnet.output)
+    mobilenet = MobileNetV2(include_top=False, weights=None, input_tensor=x)
+    rows, cols, channels = mobilenet.output.shape[1:]
+    x = Reshape((rows or -1, cols * channels), name="flatten_channels")(mobilenet.output)
     x = FrameLayer(512, 5, 1, name="frame1")(x)
     x = FrameLayer(512, 3, 2, name="frame2")(x)
     x = FrameLayer(512, 3, 3, name="frame3")(x)
@@ -40,4 +40,4 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     outputs = Dense(num_outputs, name="output", activation=None)(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
-    return Model(inputs=inputs, outputs=outputs, name="resnet50-x-vector")
+    return Model(inputs=inputs, outputs=outputs, name="mobilenet50-x-vector")
