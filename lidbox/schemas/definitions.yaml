@@ -13,11 +13,11 @@ dataset:
     labels:
       type: array
       description: 'One or more unique labels present in the dataset'
-      contains:
+      items:
         type: string
     splits:
       type: array
-      contains:
+      items:
         type: object
         description: 'Metadata for one split (e.g. train or test)'
         required:
@@ -35,7 +35,7 @@ dataset:
             type: integer
           datafiles:
             type: array
-            contains:
+            items:
               type: string
 
 split:
@@ -58,7 +58,7 @@ split:
       type: boolean
     evaluate_metrics:
       type: array
-      contains:
+      items:
         type: object
         required:
           - name
@@ -200,7 +200,7 @@ features:
     splits:
       # Embeddings, bottleneck-features, Kaldi-features etc. pre-extracted for every split
       type: array
-      contains:
+      items:
         type: object
         required:
           - features_path
@@ -283,12 +283,14 @@ experiment:
       type: string
     callbacks:
       type: array
-      contains:
+      items:
         type: object
         required:
           - cls
         additionalProperties: false
         properties:
+          format:
+            type: string
           kwargs:
             type: object
           cls:
@@ -301,7 +303,7 @@ experiment:
           minimum: 0
     output_shape:
       type: array
-      contains:
+      items:
         type: integer
         minimum: 0
     input_shape:
@@ -343,7 +345,7 @@ experiment:
           type: object
     metrics:
       type: array
-      contains:
+      items:
         type: object
         required:
           - cls
@@ -358,7 +360,7 @@ embeddings:
     extractors:
       type: array
       minItems: 1
-      contains:
+      items:
         $ref: '#/definitions/embedding_extractor'
     cache:
       $ref: '#/definitions/cache'
@@ -462,10 +464,11 @@ pre_process:
           exclusiveMinimum: 0
     augment:
       type: array
-      contains:
-        anyOf:
-          - $ref: '#/definitions/augment_config_additive_noise'
-          - $ref: '#/definitions/augment_config_random_resampling'
+      # TODO not working
+      # items:
+        # oneOf:
+          # - $ref: '#/definitions/augment_config_additive_noise'
+          # - $ref: '#/definitions/augment_config_random_resampling'
     cache:
       $ref: '#/definitions/cache'
 
@@ -493,7 +496,7 @@ filters:
 
 shape:
   type: array
-  contains:
+  items:
     anyOf:
       - type: integer
         minimum: 0
@@ -518,7 +521,7 @@ augment_config_random_resampling:
       type: array
       minItems: 2
       maxItems: 2
-      contains:
+      items:
         type: number
 
 augment_config_additive_noise:
@@ -529,6 +532,7 @@ augment_config_additive_noise:
     - split
     - noise_datadir
     - snr_datadir
+    - snr_list
   properties:
     type:
       type: string
@@ -543,11 +547,16 @@ augment_config_additive_noise:
       type: boolean
     snr_list:
       type: array
-      contains:
-        anyOf:
+      items:
+        type: array
+        additionalItems: false
+        items:
+          - type: string
+            enum: [noise, speech, music]
           - type: integer
             minimum: 0
-          - type: string
+          - type: integer
+            minimum: 0
 
 signal_chunks:
   type: object
@@ -615,7 +624,7 @@ embedding_extractor:
       type: string
     output_shape:
       type: array
-      contains:
+      items:
         type: integer
         minimum: 0
     input_shape:
