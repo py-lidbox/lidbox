@@ -292,23 +292,23 @@ def augment_by_random_resampling(ds, range, skip_already_augmented=True):
     E.g.
         range = [0.8, 1.0]
         all augmented samples will have signals at speed rate in [0.8, 1.0] of the original signal
-    Requires tensorflow-io-nightly
+    Requires tensorflow-io >= 0.13.0
     """
     logger.info("Augmenting dataset with external TensorFlow IO library by random resampling with a random ratio chosen from %s", repr(range))
     import tensorflow_io as tfio
-    # https://speex.org/docs/manual/speex-manual/node7.html
-    resampling_quality = 4
+    tfio_major, tfio_minor = tfio.version.VERSION.split('.')[:2]
+    assert int(tfio_major) == 0 and int(tfio_minor) >= 13, "tfio.version.VERSION is '{}' when at least 0.13.0 is expected".format(tfio.version.VERSION)
     sample_rate_ratio_min = tf.constant(range[0], tf.float32)
     sample_rate_ratio_max = tf.constant(range[1], tf.float32)
     def _resample_randomly(x):
         random_ratio = tf.random.uniform([], sample_rate_ratio_min, sample_rate_ratio_max)
         sample_rate_in = tf.cast(random_ratio * tf.cast(x["sample_rate"], tf.float32), tf.int64)
         sample_rate_out = tf.cast(x["sample_rate"], tf.int64)
-        resampled_signal = tfio.experimental.audio.resample(
+        resampled_signal = tfio.audio.resample(
                 tf.expand_dims(x["signal"], -1),
                 sample_rate_in,
                 sample_rate_out,
-                resampling_quality)
+                name="augment_by_random_resampling")
         resampled_signal = tf.squeeze(resampled_signal, -1)
         new_id = tf.strings.join(("augmented", x["id"], "rate", tf.strings.as_string(random_ratio, precision=3)), separator="-")
         return dict(x, id=new_id, signal=resampled_signal, signal_is_augmented=True)
