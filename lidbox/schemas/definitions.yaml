@@ -66,6 +66,15 @@ split:
           name:
             type: string
 
+split_nobatch:
+  type: object
+  required:
+    - split
+  additionalProperties: false
+  properties:
+    split:
+      type: string
+
 group_by_input_length:
   type: object
   additionalProperties: false
@@ -349,6 +358,43 @@ experiment:
         type: object
         required:
           - cls
+
+sklearn_experiment:
+  type: object
+  description: 'Model training pipeline configuration with scikit-learn'
+  required:
+    - cache_directory
+    - data
+    - model
+    - name
+  additionalProperties: false
+  properties:
+    data:
+      type: object
+      additionalProperties: false
+      required:
+        - train
+        - test
+      properties:
+        test:
+          $ref: '#/definitions/split_nobatch'
+        train:
+          $ref: '#/definitions/split_nobatch'
+    cache_directory:
+      type: string
+    model:
+      type: object
+      description: 'scikit-learn model'
+      required:
+        - key
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        kwargs:
+          type: object
+    name:
+      type: string
 
 embeddings:
   type: object
@@ -639,5 +685,13 @@ embedding_extractor:
           type: string
         kwargs:
           type: object
-    name:
+    experiment_name:
       type: string
+    best_checkpoint:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+        monitor:
+          type: string

@@ -24,5 +24,7 @@ properties:
     $ref: '#/definitions/post_process'
   experiment:
     $ref: '#/definitions/experiment'
+  sklearn_experiment:
+    $ref: '#/definitions/sklearn_experiment'
   embeddings:
     $ref: '#/definitions/embeddings'

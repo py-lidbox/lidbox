@@ -180,10 +180,10 @@ class TrainEmbeddings(Command):
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2ds = lidbox.api.create_datasets(split2meta, labels, config)
         split2numpy_ds, target2label = lidbox.api.extract_embeddings(split2ds, labels)
-        train_data = split2numpy_ds[config["experiment"]["data"]["train"]["split"]]
-        test_data = split2numpy_ds[config["experiment"]["data"]["test"]["split"]]
-        model_key = config["experiment"]["model"]["key"]
-        model_kwargs = config["experiment"]["model"].get("kwargs", {})
+        train_data = split2numpy_ds[config["sklearn_experiment"]["data"]["train"]["split"]]
+        test_data = split2numpy_ds[config["sklearn_experiment"]["data"]["test"]["split"]]
+        model_key = config["sklearn_experiment"]["model"]["key"]
+        model_kwargs = config["sklearn_experiment"]["model"].get("kwargs", {})
         if model_key == "naive_bayes":
             lidbox.embeddings.sklearn_utils.fit_naive_bayes(
                     train_data, test_data, labels, config, target2label, **model_kwargs)
