@@ -189,7 +189,7 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
         logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
         p.fit(train["X"])
     label2sample = draw_random_sample(train, test, labels, target2label)
-    demo_dir = os.path.join(config["experiment"]["cache_directory"], "figures")
+    demo_dir = os.path.join(config["sklearn_experiment"]["cache_directory"], "figures")
     plot_embedding_demo(os.path.join(demo_dir, "train"), train, target2label, pca, label2sample["train"])
     plot_embedding_demo(os.path.join(demo_dir, "test"), test, target2label, pca, label2sample["test"])
     classifiers = [
