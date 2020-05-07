@@ -193,10 +193,24 @@ def as_supervised(ds):
     return ds.map(_as_supervised, num_parallel_calls=TF_AUTOTUNE)
 
 
-#TODO preload the whole noise dataset to allow caching or random access from memory instead of disk
-#TODO rethink how augmented dataset instances are merged,
-# using the 'skip_already_augmented' flag might be a big performance bottleneck
-def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmented=True, copy_noise_files_to_tmpdir=False):
+def augment_signals(ds, augment_configs):
+    """
+    Apply all augmentation methods specified in 'augment_config' and return a dataset where all elements are drawn randomly from the augmented and unaugmented datasets.
+    """
+    augmented_datasets = []
+    for conf in augment_configs:
+        aug_kwargs = {k: v for k, v in conf.items() if k not in {"type", "split"}}
+        if conf["type"] == "random_resampling":
+            augmented_datasets.append(augment_by_random_resampling(ds, **aug_kwargs))
+        elif conf["type"] == "additive_noise":
+            augmented_datasets.append(augment_by_additive_noise(ds, **aug_kwargs))
+        else:
+            logger.warning("Unknown signal augmentation type '%s', skipping", conf["type"])
+    # Sample randomly from the unaugmented dataset and all augmented datasets
+    return tf.data.experimental.sample_from_datasets([ds] + augmented_datasets)
+
+
+def augment_by_additive_noise(ds, noise_datadir, snr_list, copy_noise_files_to_tmpdir=False):
     """
     Read all noise signals from $noise_datadir/id2path and create new signals by mixing noise to each element of ds.
     'snr_list' defines the noise labels, which is determined by $noise_datadir/id2label, and the SNR dB range from which the noise level in the resulting signal will be chosen randomly.
@@ -231,7 +245,7 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmente
             type2paths[noise_type] = new_paths
     type2paths = {t: tf.constant(paths, tf.string) for t, paths in type2paths.items()}
     def _update_element_meta(new_id, mixed_signal, x):
-        return dict(x, id=new_id, signal=mixed_signal, signal_is_augmented=True)
+        return dict(x, id=new_id, signal=mixed_signal)
     def _add_random_noise_and_flatten(x):
         """
         Using snr_list, choose len(snr_list) noise signals randomly and create new signal samples by mixing the chosen noise signals with x["signal"] using random SNR dB levels.
@@ -247,7 +261,7 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmente
                 (audio_features.read_wav(type2paths[noise_type][rand_index]), snr)
                 for noise_type, rand_index, snr in rand_noise]
         # Assert sample rates
-        # TODO maybe add inline resampling
+        # TODO maybe add inline resampling of noise signals so they match the speech sr
         for (noise, sample_rate), snr in rand_noise:
             tf.debugging.assert_equal(sample_rate, x["sample_rate"], message="Invalid noise signals are being used, all noise signals must have same sample rate as speech signals that are being augmented")
         # Fix noise signal length to match x["signal"] by repeating the noise signal if it is too short and then slicing it
@@ -276,19 +290,13 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, skip_already_augmente
                         tf.data.Dataset.from_tensor_slices(mixed_signals),
                         tf.data.Dataset.from_tensors(x).repeat(len(mixed_signals))))
                   .map(_update_element_meta))
-    def _is_not_augmented(x):
-        return not (skip_already_augmented and x["signal_is_augmented"])
-    # Augment signals of all unaugmented elements (or all elements if skip_already_augmented is False)
-    augmented_ds = (ds.filter(_is_not_augmented)
-                      .interleave(
-                          _add_random_noise_and_flatten,
-                          block_length=len(snr_list),
-                          num_parallel_calls=TF_AUTOTUNE))
-    # Interleave augmented and original elements randomly
-    return tf.data.experimental.sample_from_datasets((ds, augmented_ds))
+    return ds.interleave(
+                _add_random_noise_and_flatten,
+                block_length=len(snr_list),
+                num_parallel_calls=TF_AUTOTUNE)
 
 
-def augment_by_random_resampling(ds, range, skip_already_augmented=True):
+def augment_by_random_resampling(ds, range):
     """
     Create new samples by resampling signals of every element of ds with randomly chosen sample rate ratio from the given range.
     E.g.
@@ -318,21 +326,8 @@ def augment_by_random_resampling(ds, range, skip_already_augmented=True):
                 name="augment_by_random_resampling")
         resampled_signal = tf.squeeze(resampled_signal, -1)
         new_id = tf.strings.join(("augmented", x["id"], "rate", tf.strings.as_string(random_ratio, precision=3)), separator="-")
-        return dict(x, id=new_id, signal=resampled_signal, signal_is_augmented=True)
-    def _is_not_augmented(x):
-        return not (skip_already_augmented and x["signal_is_augmented"])
-    augmented_ds = (ds.filter(_is_not_augmented)
-                      .map(_resample_randomly, num_parallel_calls=TF_AUTOTUNE))
-    return tf.data.experimental.sample_from_datasets((ds, augmented_ds))
-
-
-def augment_prepare(ds):
-    """
-    Prepare unaugmented dataset for augmentation.
-    """
-    def _set_flag(x):
-        return dict(x, signal_is_augmented=False)
-    return ds.map(_set_flag, num_parallel_calls=TF_AUTOTUNE)
+        return dict(x, id=new_id, signal=resampled_signal)
+    return ds.map(_resample_randomly, num_parallel_calls=TF_AUTOTUNE)
 
 
 def cache(ds, directory=None, batch_size=1, cache_key=None):
@@ -918,7 +913,7 @@ VALID_STEP_FUNCTIONS = {
     "as_supervised": as_supervised,
     "augment_by_additive_noise": augment_by_additive_noise,
     "augment_by_random_resampling": augment_by_random_resampling,
-    "augment_prepare": augment_prepare,
+    "augment_signals": augment_signals,
     "cache": cache,
     "compute_rms_vad": compute_rms_vad,
     "compute_webrtc_vad": compute_webrtc_vad,

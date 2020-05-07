@@ -77,18 +77,11 @@ def create_dataset(split, labels, init_data, config):
                 # Some signals might contain only non-speech frames
                 Step("drop_empty", {}),
             ])
-        if "augment" in config["pre_process"] and any(d["split"] == split for d in config["pre_process"]["augment"]):
-            steps.append(Step("augment_prepare", {}))
-            # Create new signals by augmenting the existing signals
-            for conf in config["pre_process"]["augment"]:
-                augment_conf = dict(conf)
-                if augment_conf.pop("split") == split:
-                    augment_type = augment_conf.pop("type")
-                    # Mix random noise signals with random SNR dB levels into existing signals
-                    if augment_type == "additive_noise":
-                        steps.append(Step("augment_by_additive_noise", augment_conf))
-                    elif augment_type == "random_resampling":
-                        steps.append(Step("augment_by_random_resampling", augment_conf))
+        if "augment" in config["pre_process"]:
+            augment_configs = [conf for conf in config["pre_process"]["augment"] if conf["split"] == split]
+            # Apply augmentation only if this dataset split was specified to be augmented
+            if augment_configs:
+                steps.append(Step("augment_signals", {"augment_configs": augment_configs}))
         if "chunks" in config["pre_process"]:
             # Dividing signals into fixed length chunks
             steps.append(Step("create_signal_chunks", config["pre_process"]["chunks"]))

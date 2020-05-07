@@ -561,8 +561,6 @@ augment_config_random_resampling:
       pattern: random_resampling
     split:
       type: string
-    skip_already_augmented:
-      type: boolean
     range:
       type: array
       minItems: 2
@@ -587,8 +585,6 @@ augment_config_additive_noise:
       type: string
     noise_datadir:
       type: string
-    skip_already_augmented:
-      type: boolean
     copy_noise_files_to_tmpdir:
       type: boolean
     snr_list:
