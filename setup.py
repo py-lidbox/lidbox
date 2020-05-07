@@ -33,7 +33,7 @@ setuptools.setup(
         "lidbox.schemas",
     ],
     package_data={
-        "schemas": ["*.yaml"]
+        "lidbox.schemas": ["*.yaml"]
     },
     entry_points={
         "console_scripts": [
