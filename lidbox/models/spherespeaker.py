@@ -33,14 +33,14 @@ class L2Normalize(Layer):
 
 # From https://github.com/Livefull/SphereDiar/blob/0de1683a2e333b4ebbd2ef8deacd5684449b8799/models/current_best.h5
 # VLAD replaced by mean pooling
-def loader(input_shape, num_outputs, output_activation="log_softmax"):
+def loader(input_shape, num_outputs, embedding_dim=1000, output_activation="log_softmax"):
     inputs = Input(shape=input_shape, name="input")
-    blstm_1 = Bidirectional(LSTM(400, return_sequences=True), name="blstm_1")(inputs)
-    blstm_2 = Bidirectional(LSTM(400, return_sequences=True), name="blstm_2")(blstm_1)
-    blstm_3 = Bidirectional(LSTM(400, return_sequences=True), name="blstm_3")(blstm_2)
+    blstm_1 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_1")(inputs)
+    blstm_2 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_2")(blstm_1)
+    blstm_3 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_3")(blstm_2)
     x = Concatenate(name="blstm_concat")([blstm_1, blstm_2, blstm_3])
     x = BatchNormalization(name="blstm_bn")(x)
-    x = Dense(256, activation="relu", name="fc_relu")(x)
+    x = Dense(embedding_dim, activation="relu", name="fc_relu")(x)
     x = GlobalAveragePooling1D(name="avg_pooling")(x)
     x = BatchNormalization(name="pool_bn")(x)
     x = L2Normalize(name="l2_normalize")(x)
