@@ -35,9 +35,9 @@ class L2Normalize(Layer):
 # VLAD replaced by mean pooling
 def loader(input_shape, num_outputs, embedding_dim=1000, output_activation="log_softmax"):
     inputs = Input(shape=input_shape, name="input")
-    blstm_1 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_1")(inputs)
-    blstm_2 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_2")(blstm_1)
-    blstm_3 = Bidirectional(LSTM(500, return_sequences=True), name="blstm_3")(blstm_2)
+    blstm_1 = Bidirectional(LSTM(250, return_sequences=True), name="blstm_1")(inputs)
+    blstm_2 = Bidirectional(LSTM(250, return_sequences=True), name="blstm_2")(blstm_1)
+    blstm_3 = Bidirectional(LSTM(250, return_sequences=True), name="blstm_3")(blstm_2)
     x = Concatenate(name="blstm_concat")([blstm_1, blstm_2, blstm_3])
     x = BatchNormalization(name="blstm_bn")(x)
     x = Dense(embedding_dim, activation="relu", name="fc_relu")(x)
