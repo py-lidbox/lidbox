@@ -20,15 +20,19 @@ from .xvector import (
 )
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
+def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0, mean_merge_freq_channels=True):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     if channel_dropout_rate > 0:
         x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
+    # Connect untrained MobileNetV2 CNN architecture
     x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
     mobilenet = MobileNetV2(include_top=False, weights=None, input_tensor=x)
     rows, cols, channels = mobilenet.output.shape[1:]
-    x = Reshape((rows or -1, cols * channels), name="flatten_channels")(mobilenet.output)
+    if mean_merge_freq_channels:
+        x = tf.math.reduce_mean(mobilenet.output, axis=-2, name="mean_pooling")
+    else:
+        x = Reshape((rows or -1, cols * channels), name="flatten_channels")(mobilenet.output)
     x = FrameLayer(512, 5, 1, name="frame1")(x)
     x = FrameLayer(512, 3, 2, name="frame2")(x)
     x = FrameLayer(512, 3, 3, name="frame3")(x)
