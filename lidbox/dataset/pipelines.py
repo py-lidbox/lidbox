@@ -57,9 +57,6 @@ def create_dataset(split, labels, init_data, config):
             Step("drop_empty", {})])
     if "pre_process" in config:
         # Pre-processing before feature extraction has been defined in the config file
-        if "repeat_too_short_signals" in config["pre_process"]:
-            # Repeat all signals until they are of given length
-            steps.append(Step("repeat_too_short_signals", config["pre_process"]["repeat_too_short_signals"]))
         if "filters" in config["pre_process"]:
             # Drop unwanted signals
             steps.append(Step("apply_filters", {"config": config["pre_process"]["filters"]}))
@@ -77,6 +74,9 @@ def create_dataset(split, labels, init_data, config):
                 # Some signals might contain only non-speech frames
                 Step("drop_empty", {}),
             ])
+        if "repeat_too_short_signals" in config["pre_process"]:
+            # Repeat all signals until they are of given length
+            steps.append(Step("repeat_too_short_signals", config["pre_process"]["repeat_too_short_signals"]))
         if "augment" in config["pre_process"]:
             augment_configs = [conf for conf in config["pre_process"]["augment"] if conf["split"] == split]
             # Apply augmentation only if this dataset split was specified to be augmented
