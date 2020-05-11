@@ -305,7 +305,11 @@ def augment_by_random_resampling(ds, range):
     Requires tensorflow-io >= 0.12.0
     """
     logger.info("Augmenting dataset with external TensorFlow IO library by random resampling with a random ratio chosen from %s", repr(range))
-    import tensorflow_io as tfio
+    try:
+        import tensorflow_io as tfio
+    except Exception as e:
+        logger.exception("Unable to import tensorflow-io, skipping augmentation step")
+        return ds
     tfio_major, tfio_minor = tfio.version.VERSION.split('.')[:2]
     assert int(tfio_major) == 0 and int(tfio_minor) >= 12, "tfio.version.VERSION is '{}' when at least 0.12.0 is expected".format(tfio.version.VERSION)
     if int(tfio_minor) == 12:
