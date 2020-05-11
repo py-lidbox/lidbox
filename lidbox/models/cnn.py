@@ -10,6 +10,7 @@ from tensorflow.keras.layers import (
     Dense,
     GlobalAveragePooling1D,
     Input,
+    SpatialDropout1D,
 )
 from tensorflow.keras import Model
 import tensorflow as tf
@@ -21,9 +22,12 @@ def as_embedding_extractor(keras_model):
     return tf.keras.models.Model(inputs=keras_model.inputs, outputs=fc.output)
 
 
-def loader(input_shape, num_outputs, output_activation="softmax", padding="same"):
+def loader(input_shape, num_outputs, output_activation="softmax", padding="causal", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
-    conv_1 = Conv1D(500, 5, 1, padding=padding, activation="relu", name="conv_1")(inputs)
+    x = inputs
+    if channel_dropout_rate > 0:
+        x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout_{:.2f}".format(channel_dropout_rate))(x)
+    conv_1 = Conv1D(500, 5, 1, padding=padding, activation="relu", name="conv_1")(x)
     conv_2 = Conv1D(500, 7, 2, padding=padding, activation="relu", name="conv_2")(conv_1)
     conv_3 = Conv1D(500, 1, 1, padding=padding, activation="relu", name="conv_3")(conv_2)
     conv_4 = Conv1D(3000, 1, 1, padding=padding, activation="relu", name="conv_4")(conv_3)

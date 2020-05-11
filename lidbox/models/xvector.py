@@ -12,6 +12,7 @@ from tensorflow.keras.layers import (
     Dropout,
     Input,
     Layer,
+    SpatialDropout1D,
 )
 from tensorflow.keras.models import Model
 import tensorflow as tf
@@ -111,7 +112,7 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     if channel_dropout_rate > 0:
-        x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
+        x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout_{:.2f}".format(channel_dropout_rate))(x)
     x = FrameLayer(512, 5, 1, name="frame1")(x)
     x = FrameLayer(512, 3, 2, name="frame2")(x)
     x = FrameLayer(512, 3, 3, name="frame3")(x)
