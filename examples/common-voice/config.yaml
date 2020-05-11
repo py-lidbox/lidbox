@@ -64,7 +64,7 @@ pre_process:
     # WebRTC VAD requires VAD windows to be 10, 20, or 30 ms
     vad_frame_length_ms: 10
     # Do not drop non-speech segments that are shorter than 500 ms
-    min_non_speech_length_ms: 500
+    min_non_speech_length_ms: 100
   # # Alternative VAD:
   # # RMS based VAD, dropping every frame for which rms(frame) <= strength * mean_rms
   # # This is much faster than WebRTC VAD because its done with TF ops,
@@ -133,10 +133,12 @@ experiment:
   model:
     # See lidbox/models/xvector.py
     key: xvector
+    kwargs:
+      channel_dropout_rate: 0.5
   optimizer:
     cls: Adam
     kwargs:
-      learning_rate: 0.00001
+      learning_rate: 0.0001
   callbacks:
     - cls: TensorBoard
     - cls: ModelCheckpoint

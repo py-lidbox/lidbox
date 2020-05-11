@@ -59,7 +59,7 @@ embeddings:
 
 # Fit Gaussian Naive Bayes from scikit-learn on extracted xvectors
 # See lidbox.embeddings.sklearn_utils
-experiment:
+sklearn_experiment:
   cache_directory: ./lidbox-cache
   name: commonvoice-lang4-embeddings
   model:
