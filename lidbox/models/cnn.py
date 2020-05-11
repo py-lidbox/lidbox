@@ -17,12 +17,12 @@ import tensorflow as tf
 
 
 def as_embedding_extractor(keras_model):
-    fc = keras_model.get_layer(name="fc_2")
+    fc = keras_model.get_layer(name="fc_1")
     fc.activation = None
     return tf.keras.models.Model(inputs=keras_model.inputs, outputs=fc.output)
 
 
-def loader(input_shape, num_outputs, output_activation="softmax", padding="causal", channel_dropout_rate=0):
+def loader(input_shape, num_outputs, output_activation="log_softmax", padding="causal", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     if channel_dropout_rate > 0:
