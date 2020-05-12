@@ -18,6 +18,7 @@ import sklearn.metrics
 import lidbox
 import lidbox.dataset.steps
 import lidbox.models.keras_utils
+from lidbox import load_yaml
 from lidbox.dataset.steps import Step
 from lidbox.models.keras_utils import KerasWrapper
 from lidbox.dataset.tf_utils import make_label2onehot
@@ -146,7 +147,7 @@ def load_user_script_as_module(path):
 
 def load_splits_from_config_file(config_file_path):
     logger.info("Using config file '%s'", config_file_path)
-    config = lidbox.load_yaml(config_file_path)
+    config = load_yaml(config_file_path)
     logger.info("Reading all metadata from %d different datasets.", len(config["datasets"]))
     split2datasets, labels = get_flat_dataset_config(config)
     logger.info("Merged all metadata into %d splits, amount of all labels %s, set of all labels:\n  %s", len(split2datasets), len(labels), '\n  '.join(labels))

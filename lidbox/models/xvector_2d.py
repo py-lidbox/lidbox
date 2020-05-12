@@ -1,5 +1,6 @@
 """
-x-vector with 2D CNN frontend for gathering frequency channel information.
+clstm.py with 2D CNN frontend only.
+I.e. x-vector with Conv2D layers for gathering frequency channel information.
 """
 from tensorflow.keras.layers import (
     Activation,
@@ -45,27 +46,24 @@ class FrameLayer2D(Layer):
         return x
 
     def get_config(self):
-        config = {
+        base_config = super().get_config()
+        base_config.update({
             "filters": self.conv.filters,
             "kernel_size": self.conv.kernel_size,
             "strides": self.conv.strides,
             "padding": self.conv.padding,
             "dropout": self.dropout.rate if self.dropout else None
-        }
-        base_config = super().get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+        })
+        return base_config
 
     @classmethod
     def from_config(cls, config):
         return cls(**config)
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
+def loader(input_shape, num_outputs, output_activation="log_softmax"):
     inputs = Input(shape=input_shape, name="input")
-    x = inputs
-    if channel_dropout_rate > 0:
-        x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
-    x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
+    x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(inputs)
     x = FrameLayer2D(256, (1, 5), (1, 1), name="frame2d_1")(x)
     x = FrameLayer2D(128, (1, 3), (1, 2), name="frame2d_2")(x)
     x = FrameLayer2D(64, (1, 3), (1, 3), name="frame2d_3")(x)

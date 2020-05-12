@@ -6,7 +6,6 @@ url: https://pdfs.semanticscholar.org/00a4/e57e9189162dc9875a1cdca527711f373b53.
 from tensorflow.keras.layers import (
     Activation,
     Dense,
-    Dropout,
     Input,
 )
 from tensorflow.keras.models import Model
@@ -20,12 +19,9 @@ from .xvector import (
 )
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
+def loader(input_shape, num_outputs, output_activation="log_softmax"):
     inputs = Input(shape=input_shape, name="input")
-    x = inputs
-    if channel_dropout_rate > 0:
-        x = Dropout(rate=channel_dropout_rate, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
-    x = FrameLayer(512, 5, 1, name="frame1")(x)
+    x = FrameLayer(512, 5, 1, name="frame1")(inputs)
     x = FrameLayer(512, 1, 1, name="frame2")(x)
     x = FrameLayer(512, 3, 2, name="frame3")(x)
     x = FrameLayer(512, 1, 1, name="frame4")(x)
