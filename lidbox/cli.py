@@ -173,23 +173,13 @@ class TrainEmbeddings(Command):
     def run(self):
         super().run()
         import lidbox.api
-        import lidbox.embeddings.sklearn_utils
         args = self.args
         if args.verbosity:
             print("Extracting embeddings with pre-trained model(s) and training classifier(s) on embeddings, using config '{}'".format(args.lidbox_config_yaml_path))
         split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2ds = lidbox.api.create_datasets(split2meta, labels, config)
-        split2numpy_ds, target2label = lidbox.api.extract_embeddings(split2ds, labels)
-        train_data = split2numpy_ds[config["sklearn_experiment"]["data"]["train"]["split"]]
-        test_data = split2numpy_ds[config["sklearn_experiment"]["data"]["test"]["split"]]
-        model_key = config["sklearn_experiment"]["model"]["key"]
-        model_kwargs = config["sklearn_experiment"]["model"].get("kwargs", {})
-        if model_key == "naive_bayes":
-            lidbox.embeddings.sklearn_utils.fit_naive_bayes(
-                    train_data, test_data, labels, config, target2label, **model_kwargs)
-        else:
-            print("Unknown model key '{}' for training embeddings.".format(model_key), file=sys.stderr)
-            return 1
+        metrics = lidbox.api.fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels, config)
+        lidbox.api.write_metrics(metrics, dict(config, experiment=config["sklearn_experiment"]))
 
 
 class Utils(Command):

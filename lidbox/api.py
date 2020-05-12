@@ -239,8 +239,9 @@ def collect_targets(labels, meta):
         yield x["id"].decode("utf-8"), x["target"]
 
 
-def extract_embeddings(split2ds, labels):
+def extract_embeddings_as_numpy_data(split2ds, labels):
     import tensorflow as tf
+    # We assume the label2target mapping used during training was from the same labels list
     label2target, _ = make_label2onehot(labels)
     target2label = {label2target.lookup(tf.convert_to_tensor(l)).numpy(): l for l in labels}
     def _assert_valid_targets(x):
@@ -251,7 +252,7 @@ def extract_embeddings(split2ds, labels):
         return x
     split2numpy_ds = {s: {} for s in split2ds}
     for split, ds in split2ds.items():
-        logger.info("Extracting embeddings from split %s, collecting to numpy arrays", split)
+        logger.info("Extracting embeddings from split '%s' and collecting them to numpy arrays", split)
         batch_X, batch_y, batch_ids = [], [], []
         for x in ds.map(_assert_valid_targets).as_numpy_iterator():
             batch_X.append(x["embedding"])
@@ -262,6 +263,55 @@ def extract_embeddings(split2ds, labels):
                 "y": np.concatenate(batch_y),
                 "ids": np.concatenate(batch_ids).astype(str)}
     return split2numpy_ds, target2label
+
+
+# TODO split training and evaluation
+# TODO move embedding demo plotting to TensorBoard image summaries
+# TODO TensorFlow backend classifiers
+def fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels, config):
+    import lidbox.embeddings.sklearn_utils
+    split2numpy_ds, target2label = extract_embeddings_as_numpy_data(split2ds, labels)
+    train_data = split2numpy_ds[config["sklearn_experiment"]["data"]["train"]["split"]]
+    test_data = split2numpy_ds[config["sklearn_experiment"]["data"]["test"]["split"]]
+    model_key = config["sklearn_experiment"]["model"]["key"]
+    model_kwargs = config["sklearn_experiment"]["model"].get("kwargs", {})
+    if model_key == "naive_bayes":
+        predictions = lidbox.embeddings.sklearn_utils.fit_naive_bayes_and_predict_test_set(
+                train_data, test_data, labels, config, target2label, **model_kwargs)
+    else:
+        logger.error("Unknown model key '%s' for training embeddings.", model_key)
+        return []
+    utt2prediction = unchunk_predictions(zip(test_data["ids"], predictions), config)
+    label2target = {l: t for t, l in target2label.items()}
+    utt2target = {u: label2target[l] for u, l in zip(split2meta["test"]["id"], split2meta["test"]["label"])}
+    utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
+    assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
+    return list(evaluate_metrics_for_predictions(
+        utt2prediction,
+        utt2target,
+        config["sklearn_experiment"]["data"]["test"]["evaluate_metrics"],
+        labels))
+
+
+def unchunk_predictions(utt2prediction, config):
+    if "chunks" in config.get("post_process", {}):
+        logger.info("Extracted features were divided into chunks, merging feature chunk scores by averaging")
+        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
+    if "chunks" in config.get("pre_process", {}):
+        logger.info("Original signals were divided into chunks, merging signal chunk scores by averaging")
+        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
+    return utt2prediction
+
+
+def generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels):
+    missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
+    if missed_utterances:
+        predictions = np.stack([p for _, p in utt2prediction])
+        min_score = np.amin(predictions)
+        logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
+        logger.debug("missed utterances:\n  %s", "\n  ".join(str(u) for u in missed_utterances))
+        utt2prediction.extend([(utt, np.array(len(labels) * [min_score])) for utt in sorted(missed_utterances)])
+    return utt2prediction
 
 
 #TODO simplify and divide into manageable pieces
@@ -296,41 +346,44 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
                 "The model predicted %d labels when %d correct labels were expected. All predictions are sliced up to index %d.",
                 predictions.shape[1], len(labels), len(labels))
         utt2prediction = [(u, p[:len(labels)]) for u, p in utt2prediction]
-        predictions = np.stack([p for _, p in utt2prediction])
-    if "chunks" in config.get("post_process", {}):
-        logger.info("Extracted features were divided into chunks, merging feature chunk scores by averaging")
-        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
-        predictions = np.stack([p for _, p in utt2prediction])
-    if "chunks" in config.get("pre_process", {}):
-        logger.info("Original signals were divided into chunks, merging signal chunk scores by averaging")
-        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
-        predictions = np.stack([p for _, p in utt2prediction])
+    utt2prediction = unchunk_predictions(utt2prediction, config)
     # Collect targets from the test set iterator
     utt2target = dict(collect_targets(labels, split2meta[test_conf["split"]]))
-    missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
-    min_score = np.amin(predictions)
-    max_score = np.amax(predictions)
-    if missed_utterances:
-        logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
-        utt2prediction.extend([(utt, np.array(len(labels) * [min_score])) for utt in sorted(missed_utterances)])
+    utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
     scores_file = os.path.join(
             lidbox.models.keras_utils.experiment_cache_from_config(config),
             "predictions",
             "scores")
     os.makedirs(os.path.dirname(scores_file), exist_ok=True)
-    logger.info("Writing predicted scores of shape %s to '%s'", predictions.shape, scores_file)
+    logger.info("Writing %d predicted scores to '%s'", len(utt2prediction), scores_file)
     if os.path.exists(scores_file):
         logger.warning("Overwriting existing '%s'", scores_file)
     with open(scores_file, "w") as scores_f:
         print_predictions(utt2prediction, labels, file=scores_f)
-    metric_results = []
+    return list(evaluate_metrics_for_predictions(
+        utt2prediction,
+        utt2target,
+        test_conf["evaluate_metrics"],
+        labels))
+
+
+def evaluate_metrics_for_predictions(utt2prediction, utt2target, eval_confs, labels):
     # Ensure true labels are always in the same order as in predictions
     predictions = np.stack([p for _, p in utt2prediction])
+    min_score = np.amin(predictions)
+    max_score = np.amax(predictions)
     true_labels_sparse = np.array([utt2target[u] for u, _ in utt2prediction])
     pred_labels_sparse = np.argmax(predictions, axis=1)
-    logger.info("Evaluating metrics on true labels of shape %s and predicted labels of shape %s", true_labels_sparse.shape, pred_labels_sparse.shape)
-    #TODO move to separate function and allow batches
-    for metric in test_conf["evaluate_metrics"]:
+    def onehot(i):
+        o = np.zeros(len(labels))
+        o[i] = 1
+        return o
+    true_labels_dense = np.stack([onehot(t) for t in true_labels_sparse])
+    logger.info(
+            "Evaluating metrics on true labels of shape %s and predicted labels of shape %s."
+            " Min prediction score %.3f max prediction score %.3f",
+            true_labels_sparse.shape, pred_labels_sparse.shape, float(min_score), float(max_score))
+    for metric in eval_confs:
         result = None
         if metric["name"].endswith("average_detection_cost"):
             logger.info("Evaluating minimum average detection cost")
@@ -340,7 +393,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
                 cavg.update_state(true_labels_sparse, predictions)
             else:
                 cavg = lidbox.metrics.AverageDetectionCost(len(labels), thresholds)
-                cavg.update_state(true_labels, predictions)
+                cavg.update_state(true_labels_dense, predictions)
             result = float(cavg.result().numpy())
             logger.info("%s: %.6f", metric["name"], result)
         elif metric["name"].endswith("average_equal_error_rate"):
@@ -348,11 +401,8 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
             logger.info("Evaluating average equal error rate")
             eer = np.zeros(len(labels))
             for l, label in enumerate(labels):
-                if label not in all_testset_labels:
-                    eer[l] = 0
-                    continue
                 # https://stackoverflow.com/a/46026962
-                fpr, tpr, _ = sklearn.metrics.roc_curve(true_labels[:,l], predictions[:,l])
+                fpr, tpr, _ = sklearn.metrics.roc_curve(true_labels_dense[:,l], predictions[:,l])
                 fnr = 1 - tpr
                 eer[l] = fpr[np.nanargmin(np.absolute(fnr - fpr))]
             result = {"avg": float(eer.mean()),
@@ -384,8 +434,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
             result = result.tolist()
         else:
             logger.error("Cannot evaluate unknown metric '%s'", metric["name"])
-        metric_results.append({"name": metric["name"], "result": result})
-    return metric_results
+        yield {"name": metric["name"], "result": result}
 
 
 def write_metrics(metrics, config):

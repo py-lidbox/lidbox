@@ -57,14 +57,17 @@ split:
     only_full_batches:
       type: boolean
     evaluate_metrics:
-      type: array
-      items:
-        type: object
-        required:
-          - name
-        properties:
-          name:
-            type: string
+      $ref: '#/definitions/evaluate_metrics'
+
+evaluate_metrics:
+  type: array
+  items:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
 
 split_nobatch:
   type: object
@@ -74,6 +77,8 @@ split_nobatch:
   properties:
     split:
       type: string
+    evaluate_metrics:
+      $ref: '#/definitions/evaluate_metrics'
 
 group_by_input_length:
   type: object

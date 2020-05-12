@@ -160,7 +160,7 @@ def draw_random_sample(train, test, labels, target2label, sample_size=100):
     return label2sample
 
 
-def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
+def fit_naive_bayes_and_predict_test_set(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
     scaler = sklearn.preprocessing.StandardScaler()
     logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
     scaler.fit(train["X"])
@@ -189,26 +189,19 @@ def fit_naive_bayes(train, test, labels, config, target2label, n_plda_coefs=None
         logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
         p.fit(train["X"])
     label2sample = draw_random_sample(train, test, labels, target2label)
-    demo_dir = os.path.join(config["sklearn_experiment"]["cache_directory"], "figures")
+    demo_dir = os.path.join(
+            config["sklearn_experiment"]["cache_directory"],
+            config["sklearn_experiment"]["model"]["key"],
+            config["sklearn_experiment"]["name"],
+            "figures")
     plot_embedding_demo(os.path.join(demo_dir, "train"), train, target2label, pca, label2sample["train"])
     plot_embedding_demo(os.path.join(demo_dir, "test"), test, target2label, pca, label2sample["test"])
-    classifiers = [
-          sklearn.naive_bayes.GaussianNB(),
-    ]
-    logger.info("Training %d classifiers", len(classifiers))
-    for classifier in classifiers:
-        logger.info("Fitting with train_X %s and train_y %s classifier:\n  %s",
-             train["X"].shape,
-             train["y"].shape,
-             classifier)
-        classifier.fit(train["X"], train["y"])
-        pred = classifier.predict_log_proba(test["X"])
-        pred = np.maximum(pred, -100)
-        cavg = lidbox.metrics.SparseAverageDetectionCost(len(labels), np.linspace(pred.min(), pred.max(), 20))
-        cavg.update_state(test["y"], pred)
-        logger.info("Evaluating classifier with test_X %s and test_y %s\n  classifier score %.6f\n  C_avg %.6f\n  classifier was %s",
-             test["X"].shape,
-             test["y"].shape,
-             classifier.score(test["X"], test["y"]),
-             cavg.result(),
-             classifier)
+    classifier = sklearn.naive_bayes.GaussianNB()
+    logger.info("Fitting with train_X %s and train_y %s classifier:\n  %s",
+         train["X"].shape,
+         train["y"].shape,
+         classifier)
+    classifier.fit(train["X"], train["y"])
+    pred = classifier.predict_log_proba(test["X"])
+    pred = np.maximum(pred, -100)
+    return pred
