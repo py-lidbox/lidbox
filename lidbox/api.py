@@ -13,7 +13,6 @@ import sys
 logger = logging.getLogger("api")
 
 import numpy as np
-import sklearn.metrics
 
 import lidbox
 import lidbox.dataset.steps
@@ -368,6 +367,7 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
 
 
 def evaluate_metrics_for_predictions(utt2prediction, utt2target, eval_confs, labels):
+    import sklearn.metrics
     # Ensure true labels are always in the same order as in predictions
     predictions = np.stack([p for _, p in utt2prediction])
     min_score = np.amin(predictions)
@@ -437,12 +437,20 @@ def evaluate_metrics_for_predictions(utt2prediction, utt2target, eval_confs, lab
         yield {"name": metric["name"], "result": result}
 
 
-def write_metrics(metrics, config):
-    metrics_file = os.path.join(
-            lidbox.models.keras_utils.experiment_cache_from_config(config),
+def _metrics_file_from_config(config):
+    from lidbox.models.keras_utils import experiment_cache_from_config
+    return os.path.join(
+            experiment_cache_from_config(config),
             "predictions",
             "metrics.json")
+
+def write_metrics(metrics, config):
+    metrics_file = _metrics_file_from_config(config)
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     logger.info("Writing evaluated metrics to '%s'", metrics_file)
     with open(metrics_file, "w") as f:
         json.dump(metrics, f)
+
+def load_metrics(config):
+    with open(_metrics_file_from_config(config)) as f:
+        return json.load(f)

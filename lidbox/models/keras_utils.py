@@ -17,10 +17,11 @@ MODELS_IMPORT_PATH = "lidbox.models."
 
 
 def experiment_cache_from_config(config):
+    experiment_config = config["sklearn_experiment"] if "sklearn_experiment" in config else config["experiment"]
     return os.path.join(
-            config["experiment"]["cache_directory"],
-            config["experiment"]["model"]["key"],
-            config["experiment"]["name"])
+            experiment_config["cache_directory"],
+            experiment_config["model"]["key"],
+            experiment_config["name"])
 
 
 def best_model_checkpoint_from_config(config):
