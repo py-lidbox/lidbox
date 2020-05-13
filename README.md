@@ -8,7 +8,7 @@
 * Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
 * You can also try `lidbox` for speaker recognition, since no assumptions will be made of the signal labels. E.g. use utt2speaker as utt2label and see what happens.
 
-## Why would I want use this?
+## Why would I want to use this?
 
 * You need a simple, deep learning based speech classification pipeline.
     For example: waveform -> VAD filter -> augment audio data -> serialize all data to a single binary file -> extract log-scale Mel-spectra or MFCC -> use DNN/CNN/LSTM/GRU/attention (etc.) to classify by signal labels
