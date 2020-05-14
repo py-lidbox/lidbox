@@ -55,15 +55,15 @@ class FrameLayer(Layer):
         return x
 
     def get_config(self):
-        config = {
+        config = super().get_config()
+        config.update({
             "filters": self.conv.filters,
             "kernel_size": self.conv.kernel_size,
             "strides": self.conv.strides,
             "padding": self.conv.padding,
             "dropout": self.dropout.rate if self.dropout else None
-        }
-        base_config = super().get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+        })
+        return config
 
     @classmethod
     def from_config(cls, config):
@@ -90,12 +90,12 @@ class SegmentLayer(Layer):
         return input_shape[0], self.dense.units
 
     def get_config(self):
-        config = {
+        config = super().get_config()
+        config.update({
             "units": self.dense.units,
             "dropout": self.dropout.rate if self.dropout else None
-        }
-        base_config = super().get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+        })
+        return config
 
     @classmethod
     def from_config(cls, config):
