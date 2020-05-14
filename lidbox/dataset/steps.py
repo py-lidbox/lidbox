@@ -453,7 +453,7 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
                     0,
                     message="Unable to add audio to tensorboard summary due to empty signals in the batch")
             signals = tf.expand_dims(batch["signal"][:max_outputs], -1)
-            tf.summary.audio("utterances", signals, sample_rates[0], step=batch_idx, encoding="wav")
+            tf.summary.audio("utterances", signals, sample_rates[0], step=batch_idx, encoding="wav", max_outputs=max_outputs)
         enumerated_uttids = tf.strings.reduce_join(
                 (tf.strings.as_string(tf.range(1, max_outputs + 1)), batch["id"][:max_outputs]),
                 axis=0,
