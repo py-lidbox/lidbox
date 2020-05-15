@@ -1,6 +1,6 @@
 """
 Audio feature extraction.
-Some functions are simply one-to-one TensorFlow math conversions from https://github.com/librosa.
+Many functions have been inspired by https://github.com/librosa and https://github.com/kaldi-asr/kaldi.
 """
 import os
 import wave
