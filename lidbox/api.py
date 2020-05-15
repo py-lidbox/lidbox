@@ -17,7 +17,7 @@ import numpy as np
 import lidbox
 import lidbox.dataset.steps
 import lidbox.models.keras_utils
-from lidbox import load_yaml
+from lidbox import load_yaml, yaml_pprint
 from lidbox.dataset.steps import Step
 from lidbox.models.keras_utils import KerasWrapper
 from lidbox.dataset.tf_utils import make_label2onehot
