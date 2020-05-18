@@ -13,7 +13,7 @@ def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legen
     cm = np.array(cm, dtype=np.float32)
     assert cm.shape[1] == cm.shape[0] == num_labels, "Confusion matrix shape {} must match amount of labels {} both in columns and rows".format(cm.shape, num_labels)
     # Normalize by support
-    cm /= cm.sum(axis=1)
+    cm /= cm.sum(axis=1, keepdims=True)
     fig, ax = plt.subplots(figsize=(4, 4))
     if title:
         ax.set_title(title)
