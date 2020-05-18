@@ -55,10 +55,11 @@ def init_metric_from_config(config):
 def init_callback_from_config(config, cache_dir):
     user_kwargs = config.get("kwargs", {})
     if config["cls"] == "ModelCheckpoint":
+        default_checkpoint_format = "epoch{epoch:06d}__val_loss{val_loss:.12f}.hdf5"
         callback_kwargs = {
             "filepath": os.path.join(
                 os.path.join(cache_dir, "checkpoints"),
-                config.get("format", "epoch{epoch:06d}.hdf5"))}
+                config.get("format", default_checkpoint_format))}
         callback_kwargs.update(user_kwargs)
         os.makedirs(os.path.dirname(callback_kwargs["filepath"]), exist_ok=True)
     elif config["cls"] == "TensorBoard":
@@ -99,18 +100,20 @@ class KerasWrapper:
 
     @staticmethod
     def get_best_checkpoint_path(checkpoints_dir, key=None, mode=None):
-        checkpoints = list(p.path for p in os.scandir(checkpoints_dir) if p.is_file() and p.name.endswith(".hdf5"))
+        if key is None:
+            key = "epoch"
+        checkpoints = [p.path for p in os.scandir(checkpoints_dir) if p.is_file() and p.name.endswith(".hdf5")]
         key_fn = lambda p: parse_checkpoint_value(p, key)
         best_path = None
         if checkpoints:
-            if key is None or key == "epoch":
+            if key == "epoch":
                 # Greatest epoch value
                 best_path = max(checkpoints, key=lambda p: int(key_fn(p)))
             else:
                 assert mode in ("min", "max"), mode
                 if mode == "min":
                     best_path = min(checkpoints, key=lambda p: float(key_fn(p)))
-                elif mode == "max":
+                else:
                     best_path = max(checkpoints, key=lambda p: float(key_fn(p)))
         return best_path
 
