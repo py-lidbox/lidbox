@@ -4,7 +4,7 @@ Modular building blocks for constructing a tf.data.Dataset pipeline from metadat
 See lidbox.dataset.steps for the step definitions.
 """
 import logging
-logger = logging.getLogger("dataset")
+logger = logging.getLogger(__name__)
 
 from lidbox.dataset.steps import from_steps
 

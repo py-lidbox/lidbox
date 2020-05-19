@@ -10,7 +10,7 @@ import os
 import shutil
 import time
 
-logger = logging.getLogger("dataset")
+logger = logging.getLogger(__name__)
 
 import tensorflow as tf
 TF_VERSION_MAJOR, TF_VERSION_MINOR = tuple(int(x) for x in tf.version.VERSION.split(".")[:2])

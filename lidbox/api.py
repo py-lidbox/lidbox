@@ -10,7 +10,7 @@ import os
 import random
 import sys
 
-logger = logging.getLogger("api")
+logger = logging.getLogger(__name__)
 
 import numpy as np
 

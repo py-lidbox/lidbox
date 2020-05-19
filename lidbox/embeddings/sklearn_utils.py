@@ -16,7 +16,7 @@ import tensorflow as tf
 import lidbox.metrics
 
 
-logger = logging.getLogger("sklearn_utils")
+logger = logging.getLogger(__name__)
 
 categorical_cmap = colorcet.glasbey_category10
 plt.rcParams["font.size"] = 28
