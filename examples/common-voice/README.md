@@ -44,6 +44,8 @@ After downloading, the directory should contain the following files:
 
 ### Train an x-vector model on log-scale Mel-spectrograms
 
+**Note** there's also a [notebook](./common-voice-4.ipynb) example on how to use the API.
+
 3. Run the `lidbox` end-to-end pipeline
 
         lidbox e2e -v config.yaml
@@ -61,15 +63,6 @@ After downloading, the directory should contain the following files:
 5.
 
         lidbox train-embeddings -v config.xvector-NB.yaml
-
-#### Randomly chosen x-vectors in the PLDA model space
-
-![Heatmap plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PLDA-model-space.png)
-
-#### 2-dim PCA projection
-
-![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./img/embeddings-PCA-2D.png)
-
 
 ### Extra
 

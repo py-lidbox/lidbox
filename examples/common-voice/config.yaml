@@ -1,6 +1,6 @@
 # List of input datasets containing wav-files
 datasets:
-  - key: common-voice
+  - key: common-voice-4
     # Language labels as BCP-47 tags
     # See also https://schneegans.de/lv/?tags=br%0D%0Aet%0D%0Amn%0D%0Atr&format=text
     labels:
@@ -127,7 +127,7 @@ experiment:
   # Where to store checkpoints and TensorBoard events
   cache_directory: ./lidbox-cache
   # Can be anything, will be used to distinguish training runs of the same model
-  name: commonvoice-lang4
+  name: common-voice-4
   model:
     # See lidbox/models/xvector.py
     key: xvector
