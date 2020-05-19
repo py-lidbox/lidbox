@@ -8,6 +8,8 @@
 * Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
 * You can also try `lidbox` for speaker recognition, since no assumptions will be made of the signal labels. E.g. use utt2speaker as utt2label and see what happens.
 
+[Here](./examples/common-voice/common-voice-4.ipynb) is an example notebook showing `lidbox` in action.
+
 ## Why would I want to use this?
 
 * You need a simple, deep learning based speech classification pipeline.
