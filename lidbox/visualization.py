@@ -1,13 +1,12 @@
 import logging
 import matplotlib.pyplot as plt
-# Plot text as text, not curves
-plt.rcParams["svg.fonttype"] = "none"
 import numpy as np
 
 
 # Modified from:
 # https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
 def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legend=True):
+    plt.style.use("default")
     num_labels = len(label_names)
     cm = np.array(cm, dtype=np.float32)
     assert cm.shape[1] == cm.shape[0] == num_labels, "Confusion matrix shape {} must match amount of labels {} both in columns and rows".format(cm.shape, num_labels)

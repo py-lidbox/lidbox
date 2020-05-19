@@ -19,7 +19,6 @@ import lidbox.metrics
 logger = logging.getLogger(__name__)
 
 categorical_cmap = colorcet.glasbey_category10
-plt.rcParams["font.size"] = 28
 
 
 class PLDA(PLDAClassifier):
@@ -32,6 +31,7 @@ class PLDA(PLDAClassifier):
 
 
 def pca_scatterplot_by_label(label2sample, pca):
+    plt.rcParams["font.size"] = 28
     assert pca.n_components in (2, 3), "PCA plot with n_components = %d not implemented, must be 2 or 3".format(pca.n_components)
     scatter_kw = dict(s=100, alpha=0.7)
     if pca.n_components == 2:
@@ -52,7 +52,8 @@ def pca_scatterplot_by_label(label2sample, pca):
     return fig
 
 
-def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample):
+def plot_embedding_demo(data, target2label, label2sample, pca=None, output_figure_dir=None):
+    plt.rcParams["font.size"] = 28
     def _write_and_close(fig, name):
         path = os.path.join(output_figure_dir, name)
         fig.savefig(path, bbox_inches="tight", dpi=150)
@@ -78,10 +79,19 @@ def plot_embedding_demo(output_figure_dir, data, target2label, pca, label2sample
             cax=fig.add_axes([0.83, 0.1, 0.02, 0.8]),
             ticks=[pixel_scaler.vmin, 0, pixel_scaler.vmax])
     cbar.outline.set_visible(False)
-    os.makedirs(output_figure_dir, exist_ok=True)
-    _write_and_close(fig, "embeddings-PLDA-model-space.png")
-    _write_and_close(pca_scatterplot_by_label(label2sample, pca["2D"]), "embeddings-PCA-2D.png")
-    _write_and_close(pca_scatterplot_by_label(label2sample, pca["3D"]), "embeddings-PCA-3D.png")
+    if pca:
+        if "2D" in pca:
+            pca_2d_plot = pca_scatterplot_by_label(label2sample, pca["2D"])
+        if "3D" in pca:
+            pca_3d_plot = pca_scatterplot_by_label(label2sample, pca["3D"])
+    if output_figure_dir is not None:
+        os.makedirs(output_figure_dir, exist_ok=True)
+        _write_and_close(fig, "embeddings-PLDA-model-space.png")
+        if pca:
+            if "2D" in pca:
+                _write_and_close(pca_2d_plot, "embeddings-PCA-2D.png")
+            if "3D" in pca:
+                _write_and_close(pca_3d_plot, "embeddings-PCA-3D.png")
 
 
 def get_lda_scores(lda, test):
@@ -194,8 +204,8 @@ def fit_naive_bayes_and_predict_test_set(train, test, labels, config, target2lab
             config["sklearn_experiment"]["model"]["key"],
             config["sklearn_experiment"]["name"],
             "figures")
-    plot_embedding_demo(os.path.join(demo_dir, "train"), train, target2label, pca, label2sample["train"])
-    plot_embedding_demo(os.path.join(demo_dir, "test"), test, target2label, pca, label2sample["test"])
+    plot_embedding_demo(train, target2label, label2sample["train"], pca, os.path.join(demo_dir, "train"))
+    plot_embedding_demo(test, target2label, label2sample["test"], pca, os.path.join(demo_dir, "test"))
     classifier = sklearn.naive_bayes.GaussianNB()
     logger.info("Fitting with train_X %s and train_y %s classifier:\n  %s",
          train["X"].shape,
