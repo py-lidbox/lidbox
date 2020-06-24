@@ -14,14 +14,18 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 import tensorflow as tf
 
-# We'll implement this separately in tfjs
-from .xvector import GlobalMeanStddevPooling1D
+from .xvector import (
+    # Implemented separately in xvector_stats_pooling.js
+    GlobalMeanStddevPooling1D,
+    TIME_AXIS,
+    as_embedding_extractor,
+)
 
 
 def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", dropout_rate=None):
     """Batch normalized temporal convolution"""
-    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="same")(inputs)
-    x = BatchNormalization(name="{}_bn".format(name))(x)
+    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="causal")(inputs)
+    x = BatchNormalization(axis=TIME_AXIS, name="{}_bn".format(name))(x)
     x = Activation(activation, name="{}_{}".format(name, str(activation)))(x)
     if dropout_rate:
         x = Dropout(rate=dropout_rate, name="{}_dropout".format(name))(x)
@@ -36,7 +40,7 @@ def SegmentLayer(inputs, units, name="segment", activation="relu", dropout_rate=
         x = Dropout(rate=dropout_rate, name="{}_dropout".format(name))(x)
     return x
 
-def loader(input_shape, num_outputs, output_activation="softmax", dropout_rate=None):
+def loader(input_shape, num_outputs, output_activation="log_softmax", dropout_rate=None):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     x = FrameLayer(x, 512, 5, 1, name="frame1", dropout_rate=dropout_rate)
@@ -52,6 +56,3 @@ def loader(input_shape, num_outputs, output_activation="softmax", dropout_rate=N
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="x-vector-javascript")
-
-def predict(model, inputs):
-    return model.predict(inputs)
