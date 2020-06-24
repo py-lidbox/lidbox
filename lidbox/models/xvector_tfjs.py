@@ -1,5 +1,5 @@
 """
-TensorFlow JavaScript compatible and self-contained implementation of xvector.py
+TensorFlow JavaScript compatible implementation of xvector.py
 """
 from tensorflow.keras.layers import (
     Activation,
@@ -24,7 +24,7 @@ from .xvector import (
 
 def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", dropout_rate=None):
     """Batch normalized temporal convolution"""
-    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="causal")(inputs)
+    x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="same")(inputs)
     x = BatchNormalization(axis=TIME_AXIS, name="{}_bn".format(name))(x)
     x = Activation(activation, name="{}_{}".format(name, str(activation)))(x)
     if dropout_rate:
