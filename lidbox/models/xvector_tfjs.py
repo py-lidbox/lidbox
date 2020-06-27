@@ -18,8 +18,12 @@ from .xvector import (
     # Implemented separately in xvector_stats_pooling.js
     GlobalMeanStddevPooling1D,
     TIME_AXIS,
-    as_embedding_extractor,
 )
+
+
+def as_embedding_extractor(keras_model):
+    segment_layer = keras_model.get_layer(name="segment1_dense")
+    return tf.keras.models.Model(inputs=keras_model.inputs, outputs=segment_layer.output)
 
 
 def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", dropout_rate=None):
