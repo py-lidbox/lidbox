@@ -170,12 +170,15 @@ def draw_random_sample(train, test, labels, target2label, sample_size=100):
     return label2sample
 
 
-def fit_naive_bayes_and_predict_test_set(train, test, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
+# TODO fix 'unlabeled' data prediction hack
+def fit_naive_bayes_and_predict_test_set(train, test, unlabeled, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
     scaler = sklearn.preprocessing.StandardScaler()
     logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
     scaler.fit(train["X"])
     train["X"] = scaler.transform(train["X"])
     test["X"] = scaler.transform(test["X"])
+    if unlabeled:
+        unlabeled["X"] = scaler.transform(unlabeled["X"])
     pca = {
             "2D": sklearn.decomposition.PCA(n_components=2, whiten=False),
             "3D": sklearn.decomposition.PCA(n_components=3, whiten=False),
@@ -193,8 +196,12 @@ def fit_naive_bayes_and_predict_test_set(train, test, labels, config, target2lab
     else:
         dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
     reduce_dimensions(train, test, dim_reducer)
+    if unlabeled:
+        unlabeled["X"] = dim_reducer.transform(unlabeled["X"])
     train["X"] = sklearn.preprocessing.normalize(train["X"])
     test["X"] = sklearn.preprocessing.normalize(test["X"])
+    if unlabeled:
+        unlabeled["X"] = sklearn.preprocessing.normalize(unlabeled["X"])
     for p in pca.values():
         logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
         p.fit(train["X"])
@@ -212,6 +219,10 @@ def fit_naive_bayes_and_predict_test_set(train, test, labels, config, target2lab
          train["y"].shape,
          classifier)
     classifier.fit(train["X"], train["y"])
-    pred = classifier.predict_log_proba(test["X"])
-    pred = np.maximum(pred, -100)
+    pred = {}
+    pred["test"] = classifier.predict_log_proba(test["X"])
+    pred["test"] = np.maximum(pred["test"], -100)
+    if unlabeled:
+        pred["unlabeled"] = classifier.predict_log_proba(unlabeled["X"])
+        pred["unlabeled"] = np.maximum(pred["unlabeled"], -100)
     return pred

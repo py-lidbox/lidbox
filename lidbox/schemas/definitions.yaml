@@ -385,6 +385,14 @@ sklearn_experiment:
           $ref: '#/definitions/split_nobatch'
         train:
           $ref: '#/definitions/split_nobatch'
+        predict_unlabeled:
+          type: object
+          required:
+            - split
+          additionalProperties: false
+          properties:
+            split:
+              type: string
     cache_directory:
       type: string
     model:

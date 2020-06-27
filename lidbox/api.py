@@ -269,23 +269,40 @@ def extract_embeddings_as_numpy_data(split2ds, labels):
 # TODO TensorFlow backend classifiers
 def fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels, config):
     import lidbox.embeddings.sklearn_utils
+    import lidbox.models.keras_utils
     split2numpy_ds, target2label = extract_embeddings_as_numpy_data(split2ds, labels)
+    all_labels = set(labels)
+    def process_predictions(ids, predictions, split_key):
+        utt2prediction = unchunk_predictions(zip(ids, predictions), config)
+        label2target = {l: t for t, l in target2label.items()}
+        utt2target = {u: label2target[l] for u, l in zip(split2meta[split_key]["id"], split2meta[split_key]["label"]) if l in all_labels}
+        utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
+        assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
+        return utt2prediction, utt2target
     train_data = split2numpy_ds[config["sklearn_experiment"]["data"]["train"]["split"]]
     test_data = split2numpy_ds[config["sklearn_experiment"]["data"]["test"]["split"]]
+    unlabeled_data = {}
+    unlabeled_split = ''
+    if "predict_unlabeled" in config["sklearn_experiment"]["data"]:
+        unlabeled_split = config["sklearn_experiment"]["data"]["predict_unlabeled"]["split"]
+        unlabeled_data = split2numpy_ds[unlabeled_split]
     model_key = config["sklearn_experiment"]["model"]["key"]
     model_kwargs = config["sklearn_experiment"]["model"].get("kwargs", {})
     if model_key == "naive_bayes":
         predictions = lidbox.embeddings.sklearn_utils.fit_naive_bayes_and_predict_test_set(
-                train_data, test_data, labels, config, target2label, **model_kwargs)
+                train_data, test_data, unlabeled_data, labels, config, target2label, **model_kwargs)
     else:
         logger.error("Unknown model key '%s' for training embeddings.", model_key)
         return []
-    utt2prediction = unchunk_predictions(zip(test_data["ids"], predictions), config)
-    label2target = {l: t for t, l in target2label.items()}
-    all_labels = set(labels)
-    utt2target = {u: label2target[l] for u, l in zip(split2meta["test"]["id"], split2meta["test"]["label"]) if l in all_labels}
-    utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
-    assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
+    if "unlabeled" in predictions:
+        utt2prediction, _ = process_predictions(unlabeled_data["ids"], predictions["unlabeled"], unlabeled_split)
+        scores_file = os.path.join(
+                lidbox.models.keras_utils.experiment_cache_from_config(config),
+                "predictions",
+                config["sklearn_experiment"]["data"]["predict_unlabeled"]["split"])
+        with open(scores_file, "w") as scores_f:
+            print_predictions(utt2prediction, labels, file=scores_f)
+    utt2prediction, utt2target = process_predictions(test_data["ids"], predictions["test"], "test")
     return list(evaluate_metrics_for_predictions(
         utt2prediction,
         utt2target,
