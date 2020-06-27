@@ -282,7 +282,8 @@ def fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels,
         return []
     utt2prediction = unchunk_predictions(zip(test_data["ids"], predictions), config)
     label2target = {l: t for t, l in target2label.items()}
-    utt2target = {u: label2target[l] for u, l in zip(split2meta["test"]["id"], split2meta["test"]["label"])}
+    all_labels = set(labels)
+    utt2target = {u: label2target[l] for u, l in zip(split2meta["test"]["id"], split2meta["test"]["label"]) if l in all_labels}
     utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
     assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
     return list(evaluate_metrics_for_predictions(
