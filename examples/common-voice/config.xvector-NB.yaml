@@ -34,7 +34,7 @@ features:
     frame_step_ms: 10
     fft_length: 1024
   melspectrogram:
-    num_mel_bins: 64
+    num_mel_bins: 40
     fmin: 20
     fmax: 7000
   window_normalization:
@@ -45,11 +45,11 @@ features:
 embeddings:
   extractors:
     # This is the experiment we performed using config.yaml
-    - experiment_name: commonvoice-lang4
+    - experiment_name: common-voice-4
       model:
         key: xvector
       cache_directory: ./lidbox-cache
-      input_shape: [198, 64]
+      input_shape: [198, 40]
       output_shape: [4]
       best_checkpoint:
         monitor: val_loss
@@ -61,7 +61,7 @@ embeddings:
 # See lidbox.embeddings.sklearn_utils
 sklearn_experiment:
   cache_directory: ./lidbox-cache
-  name: commonvoice-lang4-embeddings
+  name: common-voice-4-embeddings
   model:
     key: naive_bayes
   data:

@@ -23,6 +23,7 @@ datasets=(
 downloads_dir=./downloads
 # Where to unpack all tars and convert mp3s to wavs
 output_dir=./data
+cv_artifact=cv-corpus-5-2020-06-22
 # Ignore files shorter than 1 second
 min_file_dur_sec=1
 # Resample all wav-files to this rate before writing
@@ -63,8 +64,9 @@ set -e
 for language in ${datasets[*]}; do
 	tarfile=$downloads_dir/${language}.tar.gz
 	echo "unpacking '$tarfile'"
-	mkdir --parents --verbose $output_dir/$language
+	mkdir -pv $output_dir/$language
 	tar zxf $tarfile -C $output_dir/$language
+	mv $output_dir/$language/$cv_artifact/$language/* $output_dir/$language
 	metadata_tsv=$output_dir/$language/validated.tsv
 	mp3_name_list=$(cut -f2 $metadata_tsv | tail -n +2 | shuf)
 	if [ -z "$mp3_name_list" ]; then
@@ -76,10 +78,10 @@ for language in ${datasets[*]}; do
 	total_sec=0
 	total_files=0
 	wavs_dir=$output_dir/$language/16k_wavs
-	mkdir --verbose $wavs_dir
+	mkdir -pv $wavs_dir
 	echo "converting $num_validated mp3 files to wav files into directory '$wavs_dir'"
 	for mp3_name in $mp3_name_list; do
-		uttid=$(basename --suffix .mp3 $mp3_name)
+		uttid=$(basename -s .mp3 $mp3_name)
 		mp3_path=$output_dir/$language/clips/$mp3_name
 		if [ ! -f $mp3_path ]; then
 			echo "skipping non-existing mp3 file '$mp3_path'"
