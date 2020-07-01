@@ -4,3 +4,7 @@
 *.wav
 .tox
 __pycache__
+
+#
+.DS_Store
+.idea/*
