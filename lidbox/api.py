@@ -273,7 +273,7 @@ def fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels,
     split2numpy_ds, target2label = extract_embeddings_as_numpy_data(split2ds, labels)
     all_labels = set(labels)
     def process_predictions(ids, predictions, split_key):
-        utt2prediction = unchunk_predictions(zip(ids, predictions), config)
+        utt2prediction = unchunk_predictions(list(zip(ids, predictions)), config)
         label2target = {l: t for t, l in target2label.items()}
         utt2target = {u: label2target[l] for u, l in zip(split2meta[split_key]["id"], split2meta[split_key]["label"]) if l in all_labels}
         utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
@@ -323,10 +323,11 @@ def unchunk_predictions(utt2prediction, config):
 def generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels):
     missed_utterances = set(utt2target.keys()) - set(u for u, _ in utt2prediction)
     if missed_utterances:
+        logger.info("%d test samples had no predictions, generating worst case scores for all missing predictions.", len(missed_utterances))
+        logger.debug("missed utterances:\n  %s", "\n  ".join(str(u) for u in missed_utterances))
         predictions = np.stack([p for _, p in utt2prediction])
         min_score = np.amin(predictions)
-        logger.info("%d test samples had no predictions and worst-case scores %.3f will be generated for them for every label", len(missed_utterances), min_score)
-        logger.debug("missed utterances:\n  %s", "\n  ".join(str(u) for u in missed_utterances))
+        logger.info("Worst-case score: %.3f", min_score)
         utt2prediction.extend([(utt, np.array(len(labels) * [min_score])) for utt in sorted(missed_utterances)])
     return utt2prediction
 
