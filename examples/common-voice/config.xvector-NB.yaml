@@ -1,5 +1,5 @@
 datasets:
-  - key: common-voice
+  - key: common-voice-4
     labels:
       - br
       - et
