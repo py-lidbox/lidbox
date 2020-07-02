@@ -9,7 +9,8 @@ batch_size = 1000
 
 def modify_steps(steps, split, labels, init_data, config):
     # Find the step where VAD decisions are added
-    i = [i for i, s in enumerate(steps) if s.key == "compute_webrtc_vad"][-1]
+    # i = [i for i, s in enumerate(steps) if s.key == "compute_webrtc_vad"][-1]
+    i = [i for i, s in enumerate(steps) if s.key == "compute_rms_vad"][-1]
     # Compute frequency of dropped and kept frames by the VAD decisions
     steps.insert(i + 1, Step("reduce_stats", {"statistic": "vad_ratio"}))
     # Find the step where features are extracted

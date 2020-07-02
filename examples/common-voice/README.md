@@ -1,6 +1,6 @@
 # Common Voice language identification example
 
-This example shows how to create a language identification dataset from four [Mozilla Common Voice](https://voice.mozilla.org/en/datasets) datasets:
+This example shows how to create a language identification dataset from four [Mozilla Common Voice](https://voice.mozilla.org/en/datasets) datasets (all of version 2020-06-22):
 * Breton (br)
 * Estonian (et)
 * Mongolian (mn)
@@ -44,7 +44,7 @@ After downloading, the directory should contain the following files:
 
 ### Train an x-vector model on log-scale Mel-spectrograms
 
-**Note** there's also a [notebook](./common-voice-4.ipynb) example on how to use the API.
+**Note** there's also a [notebook](./common-voice-4.ipynb) example on how to use the [API](/lidbox/api.py).
 
 3. Run the `lidbox` end-to-end pipeline
 
@@ -54,7 +54,7 @@ After downloading, the directory should contain the following files:
 
 4. Inspect extracted features and training progress in TensorBoard by running:
 
-        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/commonvoice-lang4/tensorboard
+        tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/common-voice-4/tensorboard
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 

@@ -175,7 +175,6 @@ experiment:
       evaluate_metrics:
         - name: sparse_average_detection_cost
         - name: sklearn_classification_report
-        - name: average_f1_score
         - name: confusion_matrix
 
 # If lidbox.dataset.pipelines.create_dataset is insufficient, a custom script can be used
