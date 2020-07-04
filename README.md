@@ -53,7 +53,7 @@ pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-pa
 If you plan on making changes to the code, it is easier to install `lidbox` as a Python package in setuptools develop mode:
 ```
 git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
-pip install ./lidbox
+pip install --editable ./lidbox
 ```
 Then, if you make changes to the code, there's no need to reinstall the package since the changes are reflected immediately.
 Just be careful not to make changes when `lidbox` is running, because TensorFlow will use its `autograph` package to convert some of the Python functions to TF graphs, which might fail if the code changes suddenly.
