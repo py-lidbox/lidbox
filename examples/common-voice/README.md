@@ -58,14 +58,15 @@ After downloading, the directory should contain the following files:
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
 
-### Extract x-vector embeddings from the trained model and fit Gaussian Naive Bayes
+### Train Gaussian Naive Bayes on x-vector embeddings
 
 Install the [PLDA package](https://github.com/RaviSoji/plda):
 ```
 pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
 ```
 
-5.
+5. Extract language embeddings from the x-vector model and train Gaussian Naive Bayes from `scikit-learn`:
+
         lidbox train-embeddings -v config.xvector-NB.yaml
 
 ### Extra
