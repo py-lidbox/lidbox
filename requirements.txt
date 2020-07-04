@@ -1,0 +1,2 @@
+plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
+tensorflow-gpu ~= 2.2.0
