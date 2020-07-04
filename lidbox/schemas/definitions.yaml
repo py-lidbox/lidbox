@@ -233,7 +233,7 @@ features:
       properties:
         window_len:
           type: integer
-          exclusiveMinimum: 0
+          minimum: -1
         normalize_variance:
           type: boolean
     tf_device:
