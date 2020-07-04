@@ -63,7 +63,7 @@ Just be careful not to make changes when `lidbox` is running, because TensorFlow
 One benefit of deep learning classifiers is that you can first train them on large amounts of data and then use them as feature extractors to produce low-dimensional, fixed-length language vectors from speech.
 See e.g. the [x-vector](http://danielpovey.com/files/2018_odyssey_xvector_lid.pdf) approach by Snyder et al.
 
-Below is visualization of test set language embeddings for 4 languages in 2-dimensional space.
+Below is a visualization of test set language embeddings for 4 languages in 2-dimensional space.
 Each data point represents 2 seconds of speech in one of the 4 languages.
 
 ![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./examples/common-voice/img/embeddings-PCA-2D.png)
