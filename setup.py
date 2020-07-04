@@ -10,18 +10,19 @@ setuptools.setup(
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
     author="Matias Lindgren",
-    author_email="matias.lindgren@gmail.com",
+    author_email="matias.lindgren@iki.fi",
+    url="https://github.com/matiaslindgren/lidbox",
     license="MIT",
     python_requires=">= 3.7.*",
     install_requires=[
         "PyYAML ~= 5.1",
+        "colorcet ~= 2.0.2",
         "jsonschema",
         "kaldiio ~= 2.13",
         "matplotlib ~= 3.1",
+        "plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0",
         "scikit-learn ~= 0.22.2",
         "webrtcvad ~= 2.0.10",
-        "colorcet ~= 2.0.2",
-        "plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0",
     ],
     packages=[
         "lidbox",
@@ -39,4 +40,8 @@ setuptools.setup(
             "lidbox = lidbox.__main__:main",
         ],
     },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+    ],
 )
