@@ -60,8 +60,12 @@ After downloading, the directory should contain the following files:
 
 ### Extract x-vector embeddings from the trained model and fit Gaussian Naive Bayes
 
-5.
+Install the [PLDA package](https://github.com/RaviSoji/plda):
+```
+pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
+```
 
+5.
         lidbox train-embeddings -v config.xvector-NB.yaml
 
 ### Extra
