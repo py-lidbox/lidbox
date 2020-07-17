@@ -68,7 +68,7 @@ After downloading, the directory should contain the following files:
 
         lidbox train-embeddings -v config.xvector-NB.yaml
 
-If you only need the embeddings, you can use your own [script](/../../../../issues/4#issuecomment-652900027).
+If you only need the embeddings, you can use your own [script](/../../issues/4#issuecomment-652900027).
 
 ### Extra
 
