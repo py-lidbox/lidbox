@@ -62,13 +62,13 @@ After downloading, the directory should contain the following files:
 
 5. Install the [PLDA package](https://github.com/RaviSoji/plda):
 
-    pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
+        pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
 
 6. Extract language embeddings from the x-vector model and train Gaussian Naive Bayes from `scikit-learn`:
 
         lidbox train-embeddings -v config.xvector-NB.yaml
 
-If you only need the embeddings, you can use your own [script](/issues/4#issuecomment-652900027).
+If you only need the embeddings, you can use your own [script](/../../../../issues/4#issuecomment-652900027).
 
 ### Extra
 
