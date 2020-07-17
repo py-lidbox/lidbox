@@ -72,13 +72,17 @@ If you only need the embeddings, you can use your own [script](/../../issues/4#i
 
 ### Extra
 
-Use a custom script to compute some stats on the test set:
+You can patch the default feature extraction [pipeline](/../../lidbox/dataset/pipelines.py) with external scripts.
+Here I'm using [`compute_stats.py`](./compute_stats.py) from the current example directory.
+It computes VAD decisions on the input audio and then counts how many frames were dropped and how many were kept.
 
         lidbox utils -v config.yaml --split test --run-script compute_stats.py
 
 ## Notes
 
 * You can include any kind of dataset by using Kaldi-like metadata files, see contents of `./data/{train,test}` after running step 2.
+* If the command line interface is too restricting, take look at the [notebook example](./common-voice-4.ipynb)
+for API usage examples.
 * If you don't want to use a GPU, you can e.g. prefix all commands with `env CUDA_VISIBLE_DEVICES=-1`.
 * Debug mode can be enabled by using the env var `LIDBOX_DEBUG=true`.
 * Keep an eye on the memory usage if you are using large feature extraction batches, there's no kill switch for using too large batches.
