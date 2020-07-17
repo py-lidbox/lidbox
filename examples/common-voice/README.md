@@ -72,7 +72,7 @@ If you only need the embeddings, you can use your own [script](/../../issues/4#i
 
 ### Extra
 
-You can patch the default feature extraction [pipeline](/../../lidbox/dataset/pipelines.py) with external scripts.
+You can patch the default feature extraction [pipeline](../../lidbox/dataset/pipelines.py) with external scripts.
 Here I'm using [`compute_stats.py`](./compute_stats.py) from the current example directory.
 It computes VAD decisions on the input audio and then counts how many frames were dropped and how many were kept.
 
