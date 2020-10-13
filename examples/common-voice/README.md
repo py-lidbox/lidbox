@@ -69,8 +69,9 @@ After downloading, the directory should contain the following files:
 6. Extract language embeddings from the x-vector model and train Gaussian Naive Bayes from `scikit-learn`:
 
         lidbox train-embeddings -v config.xvector-NB.yaml
+    Some samples of the extracted embeddings/vectors from both the training and test set can be found as PNG images in `./lidbox-cache/naive_bayes/common-voice-4-embeddings/figures`.
 
-If you only need the embeddings, you can use your own [script](/../../issues/4#issuecomment-652900027).
+If you want to do some other experiments with the embeddings, you can extract them as NumPy arrays with your own [script](./scripts/get_embeddings.py).
 
 ### Extra
 
@@ -79,6 +80,11 @@ Here I'm using [`compute_stats.py`](./compute_stats.py) from the current example
 It computes VAD decisions on the input audio and then counts how many frames were dropped and how many were kept.
 
         lidbox utils -v config.yaml --split test --run-script compute_stats.py
+
+### TODO
+
+Examples how to use the dataset steps API.
+The CLI is a bit cumbersome.
 
 ## Notes
 
