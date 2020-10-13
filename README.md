@@ -1,6 +1,6 @@
 # lidbox
 
-* End-to-end spoken language identification (LID) on TensorFlow.
+* Spoken language identification (LId) out of the box using TensorFlow.
 * Parallel feature extraction using `tf.data.Dataset`, with STFT computations on the GPU using the `tf.signal` package.
 * Only metadata (e.g. utt2path, utt2label) is fully loaded into memory, rest is done in linear passes  over the dataset with the `tf.data.Dataset` iterator.
 * Spectrograms, source audio, and utterance ids can be written into TensorBoard summaries.
@@ -23,13 +23,17 @@
 * You are happy doing everything with [Kaldi](https://github.com/kaldi-asr/kaldi) or some other toolkits
 * You don't want to debug by reading the source code when something goes wrong
 * You don't want to install TensorFlow 2 and configure its dependencies (CUDA etc.)
-* You need CTC or some other way to train a phoneme recognizer
+* You want to train phoneme recognizers or use CTC
 
 ## Installing
 
+You need to have Python 3 installed.
+
+### With the example
+
 ```
 git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
-pip install ./lidbox
+python3 -m pip install ./lidbox
 ```
 Check that the command line entry point is working:
 ```
@@ -37,23 +41,29 @@ lidbox -h
 ```
 If not, make sure the `setuptools` entry point scripts (e.g. directory `$HOME/.local/bin`) are on your path.
 
-Then, install TensorFlow 2.1 or 2.2 (both should work), unless it is already installed.
+### Without the example
+
+```
+python3 -m pip install lidbox
+```
+
+### TensorFlow
+
+TensorFlow 2 is not included in the package requirements because you might want to do custom configuration to get the GPU working etc.
+
+If you don't want to customize anything and instead prefer something that just works for now, the following should be enough:
+```
+python3 -m pip install tensorflow
+```
 
 If everything is working, see [this](./examples/common-voice) for a simple example to get started.
-
-### Language embeddings
-
-If you want to use language embeddings, install the [PLDA package](https://github.com/RaviSoji/plda) from [here](https://github.com/matiaslindgren/plda/tree/as-setuptools-package):
-```
-pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
-```
 
 ### Editable install
 
 If you plan on making changes to the code, it is easier to install `lidbox` as a Python package in setuptools develop mode:
 ```
 git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
-pip install --editable ./lidbox
+python3 -m pip install --editable ./lidbox
 ```
 Then, if you make changes to the code, there's no need to reinstall the package since the changes are reflected immediately.
 Just be careful not to make changes when `lidbox` is running, because TensorFlow will use its `autograph` package to convert some of the Python functions to TF graphs, which might fail if the code changes suddenly.
@@ -67,3 +77,11 @@ Below is a visualization of test set language embeddings for 4 languages in 2-di
 Each data point represents 2 seconds of speech in one of the 4 languages.
 
 ![2-dimensional PCA plot of 400 random x-vectors for 4 Common Voice languages](./examples/common-voice/img/embeddings-PCA-2D.png)
+
+### PLDA + Naive Bayes classifier
+
+There is a simple [language embedding classifier backend](./lidbox/embeddings/sklearn_utils.py) available.
+To use it, you need to first install [PLDA](https://github.com/RaviSoji/plda):
+```
+python3 -m pip install plda@https://github.com/RaviSoji/plda/archive/184d6e39b01363b72080f2752819496cd029f1bd.zip
+```

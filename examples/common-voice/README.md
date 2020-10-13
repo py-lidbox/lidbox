@@ -1,6 +1,6 @@
 # Common Voice language identification example
 
-This example shows how to create a language identification dataset from four [Mozilla Common Voice](https://voice.mozilla.org/en/datasets) datasets (all of version 2020-06-22):
+This example shows how to create a language identification dataset from four [Mozilla Common Voice](https://commonvoice.mozilla.org/en/datasets) datasets (version 2020-06-22 assumed):
 * Breton (br)
 * Estonian (et)
 * Mongolian (mn)
@@ -46,7 +46,7 @@ After downloading, the directory should contain the following files:
 
 **Note** there's also a [notebook](./common-voice-4.ipynb) example on how to use the [API](/lidbox/api.py).
 
-3. Run the `lidbox` end-to-end pipeline
+3. Run the `lidbox` end-to-end pipeline. The training should take a few minutes if you have a decent GPU, but might require up to 30 minutes on a CPU. Early stopping is used based on the validation loss.
 
         lidbox e2e -v config.yaml
     You can enable debug mode by setting the environment variable `LIDBOX_DEBUG=true`, but note that this generates a lot of output.
@@ -57,12 +57,14 @@ After downloading, the directory should contain the following files:
         tensorboard --samples_per_plugin="images=0,audio=0,text=0" --logdir ./lidbox-cache/xvector/common-voice-4/tensorboard
     Then go to the localhost web address that TensorBoard is using (probably http://localhost:6006).
     Take some time inspecting the data in all the tabs, e.g. look at the Mel filter banks under 'images' and listen to the utterances under 'audio'.
+    In my experience, TensorBoard seems to work best on Chrome, ok on Firefox and quite poorly on Safari.
 
 ### Train Gaussian Naive Bayes on x-vector embeddings
 
 5. Install the [PLDA package](https://github.com/RaviSoji/plda):
 
-        pip install plda@https://github.com/matiaslindgren/plda/archive/as-setuptools-package.zip#egg=plda-0.1.0
+        python3 -m pip install plda@https://github.com/RaviSoji/plda/archive/184d6e39b01363b72080f2752819496cd029f1bd.zip
+
 
 6. Extract language embeddings from the x-vector model and train Gaussian Naive Bayes from `scikit-learn`:
 
