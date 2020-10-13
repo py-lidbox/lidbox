@@ -13,6 +13,15 @@ function print_progress {
 	echo "$files files done, $hours hours of data"
 }
 
+# shuf-alternative
+function py_shuf {
+	python3 -c '
+import sys, random
+lines = sys.stdin.readlines()
+random.shuffle(lines)
+print("".join(lines), end="")'
+}
+
 datasets=(
 	br
 	et
@@ -23,7 +32,7 @@ datasets=(
 downloads_dir=./downloads
 # Where to unpack all tars and convert mp3s to wavs
 output_dir=./data
-cv_artifact=cv-corpus-5-2020-06-22
+cv_artifact=cv-corpus-*-2020-06-22
 # Ignore files shorter than 1 second
 min_file_dur_sec=1
 # Resample all wav-files to this rate before writing
@@ -68,7 +77,7 @@ for language in ${datasets[*]}; do
 	tar zxf $tarfile -C $output_dir/$language
 	mv $output_dir/$language/$cv_artifact/$language/* $output_dir/$language
 	metadata_tsv=$output_dir/$language/validated.tsv
-	mp3_name_list=$(cut -f2 $metadata_tsv | tail -n +2 | shuf)
+	mp3_name_list=$(cut -f2 $metadata_tsv | tail -n +2 | py_shuf)
 	if [ -z "$mp3_name_list" ]; then
 		echo "error: unable to load list of paths from metadata file at '$metadata_tsv'"
 		exit 1
