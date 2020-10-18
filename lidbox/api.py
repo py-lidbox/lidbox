@@ -243,12 +243,14 @@ def extract_embeddings_as_numpy_data(split2ds, labels):
     # We assume the label2target mapping used during training was from the same labels list
     label2target, _ = make_label2onehot(labels)
     target2label = {label2target.lookup(tf.convert_to_tensor(l)).numpy(): l for l in labels}
+
     def _assert_valid_targets(x):
         tf.debugging.assert_equal(
                 label2target.lookup(x["label"]),
                 x["target"],
                 message="Sample had mismatching labels and targets")
         return x
+
     split2numpy_ds = {s: {} for s in split2ds}
     for split, ds in split2ds.items():
         logger.info("Extracting embeddings from split '%s' and collecting them to numpy arrays", split)
@@ -264,50 +266,55 @@ def extract_embeddings_as_numpy_data(split2ds, labels):
     return split2numpy_ds, target2label
 
 
-# TODO split training and evaluation
-# TODO move embedding demo plotting to TensorBoard image summaries
-# TODO TensorFlow backend classifiers
-def fit_embedding_classifier_and_evaluate_test_set(split2ds, split2meta, labels, config):
+def fit_embedding_classifier(split2ds, split2meta, labels, config):
     import lidbox.embeddings.sklearn_utils
-    import lidbox.models.keras_utils
+
     split2numpy_ds, target2label = extract_embeddings_as_numpy_data(split2ds, labels)
     all_labels = set(labels)
-    def process_predictions(ids, predictions, split_key):
-        utt2prediction = unchunk_predictions(list(zip(ids, predictions)), config)
-        label2target = {l: t for t, l in target2label.items()}
-        utt2target = {u: label2target[l] for u, l in zip(split2meta[split_key]["id"], split2meta[split_key]["label"]) if l in all_labels}
-        utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
-        assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
-        return utt2prediction, utt2target
+
     train_data = split2numpy_ds[config["sklearn_experiment"]["data"]["train"]["split"]]
     test_data = split2numpy_ds[config["sklearn_experiment"]["data"]["test"]["split"]]
-    unlabeled_data = {}
-    unlabeled_split = ''
-    if "predict_unlabeled" in config["sklearn_experiment"]["data"]:
-        unlabeled_split = config["sklearn_experiment"]["data"]["predict_unlabeled"]["split"]
-        unlabeled_data = split2numpy_ds[unlabeled_split]
+
     model_key = config["sklearn_experiment"]["model"]["key"]
     model_kwargs = config["sklearn_experiment"]["model"].get("kwargs", {})
     if model_key == "naive_bayes":
-        predictions = lidbox.embeddings.sklearn_utils.fit_naive_bayes_and_predict_test_set(
-                train_data, test_data, unlabeled_data, labels, config, target2label, **model_kwargs)
+        from sklearn.naive_bayes import GaussianNB
+        Classifier = GaussianNB
     else:
         logger.error("Unknown model key '%s' for training embeddings.", model_key)
         return []
-    if "unlabeled" in predictions:
-        utt2prediction, _ = process_predictions(unlabeled_data["ids"], predictions["unlabeled"], unlabeled_split)
-        scores_file = os.path.join(
-                lidbox.models.keras_utils.experiment_cache_from_config(config),
-                "predictions",
-                config["sklearn_experiment"]["data"]["predict_unlabeled"]["split"])
-        with open(scores_file, "w") as scores_f:
-            print_predictions(utt2prediction, labels, file=scores_f)
-    utt2prediction, utt2target = process_predictions(test_data["ids"], predictions["test"], "test")
-    return list(evaluate_metrics_for_predictions(
-        utt2prediction,
-        utt2target,
-        config["sklearn_experiment"]["data"]["test"]["evaluate_metrics"],
-        labels))
+
+    sklearn_objs = lidbox.embeddings.sklearn_utils.fit_classifier(
+            train_data, test_data, labels, config, target2label, Classifier, **model_kwargs)
+    joblib_dir = lidbox.embeddings.sklearn_utils.pipeline_to_disk(config, sklearn_objs)
+    logger.info("Wrote trained classification pipeline to '%s'", joblib_dir)
+
+
+def predict_with_embedding_classifier(split2ds, split2meta, labels, config, data_conf):
+    import lidbox.embeddings.sklearn_utils
+
+    all_labels = set(labels)
+    split_key = data_conf["split"]
+    split2numpy_ds, target2label = extract_embeddings_as_numpy_data(
+            {split_key: split2ds[split_key]}, labels)
+    predict_input = split2numpy_ds[split_key]
+
+    sklearn_objs = lidbox.embeddings.sklearn_utils.pipeline_from_disk(config)
+    predictions = lidbox.embeddings.sklearn_utils.predict_with_trained_classifier(
+            predict_input, config, target2label, sklearn_objs)
+
+    utt2prediction = list(zip(predict_input["ids"], predictions))
+    utt2prediction = unchunk_predictions(utt2prediction, config)
+
+    label2target = {l: t for t, l in target2label.items()}
+    utt2target = {
+            u: label2target[l]
+            for u, l in zip(split2meta[split_key]["id"], split2meta[split_key]["label"])
+            if l in all_labels}
+    utt2prediction = generate_worst_case_predictions_for_missed_utterances(
+            utt2prediction, utt2target, labels)
+    assert len(utt2prediction) == len(utt2target), "invalid amount of predictions {} when utt2target has {} keys".format(len(utt2prediction), len(utt2target))
+    return utt2prediction, utt2target
 
 
 def unchunk_predictions(utt2prediction, config):
@@ -332,52 +339,40 @@ def generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2ta
     return utt2prediction
 
 
-#TODO simplify and divide into manageable pieces
-#TODO check user script before calling this
-def evaluate_test_set(split2ds, split2meta, labels, config):
-    test_conf = config["experiment"]["data"]["test"]
-    test_ds = (split2ds[test_conf["split"]]
-                .batch(test_conf["batch_size"])
+def predict_with_keras_model(split2ds, split2meta, labels, config, data_conf):
+    ds = (split2ds[data_conf["split"]]
+                .batch(data_conf["batch_size"])
                 .apply(lidbox.dataset.steps.as_supervised))
-    predictions = None
-    if "user_script" in config:
-        user_script = load_user_script_as_module(config["user_script"])
-        if hasattr(user_script, "predict"):
-            logger.info("User script has defined a 'predict' function, will use it")
-            predictions = user_script.predict(test_ds, config)
-            if predictions is None:
-                logger.error("Function 'predict' in the user script '%s' did not return predictions", config["user_script"])
-                return
-    if predictions is None:
-        logger.info("User script has not defined a 'predict' function, will use default approach")
-        keras_wrapper = KerasWrapper.from_config(config)
-        logger.info("Model initialized:\n%s", str(keras_wrapper))
-        best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
-        logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
-        keras_wrapper.load_weights(best_checkpoint)
-        logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
-        predictions = keras_wrapper.keras_model.predict(test_ds)
-    logger.info("Model returned predictions of shape %s, now combining predictions with correct utterance ids.", repr(predictions.shape))
-    utt2prediction = sorted(zip_utt2vector(split2ds[test_conf["split"]], predictions), key=lambda t: t[0])
+
+    keras_wrapper = KerasWrapper.from_config(config)
+    logger.info("Model initialized:\n%s", str(keras_wrapper))
+    best_checkpoint = lidbox.models.keras_utils.best_model_checkpoint_from_config(config)
+    logger.info("Loading weights from checkpoint file '%s'", best_checkpoint)
+    keras_wrapper.load_weights(best_checkpoint)
+    logger.info("Starting prediction with model '%s'", keras_wrapper.model_key)
+    predictions = keras_wrapper.keras_model.predict(ds)
+
+    logger.info("Model returned predictions of shape %s.", repr(predictions.shape))
     if predictions.shape[1] > len(labels):
         logger.warning(
-                "The model predicted %d labels when %d correct labels were expected. All predictions are sliced up to index %d.",
+                "Predictions contain %d labels, but %d correct labels were expected. All predictions are sliced up to index %d.",
                 predictions.shape[1], len(labels), len(labels))
         utt2prediction = [(u, p[:len(labels)]) for u, p in utt2prediction]
+
+    logger.info("Combining predictions with utterance ids.")
+    utt2prediction = sorted(
+            zip_utt2vector(split2ds[data_conf["split"]], predictions),
+            key=lambda t: t[0])
     utt2prediction = unchunk_predictions(utt2prediction, config)
-    # Collect targets from the test set iterator
-    utt2target = dict(collect_targets(labels, split2meta[test_conf["split"]]))
+
+    logger.info("Collecting targets from dataset iterator.")
+    utt2target = dict(collect_targets(labels, split2meta[data_conf["split"]]))
+    return utt2prediction, utt2target
+
+
+def evaluate_test_set(utt2prediction, utt2target, labels, config, test_conf):
     utt2prediction = generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2target, labels)
-    scores_file = os.path.join(
-            lidbox.models.keras_utils.experiment_cache_from_config(config),
-            "predictions",
-            "scores")
-    os.makedirs(os.path.dirname(scores_file), exist_ok=True)
-    logger.info("Writing %d predicted scores to '%s'", len(utt2prediction), scores_file)
-    if os.path.exists(scores_file):
-        logger.warning("Overwriting existing '%s'", scores_file)
-    with open(scores_file, "w") as scores_f:
-        print_predictions(utt2prediction, labels, file=scores_f)
+    write_predictions(utt2prediction, labels, config, test_conf["split"])
     return list(evaluate_metrics_for_predictions(
         utt2prediction,
         utt2target,
@@ -387,21 +382,26 @@ def evaluate_test_set(split2ds, split2meta, labels, config):
 
 def evaluate_metrics_for_predictions(utt2prediction, utt2target, eval_confs, labels):
     import sklearn.metrics
+
+    logger.info("Stacking predictions to numpy arrays")
     # Ensure true labels are always in the same order as in predictions
     predictions = np.stack([p for _, p in utt2prediction])
     min_score = np.amin(predictions)
     max_score = np.amax(predictions)
     true_labels_sparse = np.array([utt2target[u] for u, _ in utt2prediction])
     pred_labels_sparse = np.argmax(predictions, axis=1)
+
     def onehot(i):
         o = np.zeros(len(labels))
         o[i] = 1
         return o
+
     true_labels_dense = np.stack([onehot(t) for t in true_labels_sparse])
     logger.info(
             "Evaluating metrics on true labels of shape %s and predicted labels of shape %s."
             " Min prediction score %.3f max prediction score %.3f",
             true_labels_sparse.shape, pred_labels_sparse.shape, float(min_score), float(max_score))
+
     for metric in eval_confs:
         result = None
         if metric["name"].endswith("average_detection_cost"):
@@ -456,20 +456,37 @@ def evaluate_metrics_for_predictions(utt2prediction, utt2target, eval_confs, lab
         yield {"name": metric["name"], "result": result}
 
 
-def _metrics_file_from_config(config):
+def _metrics_file_from_config(config, dataset_name):
     from lidbox.models.keras_utils import experiment_cache_from_config
     return os.path.join(
             experiment_cache_from_config(config),
             "predictions",
+            dataset_name,
             "metrics.json")
 
-def write_metrics(metrics, config):
-    metrics_file = _metrics_file_from_config(config)
+
+def write_predictions(utt2prediction, labels, config, dataset_name):
+    scores_file = os.path.join(
+            lidbox.models.keras_utils.experiment_cache_from_config(config),
+            "predictions",
+            dataset_name,
+            "scores")
+    os.makedirs(os.path.dirname(scores_file), exist_ok=True)
+    logger.info("Writing %d predicted scores to '%s'", len(utt2prediction), scores_file)
+    if os.path.exists(scores_file):
+        logger.warning("Overwriting existing '%s'", scores_file)
+    with open(scores_file, "w") as scores_f:
+        print_predictions(utt2prediction, labels, file=scores_f)
+
+
+def write_metrics(metrics, config, dataset_name):
+    metrics_file = _metrics_file_from_config(config, dataset_name)
     os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
     logger.info("Writing evaluated metrics to '%s'", metrics_file)
     with open(metrics_file, "w") as f:
         json.dump(metrics, f)
 
-def load_metrics(config):
-    with open(_metrics_file_from_config(config)) as f:
+
+def load_metrics(config, dataset_name):
+    with open(_metrics_file_from_config(config, dataset_name)) as f:
         return json.load(f)

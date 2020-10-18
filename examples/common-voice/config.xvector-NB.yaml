@@ -76,3 +76,5 @@ sklearn_experiment:
         - name: sparse_average_detection_cost
         - name: sklearn_classification_report
         - name: confusion_matrix
+    predict:
+      split: test

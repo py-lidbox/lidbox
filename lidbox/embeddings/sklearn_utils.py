@@ -5,12 +5,13 @@ import os
 from mpl_toolkits.mplot3d import Axes3D
 from plda import Classifier as PLDAClassifier
 import colorcet
+import joblib
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
+import sklearn.discriminant_analysis
 import sklearn.naive_bayes
 import sklearn.preprocessing
-import sklearn.discriminant_analysis
 import tensorflow as tf
 
 import lidbox.metrics
@@ -170,59 +171,102 @@ def draw_random_sample(train, test, labels, target2label, sample_size=100):
     return label2sample
 
 
-# TODO fix 'unlabeled' data prediction hack
-def fit_naive_bayes_and_predict_test_set(train, test, unlabeled, labels, config, target2label, n_plda_coefs=None, plda_gridsearch_size=None, use_lda_preprocessing=False):
+def fit_classifier(train, test, labels, config, target2label, Classifier, n_plda_coefs=None, plot_demo=True):
     scaler = sklearn.preprocessing.StandardScaler()
     logger.info("Fitting scaler to train_X %s:\n  %s", train["X"].shape, scaler)
     scaler.fit(train["X"])
     train["X"] = scaler.transform(train["X"])
     test["X"] = scaler.transform(test["X"])
-    if unlabeled:
-        unlabeled["X"] = scaler.transform(unlabeled["X"])
-    pca = {
-            "2D": sklearn.decomposition.PCA(n_components=2, whiten=False),
-            "3D": sklearn.decomposition.PCA(n_components=3, whiten=False),
-            # "2D_whitened": sklearn.decomposition.PCA(n_components=2, whiten=True),
-            # "3D_whitened": sklearn.decomposition.PCA(n_components=3, whiten=True),
-    }
-    if use_lda_preprocessing:
-        reduce_dimensions(train, test, fit_lda(train, test))
-    if plda_gridsearch_size is not None:
-        coef_grid = np.random.choice(
-                np.arange(len(labels), train["X"].shape[1]),
-                size=plda_gridsearch_size,
-                replace=False)
-        dim_reducer = fit_plda_gridsearch(train, test, np.sort(coef_grid))
-    else:
-        dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
-    reduce_dimensions(train, test, dim_reducer)
-    if unlabeled:
-        unlabeled["X"] = dim_reducer.transform(unlabeled["X"])
+
+    dim_reducer = fit_plda(train, test, n_components=n_plda_coefs)
+    logger.info("Reducing train_X %s and test_X %s dimensions with:\n  %s",
+            train["X"].shape,
+            test["X"].shape,
+            dim_reducer)
+    train["X"] = dim_reducer.transform(train["X"])
+    test["X"] = dim_reducer.transform(test["X"])
+
+    logger.info("Normalizing train_X %s, test_X %s", train["X"].shape, test["X"].shape)
     train["X"] = sklearn.preprocessing.normalize(train["X"])
     test["X"] = sklearn.preprocessing.normalize(test["X"])
-    if unlabeled:
-        unlabeled["X"] = sklearn.preprocessing.normalize(unlabeled["X"])
-    for p in pca.values():
-        logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
-        p.fit(train["X"])
-    label2sample = draw_random_sample(train, test, labels, target2label)
-    demo_dir = os.path.join(
-            config["sklearn_experiment"]["cache_directory"],
-            config["sklearn_experiment"]["model"]["key"],
-            config["sklearn_experiment"]["name"],
-            "figures")
-    plot_embedding_demo(train, target2label, label2sample["train"], pca, os.path.join(demo_dir, "train"))
-    plot_embedding_demo(test, target2label, label2sample["test"], pca, os.path.join(demo_dir, "test"))
-    classifier = sklearn.naive_bayes.GaussianNB()
-    logger.info("Fitting with train_X %s and train_y %s classifier:\n  %s",
+
+    if plot_demo:
+        logger.info("Drawing random sample of embeddings and plotting demo figures")
+        pca = {
+                "2D": sklearn.decomposition.PCA(n_components=2, whiten=False),
+                "3D": sklearn.decomposition.PCA(n_components=3, whiten=False),
+        }
+        for p in pca.values():
+            logger.info("Fitting PCA to train_X %s:\n  %s", train["X"].shape, p)
+            p.fit(train["X"])
+        label2sample = draw_random_sample(train, test, labels, target2label)
+        demo_dir = os.path.join(
+                config["sklearn_experiment"]["cache_directory"],
+                config["sklearn_experiment"]["model"]["key"],
+                config["sklearn_experiment"]["name"],
+                "figures")
+        plot_embedding_demo(train, target2label, label2sample["train"], pca, os.path.join(demo_dir, "train"))
+        plot_embedding_demo(test, target2label, label2sample["test"], pca, os.path.join(demo_dir, "test"))
+
+    classifier = Classifier()
+    logger.info("Fitting classifier to train_X %s and train_y %s:\n  %s",
          train["X"].shape,
          train["y"].shape,
          classifier)
     classifier.fit(train["X"], train["y"])
-    pred = {}
-    pred["test"] = classifier.predict_log_proba(test["X"])
-    pred["test"] = np.maximum(pred["test"], -100)
-    if unlabeled:
-        pred["unlabeled"] = classifier.predict_log_proba(unlabeled["X"])
-        pred["unlabeled"] = np.maximum(pred["unlabeled"], -100)
-    return pred
+
+    return {
+        "scaler": scaler,
+        "dim_reducer": dim_reducer,
+        "classifier": classifier
+    }
+
+
+def predict_with_trained_classifier(unlabeled, config, target2label, pipeline):
+    X = unlabeled["X"]
+    if "scaler" in pipeline:
+        logger.info("Scaling input %s with %s", X.shape, pipeline["scaler"])
+        X = pipeline["scaler"].transform(X)
+    if "dim_reducer" in pipeline:
+        logger.info("Reducing dimensions of %s with %s", X.shape, pipeline["dim_reducer"])
+        X = pipeline["dim_reducer"].transform(X)
+    logger.info("Normalizing %s", X.shape)
+    X = sklearn.preprocessing.normalize(X)
+
+    logger.info("Predicting log probabilties for %s with %s", X.shape, pipeline["classifier"])
+    predictions = pipeline["classifier"].predict_log_proba(X)
+    predictions = np.maximum(predictions, -100)
+    return predictions
+
+
+def joblib_dir_from_config(config):
+    return os.path.join(
+            config["sklearn_experiment"]["cache_directory"],
+            config["sklearn_experiment"]["model"]["key"],
+            config["sklearn_experiment"]["name"],
+            "sklearn_objects")
+
+
+def pipeline_to_disk(config, sklearn_objects):
+    joblib_dir = joblib_dir_from_config(config)
+    os.makedirs(joblib_dir, exist_ok=True)
+    for key, obj in sklearn_objects.items():
+        joblib_fname = os.path.join(joblib_dir, key + ".joblib")
+        logger.info("Writing scikit-learn object '%s' to '%s'", obj, joblib_fname)
+        joblib.dump(obj, joblib_fname)
+    return joblib_dir
+
+
+def pipeline_from_disk(config):
+    joblib_dir = joblib_dir_from_config(config)
+    if not os.path.isdir(joblib_dir):
+        logger.error("Directory '%s' does not exist, cannot load pipeline from disk", joblib_dir)
+        return {}
+    sklearn_objects = {}
+    for f in os.scandir(joblib_dir):
+        if not f.name.endswith(".joblib"):
+            continue
+        logger.info("Loading scikit-learn object from file '%s'", f.path)
+        key = f.name.split(".joblib")[0]
+        sklearn_objects[key] = joblib.load(f.path)
+    return sklearn_objects

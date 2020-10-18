@@ -68,18 +68,42 @@ After downloading, the directory should contain the following files:
 
 6. Extract language embeddings from the x-vector model and train Gaussian Naive Bayes from `scikit-learn`:
 
-        lidbox train-embeddings -v config.xvector-NB.yaml
+        lidbox backend-e2e -v config.xvector-NB.yaml
     Some samples of the extracted embeddings/vectors from both the training and test set can be found as PNG images in `./lidbox-cache/naive_bayes/common-voice-4-embeddings/figures`.
 
 If you want to do some other experiments with the embeddings, you can extract them as NumPy arrays with your own [script](./scripts/get_embeddings.py).
 
 ### Extra
 
-You can patch the default feature extraction [pipeline](../../lidbox/dataset/pipelines.py) with external scripts.
-Here I'm using [`compute_stats.py`](./compute_stats.py) from the current example directory.
-It computes VAD decisions on the input audio and then counts how many frames were dropped and how many were kept.
+#### Predict with trained backend classifier
 
-        lidbox utils -v config.yaml --split test --run-script compute_stats.py
+
+Adding `sklearn_experiment.data.predict` to the config file allows you to predict log probabilities with a trained Keras embedding extractor + backend classifier pipeline for any data:
+```
+lidbox backend-predict -v config.xvector-NB.yaml
+```
+
+In `config.xvector-NB.yaml` the custom data is the test set, but you can add any data under `datasets.splits` with some other key and use that instead:
+```yaml
+datasets:
+    ...
+    splits:
+      - key: mydata
+        path: ./somewhere
+        datafiles:
+          - utt2path
+          - utt2label
+...
+sklearn_experiment:
+  cache_directory: ./lidbox-cache
+  name: common-voice-4-embeddings
+  model:
+    key: naive_bayes
+  data:
+    predict:
+      split: mydata
+```
+
 
 ### TODO
 
