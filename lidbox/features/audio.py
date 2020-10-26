@@ -30,7 +30,7 @@ def wav_header_is_valid(path):
         wav_body_size = tf.cast(tf.numpy_function(_count_wav_body_size, [path], tf.int64), tf.int32)
         return wav_body_size + 44 == tf.strings.length(file_contents)
 
-@tf.function
+@tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
 def read_wav(path):
     file_contents = tf.io.read_file(path)
     wav = tf.audio.decode_wav(file_contents)
@@ -111,16 +111,27 @@ def fft_frequencies(sample_rate, n_fft):
 def log10(x):
     return tf.math.log(x) / tf.math.log(10.0)
 
-@tf.function
-def power_to_db(S, ref=tf.math.reduce_max, amin=1e-10, top_db=80.0):
-    db_spectrogram = 20.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, ref(S))))
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32)])
+def power_to_db(S, amin=1e-10, top_db=80.0):
+    db_spectrogram = 20.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, tf.math.reduce_max(S))))
     return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
 
 @tf.function
 def ms_to_frames(sample_rate, ms):
     return tf.cast(tf.cast(sample_rate, tf.float32) * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, power=2.0, fmin=0.0, fmax=8000.0, fft_length=512):
     tf.debugging.assert_rank(signals, 2, message="Expected input signals from which to compute spectrograms to be of shape (batch_size, signal_frames)")
     frame_length = ms_to_frames(sample_rate, frame_length_ms)
@@ -144,14 +155,17 @@ def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
         upper_edge_hertz=fmax)
     return tf.matmul(S, mel_weights)
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def root_mean_square(x, axis=-1):
     return tf.math.sqrt(
             tf.math.reduce_mean(
                 tf.math.square(tf.math.abs(x)),
                 axis=axis))
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.int32)])
 def run_length_encoding(v):
     """
     From numpy version at https://stackoverflow.com/a/32681075
@@ -162,7 +176,9 @@ def run_length_encoding(v):
     lengths = pos[1:] - pos[:-1]
     return pos[:-1], lengths
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.bool),
+    tf.TensorSpec(shape=[], dtype=tf.int64)])
 def invert_too_short_consecutive_false(mask, min_length):
     pos, group_lengths = run_length_encoding(tf.cast(mask, tf.int32))
     true_or_too_short = tf.math.logical_or(tf.gather(mask, pos), group_lengths < min_length)
@@ -170,7 +186,14 @@ def invert_too_short_consecutive_false(mask, min_length):
     tf.debugging.assert_equal(tf.size(mask), tf.size(new_mask))
     return new_mask
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_non_speech_ms=0, strength=0.05, min_rms_threshold=1e-3, time_axis=0):
     """
     Compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal, such that True means the frame is voiced and False unvoiced.

@@ -420,12 +420,12 @@ def consume(ds, log_interval=-1):
     return ds
 
 
-def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
+def consume_to_tensorboard(ds, summary_dir, config, exist_ok=False):
     """
     Inspect the elements of ds by dumping them to TensorBoard summaries, e.g. features as spectrogram images and signals as wav audio.
     """
-    if skip_if_exists and os.path.isdir(summary_dir) and any(p.name.startswith("events") for p in os.scandir(summary_dir) if p.is_file()):
-        logger.info("Skipping TensorBoard step since 'skip_if_exists' is True and directory '%s' already contains tf event files", summary_dir)
+    if not exist_ok and os.path.isdir(summary_dir) and any(p.name.startswith("events") for p in os.scandir(summary_dir) if p.is_file()):
+        logger.error("Skipping TensorBoard step since 'exist_ok' is False and directory '%s' already contains tf event files", summary_dir)
         return ds
     colors = tf_utils.matplotlib_colormap_to_tensor(config.get("colormap", "viridis"))
     image_size_multiplier = tf.constant(config.get("image_size_multiplier", 1), tf.float32)
@@ -436,12 +436,15 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
     @tf.function
     def _inspect_batches(batch_idx, batch):
         tf.debugging.assert_greater([tf.size(v) for v in batch.values()], 0, message="Empty batch given to tensorboard logger.")
-        inputs = batch["input"][:max_outputs]
+
         targets = batch["target"][:max_outputs]
-        tf.summary.histogram("inputs", inputs, step=batch_idx)
         tf.summary.histogram("targets", targets, step=batch_idx)
+
+        inputs = batch["input"][:max_outputs]
+        tf.summary.histogram("inputs", inputs, step=batch_idx)
         images = tf_utils.tensors_to_rgb_images(inputs, colors, image_size_multiplier)
         tf.summary.image("inputs/img", images, step=batch_idx, max_outputs=max_outputs)
+
         if "signal" in batch:
             sample_rates = batch["sample_rate"][:max_outputs]
             tf.debugging.assert_equal(
@@ -453,12 +456,22 @@ def consume_to_tensorboard(ds, summary_dir, config, skip_if_exists=True):
                     0,
                     message="Unable to add audio to tensorboard summary due to empty signals in the batch")
             signals = tf.expand_dims(batch["signal"][:max_outputs], -1)
-            tf.summary.audio("utterances", signals, sample_rates[0], step=batch_idx, encoding="wav", max_outputs=max_outputs)
+            tf.summary.audio("utterances",
+                    signals,
+                    sample_rates[0],
+                    step=batch_idx,
+                    encoding="wav",
+                    max_outputs=max_outputs)
+
         enumerated_uttids = tf.strings.reduce_join(
                 (tf.strings.as_string(tf.range(1, max_outputs + 1)), batch["id"][:max_outputs]),
                 axis=0,
                 separator=": ")
         tf.summary.text("utterance_ids", enumerated_uttids, step=batch_idx)
+
+        if "transcript" in batch:
+            tf.summary.text("transcripts", batch["transcript"][:max_outputs], step=batch_idx)
+
         return batch
 
     logger.info(
@@ -506,10 +519,12 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
     The metadata of each element is repeated into into each chunk, except for the utterance ids, which will be appended by the chunk number.
     """
     logger.info("Dividing every signal in the dataset into new signals by creating signal chunks of length %d ms and offset %d ms. Maximum amount of padding allowed in the last chunk is %d ms.", length_ms, step_ms, max_pad_ms)
+
     chunk_length_sec = tf.constant(1e-3 * length_ms, tf.float32)
     chunk_step_sec = tf.constant(1e-3 * step_ms, tf.float32)
     max_pad_sec = tf.constant(1e-3 * max_pad_ms, tf.float32)
     id_str_padding = tf.cast(tf.round(audio_features.log10(tf.cast(max_num_chunks_per_signal, tf.float32))), tf.int32)
+
     def chunks_to_elements(chunk, chunk_num, x):
         chunk_num_str = tf.strings.as_string(chunk_num, width=id_str_padding, fill='0')
         chunk_id = tf.strings.join((x["id"], chunk_num_str), separator='-')
@@ -518,25 +533,31 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
             duration_str = tf.strings.as_string(tf.cast(tf.size(chunk) / x["sample_rate"], tf.float32))
             out = dict(out, duration=duration_str)
         return out
+
     def chunk_signal_and_flatten(x):
         signal = x["signal"]
         sample_rate = tf.cast(x["sample_rate"], tf.float32)
+
         chunk_length = tf.cast(sample_rate * chunk_length_sec, tf.int32)
         chunk_step = tf.cast(sample_rate * chunk_step_sec, tf.int32)
         max_pad = tf.cast(sample_rate * max_pad_sec, tf.int32)
         num_full_chunks = tf.math.maximum(0, 1 + (tf.size(signal) - chunk_length) // chunk_step)
         tf.debugging.assert_less(num_full_chunks, max_num_chunks_per_signal, message="Too many chunks created from signal, cannot create unique utterance ids, raise the max_num_chunks_per_signal parameter")
+
         last_chunk_length = tf.size(signal) - num_full_chunks * chunk_step
         if last_chunk_length < chunk_length and chunk_length <= last_chunk_length + max_pad:
             signal = tf.pad(signal, [[0, chunk_length - last_chunk_length]])
+
         chunks = tf.signal.frame(signal, chunk_length, chunk_step, axis=0)
         num_chunks = tf.cast(tf.shape(chunks)[0], tf.int64)
         chunk_ds = tf.data.Dataset.from_tensor_slices(chunks)
         chunk_nums_ds = tf.data.Dataset.range(1, num_chunks + 1)
         repeat_x_ds = tf.data.Dataset.from_tensors(x).repeat(num_chunks)
+
         return (tf.data.Dataset
                   .zip((chunk_ds, chunk_nums_ds, repeat_x_ds))
                   .map(chunks_to_elements))
+
     interleave_kwargs = {
             "block_length": avg_num_chunks_from_signals,
             "num_parallel_calls": TF_AUTOTUNE,
@@ -544,6 +565,7 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
     if TF_VERSION_MAJOR == 2 and TF_VERSION_MINOR < 2:
         del interleave_kwargs["deterministic"]
         logger.warning("Deleted unsupported 'deterministic' kwarg from tf.data.Dataset.interleave call, TF version >= 2.2 is required.")
+
     return ds.interleave(chunk_signal_and_flatten, **interleave_kwargs)
 
 
@@ -667,13 +689,11 @@ def group_by_axis_length(ds, element_key, max_batch_size, min_batch_size=0, axis
         window_size=max_batch_size))
 
 
-def initialize(ds, labels, init_data):
+def initialize(labels, init_data):
     """
     Initialize a tf.data.Dataset instance for the pipeline.
     This should probably always be the first step.
     """
-    if ds is not None:
-        logger.warning("Step 'initialize' is being applied on an already initialized dataset, all state will be lost.")
     ds = None
     init_data = {k: list(v) for k, v in init_data.items()}
     logger.info(
