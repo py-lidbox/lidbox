@@ -189,12 +189,12 @@ def run_training(split2ds, config):
     return history
 
 
-def group_chunk_predictions_by_parent_id(utt2prediction):
+def merge_chunk_predictions(utt2prediction, merge_fn=np.mean):
     """
     Group all chunks by the parent utterance id separated by '-' and take average over chunk predictions.
     """
     get_parent_id = lambda t: t[0].rsplit('-', 1)[0]
-    return [(utt, np.stack([pred for _, pred in chunk2pred]).mean(axis=0))
+    return [(utt, merge_fn(np.stack([pred for _, pred in chunk2pred]), axis=0))
             for utt, chunk2pred in
             itertools.groupby(sorted(utt2prediction, key=get_parent_id), key=get_parent_id)]
 
@@ -233,7 +233,7 @@ def zip_utt2vector(ds, vectors):
 
 
 def collect_targets(labels, meta):
-    meta_ds = lidbox.dataset.steps.initialize(None, labels, meta)
+    meta_ds = lidbox.dataset.steps.initialize(labels, meta)
     for x in meta_ds.as_numpy_iterator():
         yield x["id"].decode("utf-8"), x["target"]
 
@@ -320,10 +320,10 @@ def predict_with_embedding_classifier(split2ds, split2meta, labels, config, data
 def unchunk_predictions(utt2prediction, config):
     if "chunks" in config.get("post_process", {}):
         logger.info("Extracted features were divided into chunks, merging feature chunk scores by averaging")
-        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
+        utt2prediction = merge_chunk_predictions(utt2prediction)
     if "chunks" in config.get("pre_process", {}):
         logger.info("Original signals were divided into chunks, merging signal chunk scores by averaging")
-        utt2prediction = group_chunk_predictions_by_parent_id(utt2prediction)
+        utt2prediction = merge_chunk_predictions(utt2prediction)
     return utt2prediction
 
 
@@ -490,3 +490,9 @@ def write_metrics(metrics, config, dataset_name):
 def load_metrics(config, dataset_name):
     with open(_metrics_file_from_config(config, dataset_name)) as f:
         return json.load(f)
+
+
+def allow_tf_gpu_memory_growth():
+    import tensorflow as tf
+    for gpu in tf.config.experimental.list_physical_devices("GPU"):
+        tf.config.experimental.set_memory_growth(gpu, True)

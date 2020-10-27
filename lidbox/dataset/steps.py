@@ -32,11 +32,11 @@ Step = collections.namedtuple("Step", ("key", "kwargs"))
 
 def from_steps(steps):
     logger.info("Initializing and preparing tf.data.Dataset instance from %d steps:\n  %s", len(steps), "\n  ".join(s.key for s in steps))
-    ds = None
     if steps[0].key != "initialize":
         logger.critical("When constructing a dataset, the first step must be 'initialize' but it was '%s'. The 'initialize' step is needed for first loading all metadata such as the utterance_id to wavpath mappings.", steps[0].key)
         return
-    for step_num, step in enumerate(steps, start=1):
+    ds = initialize(**steps[0].kwargs)
+    for step_num, step in enumerate(steps[1:], start=2):
         if step is None:
             logger.warning("Skipping no-op step with value None")
             continue
@@ -483,6 +483,7 @@ def consume_to_tensorboard(ds, summary_dir, config, exist_ok=False):
                .take(num_batches)
                .enumerate()
                .map(_inspect_batches, num_parallel_calls=TF_AUTOTUNE)
+               .unbatch()
                .apply(consume))
     return ds
 
@@ -654,6 +655,7 @@ def extract_features(ds, config):
         batch_size = tf.constant(config.get("batch_size", 1), tf.int64)
         logger.info("Batching signals with batch size %s, extracting features in batches.", batch_size.numpy())
         ds = ds.batch(batch_size)
+
     return (ds.prefetch(TF_AUTOTUNE)
               .map(_append_features, num_parallel_calls=TF_AUTOTUNE)
               .unbatch())
@@ -735,7 +737,7 @@ def normalize(ds, config):
     logger.info("Applying normalization with config:\n  %s", _dict_to_logstring(config))
     key = config["key"]
     def _normalize(x):
-        return dict(x, **{key: features.mean_variance_normalization(x[key], **config.get("kwargs", {}))})
+        return dict(x, **{key: features.cmvn(x[key], **config.get("kwargs", {}))})
     return (ds.batch(config.get("batch_size", 1))
               .map(_normalize, num_parallel_calls=TF_AUTOTUNE)
               .unbatch())

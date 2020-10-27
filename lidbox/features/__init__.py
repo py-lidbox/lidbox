@@ -2,7 +2,6 @@ import kaldiio
 import tensorflow as tf
 
 
-@tf.function
 def feature_scaling(X, min, max, axis=None):
     """Apply feature scaling on X over given axis such that all values are between [min, max]"""
     X_min = tf.math.reduce_min(X, axis=axis, keepdims=True)
@@ -10,11 +9,14 @@ def feature_scaling(X, min, max, axis=None):
     return min + (max - min) * tf.math.divide_no_nan(X - X_min, X_max - X_min)
 
 
-@tf.function
-def mean_variance_normalization(X, axis=None, normalize_variance=True):
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.bool)])
+def cmvn(X, axis=1, normalize_variance=True):
     """
-    Standardize X over given axis, i.e. zero mean and unit variance normalization.
-    If normalize_variance is False, only center means to zero over given axis.
+    Standardize batches of features X over given axis, i.e. center means to zero and variances to one.
+    If normalize_variance is False, only means are centered.
     """
     output = X - tf.math.reduce_mean(X, axis=axis, keepdims=True)
     if normalize_variance:
@@ -22,22 +24,29 @@ def mean_variance_normalization(X, axis=None, normalize_variance=True):
     return output
 
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.bool)])
 def window_normalization(X, axis=1, window_len=-1, normalize_variance=True):
     """
     Apply mean and variance normalization over the time dimension on batches of features matrices X with a given window length.
     By default normalize over whole tensor, i.e. without a window.
     """
-    tf.debugging.assert_rank(X, 3, message="Input to window_normalization should be of shape (batch_size, timedim, channels)")
     output = tf.identity(X)
     if window_len == -1 or tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding window
-        output = mean_variance_normalization(X, axis=axis, normalize_variance=normalize_variance)
+        output = cmvn(X, axis=axis, normalize_variance=normalize_variance)
     else:
         # Pad boundaries by reflecting at most half of the window contents from X, e.g.
         # Left pad [              X              ] right pad
         # 2, 1, 0, [ 0, 1, 2, ..., N-3, N-2, N-1 ] N-1, N-2, N-3, ...
-        padding = tf.constant([[0, 0], [window_len//2, window_len//2 - 1 + (window_len&1)], [0, 0]])
+        padding = [
+            [0, 0],
+            [window_len//2, window_len//2 - 1 + tf.bitwise.bitwise_and(window_len, 1)],
+            [0, 0]
+        ]
         X_padded = tf.pad(X, padding, mode="REFLECT")
         windows = tf.signal.frame(X_padded, window_len, 1, axis=axis)
         tf.debugging.assert_equal(tf.shape(windows)[1], tf.shape(X)[1], message="Mismatching amount of output windows and time steps in the input")

@@ -133,7 +133,6 @@ def ms_to_frames(sample_rate, ms):
     tf.TensorSpec(shape=[], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
 def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, power=2.0, fmin=0.0, fmax=8000.0, fft_length=512):
-    tf.debugging.assert_rank(signals, 2, message="Expected input signals from which to compute spectrograms to be of shape (batch_size, signal_frames)")
     frame_length = ms_to_frames(sample_rate, frame_length_ms)
     frame_step = ms_to_frames(sample_rate, frame_step_ms)
     S = tf.signal.stft(signals, frame_length, frame_step, fft_length=fft_length)
@@ -176,6 +175,7 @@ def run_length_encoding(v):
     lengths = pos[1:] - pos[:-1]
     return pos[:-1], lengths
 
+
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.bool),
     tf.TensorSpec(shape=[], dtype=tf.int64)])
@@ -185,6 +185,7 @@ def invert_too_short_consecutive_false(mask, min_length):
     new_mask = tf.repeat(true_or_too_short, group_lengths)
     tf.debugging.assert_equal(tf.size(mask), tf.size(new_mask))
     return new_mask
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
@@ -210,7 +211,8 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
     if min_non_speech_frames > 0:
         # Convert all non-speech frame groups that contain less than min_non_speech_frames consecutive non-speech frames from False to True
         vad_decisions = invert_too_short_consecutive_false(vad_decisions, min_non_speech_frames)
-    return vad_decisions
+    return tf.reshape(vad_decisions, tf.shape(frames))
+
 
 # # similar to kaldi mfcc vad but without a context window (for now):
 # # https://github.com/kaldi-asr/kaldi/blob/8ce3a95761e0eb97d95d3db2fcb6b2bfb7ffec5b/src/ivector/voice-activity-detection.cc
