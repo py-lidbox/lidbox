@@ -212,18 +212,26 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
     Compute energy based frame-wise VAD decisions by comparing the RMS value of each frame to the mean RMS of the whole signal, such that True means the frame is voiced and False unvoiced.
     VAD threshold is 'strength' multiplied by mean RMS, i.e. larger 'strength' values increase VAD aggressiveness.
     """
-    tf.debugging.assert_rank(signal, 1, message="energy_vad_decisions expects one single channel signal")
+    # Partition signal into non-overlapping frames
     frame_step = ms_to_frames(sample_rate, frame_step_ms)
     frames = tf.signal.frame(signal, frame_step, frame_step, axis=time_axis)
+
+    # Compute RMS and mean RMS over frames
     rms = root_mean_square(frames, axis=time_axis+1)
     mean_rms = tf.math.reduce_mean(rms, axis=time_axis, keepdims=True)
+
+    # Compute VAD decisions using the RMS threshold
     threshold = strength * tf.math.maximum(min_rms_threshold, mean_rms)
     vad_decisions = rms > threshold
+
+    # Check if there are too short sequences of positive VAD decisions and revert them to negative
     min_non_speech_frames = tf.cast(ms_to_frames(sample_rate, min_non_speech_ms) // frame_step, tf.int64)
     if min_non_speech_frames > 0:
         # Convert all non-speech frame groups that contain less than min_non_speech_frames consecutive non-speech frames from False to True
         vad_decisions = invert_too_short_consecutive_false(vad_decisions, min_non_speech_frames)
-    return tf.reshape(vad_decisions, tf.shape(frames))
+
+    # Ensure we always return VAD decisions equal to the number of frames
+    return tf.reshape(vad_decisions, [tf.shape(frames)[0]])
 
 
 # # similar to kaldi mfcc vad but without a context window (for now):
