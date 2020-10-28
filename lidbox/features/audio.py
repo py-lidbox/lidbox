@@ -17,6 +17,7 @@ def _count_wav_body_size(path_bytes):
     with wave.open(path_bytes.decode("utf-8"), 'r') as f_in:
         return f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()
 
+
 @tf.function
 def wav_header_is_valid(path):
     """
@@ -30,6 +31,7 @@ def wav_header_is_valid(path):
         wav_body_size = tf.cast(tf.numpy_function(_count_wav_body_size, [path], tf.int64), tf.int32)
         return wav_body_size + 44 == tf.strings.length(file_contents)
 
+
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
 def read_wav(path):
     file_contents = tf.io.read_file(path)
@@ -38,6 +40,7 @@ def read_wav(path):
     signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
     return signal, wav.sample_rate
 
+
 @tf.function
 def write_mono_wav(path, signal, sample_rate):
     tf.debugging.assert_rank(signal, 1, "write_wav expects 1-dim mono signals without channel dims.")
@@ -45,6 +48,7 @@ def write_mono_wav(path, signal, sample_rate):
     wav = tf.audio.encode_wav(signal, sample_rate)
     tf.io.write_file(path, wav)
     return path
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
@@ -57,6 +61,7 @@ def wav_to_pcm_data(signal, sample_rate):
     header = tf.strings.substr(pcm_data, 0, 44)
     content = tf.strings.substr(pcm_data, 44, -1)
     return header, content
+
 
 def numpy_snr_mixer(clean, noise, snr):
     """
@@ -79,6 +84,7 @@ def numpy_snr_mixer(clean, noise, snr):
     noisyspeech = clean + noisenewlevel
     return clean, noisenewlevel, noisyspeech
 
+
 @tf.function
 def snr_mixer(clean, noise, snr):
     """
@@ -99,6 +105,7 @@ def snr_mixer(clean, noise, snr):
     noisyspeech = clean_norm + noisenewlevel
     return clean_norm, noisenewlevel, noisyspeech
 
+
 @tf.function
 def fft_frequencies(sample_rate, n_fft):
     # Equal to librosa.core.fft_frequencies
@@ -107,9 +114,11 @@ def fft_frequencies(sample_rate, n_fft):
     step = 1 + n_fft // 2
     return tf.linspace(begin, end, step)
 
+
 @tf.function
 def log10(x):
     return tf.math.log(x) / tf.math.log(10.0)
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
@@ -119,9 +128,11 @@ def power_to_db(S, amin=1e-10, top_db=80.0):
     db_spectrogram = 20.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, tf.math.reduce_max(S))))
     return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
 
+
 @tf.function
 def ms_to_frames(sample_rate, ms):
     return tf.cast(tf.cast(sample_rate, tf.float32) * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None], dtype=tf.float32),
@@ -158,10 +169,11 @@ def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
     tf.TensorSpec(shape=[None, None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
 def root_mean_square(x, axis=-1):
-    return tf.math.sqrt(
-            tf.math.reduce_mean(
-                tf.math.square(tf.math.abs(x)),
-                axis=axis))
+    square = tf.math.square(tf.math.abs(x))
+    mean = tf.math.reduce_mean(square, axis=axis)
+    root = tf.math.sqrt(mean)
+    return root
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.int32)])
