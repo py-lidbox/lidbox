@@ -17,7 +17,6 @@ import tensorflow as tf
 from .xvector import (
     # Implemented separately in xvector_stats_pooling.js
     GlobalMeanStddevPooling1D,
-    TIME_AXIS,
 )
 
 
@@ -29,7 +28,7 @@ def as_embedding_extractor(keras_model):
 def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="relu", dropout_rate=None):
     """Batch normalized temporal convolution"""
     x = Conv1D(filters, kernel_size, stride, name="{}_conv".format(name), activation=None, padding="same")(inputs)
-    x = BatchNormalization(axis=TIME_AXIS, name="{}_bn".format(name))(x)
+    x = BatchNormalization(name="{}_bn".format(name))(x)
     x = Activation(activation, name="{}_{}".format(name, str(activation)))(x)
     if dropout_rate:
         x = Dropout(rate=dropout_rate, name="{}_dropout".format(name))(x)

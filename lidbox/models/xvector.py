@@ -17,9 +17,9 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 import tensorflow as tf
 
-
 # Assuming spectral features (Batch, Time, Channels), where freq. channels are always last
 TIME_AXIS = 1
+STDDEV_SQRT_MIN_CLIP = 1e-10
 
 
 class GlobalMeanStddevPooling1D(Layer):
@@ -28,7 +28,7 @@ class GlobalMeanStddevPooling1D(Layer):
         means = tf.math.reduce_mean(inputs, axis=TIME_AXIS, keepdims=True)
         variances = tf.math.reduce_mean(tf.math.square(inputs - means), axis=TIME_AXIS)
         means = tf.squeeze(means, TIME_AXIS)
-        stddevs = tf.math.sqrt(tf.clip_by_value(variances, 0, variances.dtype.max))
+        stddevs = tf.math.sqrt(tf.clip_by_value(variances, STDDEV_SQRT_MIN_CLIP, variances.dtype.max))
         return tf.concat((means, stddevs), axis=TIME_AXIS)
 
 
@@ -42,7 +42,7 @@ class FrameLayer(Layer):
                 activation=activation,
                 padding=padding,
                 name="{}_conv".format(name))
-        self.batch_norm = BatchNormalization(axis=TIME_AXIS, name="{}_bn".format(name))
+        self.batch_norm = BatchNormalization(name="{}_bn".format(name))
         self.dropout = None
         if dropout_rate:
             self.dropout = Dropout(rate=dropout_rate, name="{}_dropout".format(name))

@@ -154,16 +154,17 @@ def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, pow
     bins_in_band = tf.math.logical_and(fmin <= fft_freqs, fft_freqs <= fmax)
     return tf.boolean_mask(S, bins_in_band, axis=2)
 
-@tf.function
-def melspectrograms(S, sample_rate, num_mel_bins=40, fmin=60.0, fmax=6000.0):
-    tf.debugging.assert_rank(S, 3, "Input to melspectrograms must be a batch of 2-dimensional spectrograms with shape (batch, frames, freq_bins)")
+
+def linear_to_mel(S, sample_rate, num_mel_bins=40, fmin=0.0, fmax=8000.0):
+    tf.debugging.assert_rank(S, 3, message="Expected a batch of spectrograms")
     mel_weights = tf.signal.linear_to_mel_weight_matrix(
         num_mel_bins=num_mel_bins,
         num_spectrogram_bins=tf.shape(S)[2],
         sample_rate=sample_rate,
         lower_edge_hertz=fmin,
         upper_edge_hertz=fmax)
-    return tf.matmul(S, mel_weights)
+    return tf.tensordot(S, mel_weights, 1)
+
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None], dtype=tf.float32),
@@ -225,7 +226,7 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
     vad_decisions = rms > threshold
 
     # Check if there are too short sequences of positive VAD decisions and revert them to negative
-    min_non_speech_frames = tf.cast(ms_to_frames(sample_rate, min_non_speech_ms) // frame_step, tf.int64)
+    min_non_speech_frames = tf.cast(ms_to_frames(sample_rate, min_non_speech_ms) / frame_step, tf.int64)
     if min_non_speech_frames > 0:
         # Convert all non-speech frame groups that contain less than min_non_speech_frames consecutive non-speech frames from False to True
         vad_decisions = invert_too_short_consecutive_false(vad_decisions, min_non_speech_frames)
