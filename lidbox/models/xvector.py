@@ -40,7 +40,7 @@ def create(input_shape, num_outputs, channel_dropout_rate=0, name="x-vector"):
 
     x = inputs
     if channel_dropout_rate > 0:
-        x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout_{:.2f}".format(channel_dropout_rate))(x)
+        x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout")(x)
 
     conv_conf = dict(padding="causal", activation="relu")
     x = Conv1D(512,  5, 1, **conv_conf, name="frame1")(x)
