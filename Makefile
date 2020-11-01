@@ -9,4 +9,4 @@ readme:
 pypi-publish:
 	python3 -m pip install --user --upgrade setuptools wheel twine && \
 		python3 setup.py sdist bdist_wheel && \
-		python -m twine upload --skip-existing --repository pypi dist/* --verbose
+		python3 -m twine upload --skip-existing --repository pypi dist/* --verbose
