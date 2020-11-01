@@ -8,7 +8,7 @@
 * Average detection cost (`C_avg`) implemented as a `tf.keras.metrics.Metric`.
 * You can also try `lidbox` for speaker recognition, since no assumptions will be made of the signal labels. E.g. use utt2speaker as utt2label and see what happens.
 
-[Here](./examples/common-voice/common-voice-4.ipynb) is a full example notebook showing what `lidbox` can do.
+[Here](https://github.com/py-lidbox/examples) are some examples.
 
 ## Why would I want to use this?
 
@@ -27,21 +27,7 @@
 
 ## Installing
 
-You need to have Python 3 installed.
-
-### With the example
-
-```
-git clone --depth 1 https://github.com/matiaslindgren/lidbox.git
-python3 -m pip install ./lidbox
-```
-Check that the command line entry point is working:
-```
-lidbox -h
-```
-If not, make sure the `setuptools` entry point scripts (e.g. directory `$HOME/.local/bin`) are on your path.
-
-### Without the example
+Python 3 is required.
 
 ```
 python3 -m pip install lidbox
