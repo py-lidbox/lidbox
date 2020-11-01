@@ -71,3 +71,17 @@ To use it, you need to first install [PLDA](https://github.com/RaviSoji/plda):
 ```
 python3 -m pip install plda@https://github.com/RaviSoji/plda/archive/184d6e39b01363b72080f2752819496cd029f1bd.zip
 ```
+
+## Citation
+
+```
+@inproceedings{Lindgren2020,
+    author={Matias Lindgren and Tommi Jauhiainen and Mikko Kurimo},
+    title={{Releasing a Toolkit and Comparing the Performance of Language Embeddings Across Various Spoken Language Identification Datasets}},
+    year=2020,
+    booktitle={Proc. Interspeech 2020},
+    pages={467--471},
+    doi={10.21437/Interspeech.2020-2706},
+    url={http://dx.doi.org/10.21437/Interspeech.2020-2706}
+}
+```
