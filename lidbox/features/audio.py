@@ -129,7 +129,9 @@ def power_to_db(S, amin=1e-10, top_db=80.0):
     return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
 
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def ms_to_frames(sample_rate, ms):
     return tf.cast(tf.cast(sample_rate, tf.float32) * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
 
@@ -182,7 +184,6 @@ def run_length_encoding(v):
     """
     From numpy version at https://stackoverflow.com/a/32681075
     """
-    tf.debugging.assert_rank(v, 1, message="Expected a vector")
     i = tf.concat(([-1], tf.squeeze(tf.where(v[1:] != v[:-1]), axis=1), [tf.size(v) - 1]), axis=0, name="rle_concat_indices")
     pos = tf.concat(([0], tf.math.cumsum(i[1:] - i[:-1])), axis=0, name="rle_concat_positions")
     lengths = pos[1:] - pos[:-1]
@@ -193,6 +194,8 @@ def run_length_encoding(v):
     tf.TensorSpec(shape=[None], dtype=tf.bool),
     tf.TensorSpec(shape=[], dtype=tf.int64)])
 def invert_too_short_consecutive_false(mask, min_length):
+    if min_length == 0:
+        return mask
     pos, group_lengths = run_length_encoding(tf.cast(mask, tf.int32))
     true_or_too_short = tf.math.logical_or(tf.gather(mask, pos), group_lengths < min_length)
     new_mask = tf.repeat(true_or_too_short, group_lengths)
@@ -227,11 +230,9 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
 
     # Check if there are too short sequences of positive VAD decisions and revert them to negative
     min_non_speech_frames = tf.cast(ms_to_frames(sample_rate, min_non_speech_ms) / frame_step, tf.int64)
-    if min_non_speech_frames > 0:
-        # Convert all non-speech frame groups that contain less than min_non_speech_frames consecutive non-speech frames from False to True
-        vad_decisions = invert_too_short_consecutive_false(vad_decisions, min_non_speech_frames)
+    vad_decisions = invert_too_short_consecutive_false(vad_decisions, min_non_speech_frames)
 
-    # Ensure we always return VAD decisions equal to the number of frames
+    # Ensure the length VAD decisions is always equal to the number of signal frames/windows
     return tf.reshape(vad_decisions, [tf.shape(frames)[0]])
 
 
