@@ -5,40 +5,29 @@ Many functions have been inspired by https://github.com/librosa and https://gith
 import os
 import wave
 
+import miniaudio
 import numpy as np
 import tensorflow as tf
 import webrtcvad
 
 
-def _count_wav_body_size(path_bytes):
-    """
-    https://github.com/mozilla/DeepSpeech/issues/2048#issuecomment-539518251
-    """
-    with wave.open(path_bytes.decode("utf-8"), 'r') as f_in:
-        return f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()
-
-
-@tf.function
-def wav_header_is_valid(path):
-    """
-    Return True if the file at 'path' is a valid wav file that can be decoded using 'read_wav' and False if it is not.
-    It is assumed the wav file is less than 2 GiB.
-    """
-    file_contents = tf.io.read_file(path)
-    if tf.strings.substr(file_contents, 0, 4) != "RIFF":
-        return False
-    else:
-        wav_body_size = tf.cast(tf.numpy_function(_count_wav_body_size, [path], tf.int64), tf.int32)
-        return wav_body_size + 44 == tf.strings.length(file_contents)
-
-
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
 def read_wav(path):
-    file_contents = tf.io.read_file(path)
-    wav = tf.audio.decode_wav(file_contents)
+    wav_bytes = tf.io.read_file(path)
+    audio = tf.audio.decode_wav(wav_bytes)
     # Merge channels by averaging, for mono this just drops the channel dim.
-    signal = tf.math.reduce_mean(wav.audio, axis=1, keepdims=False)
-    return signal, wav.sample_rate
+    signal = tf.math.reduce_mean(audio.audio, axis=1, keepdims=False)
+    return signal, audio.sample_rate
+
+
+def miniaudio_read_mp3(path):
+    audio = miniaudio.mp3_read_file_f32(path.decode("utf-8"))
+    return np.array(audio.samples, np.float32), audio.sample_rate
+
+@tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
+def read_mp3(path):
+    signal, rate = tf.numpy_function(miniaudio_read_mp3, [path], [tf.float32, tf.int64])
+    return signal, tf.cast(rate, tf.int32)
 
 
 @tf.function
@@ -54,7 +43,6 @@ def write_mono_wav(path, signal, sample_rate):
     tf.TensorSpec(shape=[None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
 def wav_to_pcm_data(signal, sample_rate):
-    tf.debugging.assert_rank(signal, 1, message="Expected a single 1D signal (i.e. one mono audio tensor without explicit channels)")
     pcm_data = tf.audio.encode_wav(tf.expand_dims(signal, -1), sample_rate)
     # expecting one wav pcm header and sample width of 2
     tf.debugging.assert_equal(tf.strings.length(pcm_data) - 44, 2 * tf.size(signal), message="wav encoding failed")
@@ -272,3 +260,25 @@ def numpy_fn_get_webrtcvad_decisions(signal, sample_rate, pcm_data, vad_step, ag
                 vad_decisions[np.arange(non_speech_begin, f)] = True
             non_speech_begin = -1
     return vad_decisions
+
+
+def _count_wav_body_size(path_bytes):
+    """
+    https://github.com/mozilla/DeepSpeech/issues/2048#issuecomment-539518251
+    """
+    with wave.open(path_bytes.decode("utf-8"), 'r') as f_in:
+        return f_in.getnframes() * f_in.getnchannels() * f_in.getsampwidth()
+
+
+@tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
+def wav_header_is_valid(path):
+    """
+    Return True if the file at 'path' is a valid wav file that can be decoded using 'read_wav' and False if it is not.
+    It is assumed the wav file is less than 2 GiB.
+    """
+    file_contents = tf.io.read_file(path)
+    if tf.strings.substr(file_contents, 0, 4) != "RIFF":
+        return False
+    else:
+        wav_body_size = tf.cast(tf.numpy_function(_count_wav_body_size, [path], tf.int64), tf.int32)
+        return wav_body_size + 44 == tf.strings.length(file_contents)

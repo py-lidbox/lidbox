@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setuptools.setup(
     name="lidbox",
-    version="0.7.0",
+    version="0.7.1",
     description="End-to-end spoken language identification (LID) on TensorFlow",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
@@ -22,6 +22,7 @@ setuptools.setup(
         "matplotlib ~= 3.1",
         "scikit-learn ~= 0.22.2",
         "webrtcvad ~= 2.0.10",
+        "miniaudio ~= 1.37"
     ],
     packages=[
         "lidbox",
