@@ -42,8 +42,6 @@ If you don't want to customize anything and instead prefer something that just w
 python3 -m pip install tensorflow
 ```
 
-If everything is working, see [this](./examples/common-voice) for a simple example to get started.
-
 ### Editable install
 
 If you plan on making changes to the code, it is easier to install `lidbox` as a Python package in setuptools develop mode:

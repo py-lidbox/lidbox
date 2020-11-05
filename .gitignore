@@ -1,9 +1,12 @@
 *.egg-info
 *.log
+*.mp3
 *.py[co]
 *.wav
 .tox
 __pycache__
+build
+dist
 
 #
 .DS_Store

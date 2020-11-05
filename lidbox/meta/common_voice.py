@@ -10,7 +10,7 @@ SPLIT_NAMES = ("train", "dev", "test")
 
 def load(corpus_dir, lang, usecols=("client_id", "path", "sentence")):
     """
-    For a given Common Voice language, load the metadata tsv-file from disk into a pandas.DataFrame.
+    Load metadata tsv-files of a Common Voice dataset from disk into a single pandas.DataFrame.
     """
     split_dfs = []
 
