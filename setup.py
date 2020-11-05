@@ -27,7 +27,8 @@ setuptools.setup(
     ],
     packages=[
         "lidbox",
-        "lidbox.dataset",
+        "lidbox.data",
+        "lidbox.e2e",
         "lidbox.embeddings",
         "lidbox.features",
         "lidbox.meta",
