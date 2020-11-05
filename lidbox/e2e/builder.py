@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 import numpy as np
 
 import lidbox
-import lidbox.dataset.steps
+import lidbox.data.steps
 import lidbox.models.keras_utils
 from lidbox import load_yaml, yaml_pprint
-from lidbox.dataset.steps import Step
+from lidbox.data.steps import Step
 from lidbox.models.keras_utils import KerasWrapper
-from lidbox.dataset.tf_utils import make_label2onehot
+from lidbox.data.tf_utils import make_label2onehot
 
 
 # When scanning a datadir for valid metadata files, these filenames will be accepted, all others are ignored
@@ -35,7 +35,7 @@ VALID_METADATA_FILES = {
 
 
 def create_datasets(split2meta, labels, config):
-    from lidbox.dataset import from_steps
+    from lidbox.data import from_steps
     create_dataset = None
     modify_steps = None
     if "user_script" in config:
@@ -43,7 +43,7 @@ def create_datasets(split2meta, labels, config):
         create_dataset = getattr(user_script, "create_dataset", None)
         modify_steps = getattr(user_script, "modify_steps", None)
     if create_dataset is None:
-        from lidbox.dataset.pipelines import create_dataset
+        from lidbox.data.pipelines import create_dataset
     else:
         logger.info("User has defined a 'create_dataset' function, will use it to create dataset steps")
     if modify_steps is None:
@@ -55,7 +55,7 @@ def create_datasets(split2meta, labels, config):
         logger.info("Creating dataset iterator for split '%s' with metadata containing %d keys", split, len(split_meta))
         if "pre_initialize" in config:
             logger.info("'pre_initialize' defined in config, updating metadata before creating dataset iterator.")
-            from lidbox.dataset.steps import pre_initialize
+            from lidbox.data.steps import pre_initialize
             split_meta = pre_initialize(split_meta, config["pre_initialize"], labels)
         args = split, labels, split_meta, config
         steps = create_dataset(*args)
@@ -159,10 +159,10 @@ def run_training(split2ds, config):
     # 2. drop all dictionary keys and convert each element to (inputs, targets) pairs
     # 3. batch the datasets
     train_ds = (split2ds[split_conf["train"]["split"]]
-            .apply(lidbox.dataset.steps.as_supervised)
+            .apply(lidbox.data.steps.as_supervised)
             .batch(split_conf["train"]["batch_size"]))
     validation_ds = (split2ds[split_conf["validation"]["split"]]
-            .apply(lidbox.dataset.steps.as_supervised)
+            .apply(lidbox.data.steps.as_supervised)
             .batch(split_conf["validation"]["batch_size"]))
     #TODO split
     history = None
@@ -230,7 +230,7 @@ def zip_utt2vector(ds, vectors):
 
 
 def collect_targets(labels, meta):
-    meta_ds = lidbox.dataset.steps.initialize(labels, meta)
+    meta_ds = lidbox.data.steps.initialize(labels, meta)
     for x in meta_ds.as_numpy_iterator():
         yield x["id"].decode("utf-8"), x["target"]
 
@@ -339,7 +339,7 @@ def generate_worst_case_predictions_for_missed_utterances(utt2prediction, utt2ta
 def predict_with_keras_model(split2ds, split2meta, labels, config, data_conf):
     ds = (split2ds[data_conf["split"]]
                 .batch(data_conf["batch_size"])
-                .apply(lidbox.dataset.steps.as_supervised))
+                .apply(lidbox.data.steps.as_supervised))
 
     keras_wrapper = KerasWrapper.from_config(config)
     logger.info("Model initialized:\n%s", str(keras_wrapper))

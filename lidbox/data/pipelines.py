@@ -3,7 +3,7 @@ Default data pipelines constructed from dataset steps.
 This module can be replaced by a custom script using key 'user_script' in the config file.
 """
 import os
-from lidbox.dataset.steps import Step
+from lidbox.data.steps import Step
 from lidbox.models.keras_utils import experiment_cache_from_config
 
 

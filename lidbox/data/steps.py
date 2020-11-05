@@ -1,7 +1,7 @@
 """
 Dataset steps are functions that can be applied on tf.data.Dataset instances using tf.data.Dataset.apply.
 They are designed to do as much constant time pre-processing as possible when called, but do not evaluate the given dataset, except for some 'consume' and 'debug' steps.
-See lidbox.dataset.pipelines.create_dataset for creating an end-to-end tf.data.Dataset pipeline from metadata.
+See lidbox.data.pipelines.create_dataset for creating an end-to-end tf.data.Dataset pipeline from metadata.
 """
 import collections
 import io
@@ -16,7 +16,7 @@ import tensorflow as tf
 TF_VERSION_MAJOR, TF_VERSION_MINOR = tuple(int(x) for x in tf.version.VERSION.split(".")[:2])
 
 import lidbox
-import lidbox.dataset.tf_utils as tf_utils
+import lidbox.data.tf_utils as tf_utils
 import lidbox.features as features
 import lidbox.features.audio as audio_features
 
