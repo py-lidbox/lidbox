@@ -9,6 +9,7 @@ import sys
 
 import lidbox
 import lidbox.schemas
+import lidbox.e2e
 
 
 VERBOSITY_TO_LOGLEVEL = [logging.WARNING, logging.INFO, logging.DEBUG]
@@ -122,20 +123,19 @@ class E2E(Command):
     def run(self):
         super().run()
         # Input dynamically to avoid importing TensorFlow when the user e.g. requests just the help string from the command
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running end-to-end with config file '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
         assert not any(v is None for v in split2ds.values()), "Empty split, cannot continue"
-        history = lidbox.api.run_training(split2ds, config)
+        history = lidbox.e2e.run_training(split2ds, config)
         test_conf = config["experiment"]["data"]["test"]
-        utt2prediction, utt2target = lidbox.api.predict_with_keras_model(
+        utt2prediction, utt2target = lidbox.e2e.predict_with_keras_model(
                 split2ds, split2meta, labels, config, test_conf)
-        metrics = lidbox.api.evaluate_test_set(
+        metrics = lidbox.e2e.evaluate_test_set(
                 utt2prediction, utt2target, labels, config, test_conf)
-        lidbox.api.write_metrics(metrics, config, test_conf["split"])
+        lidbox.e2e.write_metrics(metrics, config, test_conf["split"])
 
 
 class Evaluate(Command):
@@ -144,21 +144,20 @@ class Evaluate(Command):
     """
     def run(self):
         super().run()
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running evaluation with config file '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
         test_split_key = config["experiment"]["data"]["test"]["split"]
         # Run the pipeline only for the test split
         split2meta = {split: meta for split, meta in split2meta.items() if split == test_split_key}
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
         test_conf = config["experiment"]["data"]["test"]
-        utt2prediction, utt2target = lidbox.api.predict_with_keras_model(
+        utt2prediction, utt2target = lidbox.e2e.predict_with_keras_model(
                 split2ds, split2meta, labels, config, test_conf)
-        metrics = lidbox.api.evaluate_test_set(
+        metrics = lidbox.e2e.evaluate_test_set(
                 utt2prediction, utt2target, labels, config, test_conf)
-        lidbox.api.write_metrics(metrics, config, test_conf["split"])
+        lidbox.e2e.write_metrics(metrics, config, test_conf["split"])
 
 
 class Prepare(Command):
@@ -167,12 +166,11 @@ class Prepare(Command):
     """
     def run(self):
         super().run()
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Running dataset preparation with config file '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
         print("Prepared iterators:")
         for split, ds in split2ds.items():
             print("   ", split, ds)
@@ -183,20 +181,19 @@ class BackendE2E(Command):
 
     def run(self):
         super().run()
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Extracting embeddings with pre-trained Keras model(s) and training backend classifier(s) on embeddings, using config '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
-        lidbox.api.fit_embedding_classifier(
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
+        lidbox.e2e.fit_embedding_classifier(
                 split2ds, split2meta, labels, config)
         test_conf = config["sklearn_experiment"]["data"]["test"]
-        utt2prediction, utt2target = lidbox.api.predict_with_embedding_classifier(
+        utt2prediction, utt2target = lidbox.e2e.predict_with_embedding_classifier(
                 split2ds, split2meta, labels, config, test_conf)
-        metrics = lidbox.api.evaluate_test_set(
+        metrics = lidbox.e2e.evaluate_test_set(
                 utt2prediction, utt2target, labels, config, test_conf)
-        lidbox.api.write_metrics(metrics, config, test_conf["split"])
+        lidbox.e2e.write_metrics(metrics, config, test_conf["split"])
 
 
 class BackendPredict(Command):
@@ -204,18 +201,17 @@ class BackendPredict(Command):
 
     def run(self):
         super().run()
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Extracting embeddings with pre-trained Keras model(s) and predicting log probabilities with trained backend classifier, using config '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
         data_conf = config["sklearn_experiment"]["data"]["predict"]
         # Drop all other splits, we only want to predict from the data with key 'predict'
         split2meta = {data_conf["split"]: split2meta[data_conf["split"]]}
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
-        utt2prediction, _ = lidbox.api.predict_with_embedding_classifier(
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
+        utt2prediction, _ = lidbox.e2e.predict_with_embedding_classifier(
                 split2ds, split2meta, labels, config, data_conf)
-        lidbox.api.write_predictions(utt2prediction, labels, config, data_conf["split"])
+        lidbox.e2e.write_predictions(utt2prediction, labels, config, data_conf["split"])
 
 
 class BackendEvaluate(Command):
@@ -223,19 +219,18 @@ class BackendEvaluate(Command):
 
     def run(self):
         super().run()
-        import lidbox.api
         args = self.args
         if args.verbosity:
             print("Extracting embeddings with pre-trained Keras model(s), predicting log probabilities with trained backend classifier, and evaluating metrics on the test set , using config '{}'".format(args.lidbox_config_yaml_path))
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
         test_conf = config["sklearn_experiment"]["data"]["test"]
         split2meta = {test_conf["split"]: split2meta[test_conf["split"]]}
-        split2ds = lidbox.api.create_datasets(split2meta, labels, config)
-        utt2prediction, utt2target = lidbox.api.predict_with_embedding_classifier(
+        split2ds = lidbox.e2e.create_datasets(split2meta, labels, config)
+        utt2prediction, utt2target = lidbox.e2e.predict_with_embedding_classifier(
                 split2ds, split2meta, labels, config, test_conf)
-        metrics = lidbox.api.evaluate_test_set(
+        metrics = lidbox.e2e.evaluate_test_set(
                 utt2prediction, utt2target, labels, config, test_conf)
-        lidbox.api.write_metrics(metrics, config, test_conf["split"])
+        lidbox.e2e.write_metrics(metrics, config, test_conf["split"])
 
 
 class Utils(Command):
@@ -273,9 +268,8 @@ class Utils(Command):
         return split2meta
 
     def load_and_show_meta(self):
-        import lidbox.api
         args = self.args
-        split2meta, labels, _ = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta, labels, _ = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2meta = self._filter_by_splitarg(split2meta)
         for split, meta in split2meta.items():
             print(split)
@@ -293,12 +287,11 @@ class Utils(Command):
             print("File '{}' ok".format(args.lidbox_config_yaml_path))
 
     def run_script(self):
-        import lidbox.api
         args = self.args
-        split2meta, labels, config = lidbox.api.load_splits_from_config_file(args.lidbox_config_yaml_path)
+        split2meta, labels, config = lidbox.e2e.load_splits_from_config_file(args.lidbox_config_yaml_path)
         split2meta = self._filter_by_splitarg(split2meta)
         config["user_script"] = args.run_script
-        _ = lidbox.api.create_datasets(split2meta, labels, config)
+        _ = lidbox.e2e.create_datasets(split2meta, labels, config)
 
     def run(self):
         super().run()
