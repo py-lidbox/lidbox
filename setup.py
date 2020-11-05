@@ -5,13 +5,13 @@ with open("README.md") as f:
 
 setuptools.setup(
     name="lidbox",
-    version="0.7.1",
-    description="End-to-end spoken language identification (LID) on TensorFlow",
+    version="1.0.0-rc",
+    description="Spoken language identification out of the box with TensorFlow",
     long_description=readmefile_contents,
     long_description_content_type="text/markdown",
     author="Matias Lindgren",
     author_email="matias.lindgren@iki.fi",
-    url="https://github.com/matiaslindgren/lidbox",
+    url="https://github.com/py-lidbox/lidbox",
     license="MIT",
     python_requires=">= 3.7.*",
     install_requires=[
@@ -22,13 +22,15 @@ setuptools.setup(
         "matplotlib ~= 3.1",
         "scikit-learn ~= 0.22.2",
         "webrtcvad ~= 2.0.10",
-        "miniaudio ~= 1.37"
+        "miniaudio ~= 1.37",
+        "pandas ~= 1.1.4",
     ],
     packages=[
         "lidbox",
         "lidbox.dataset",
         "lidbox.embeddings",
         "lidbox.features",
+        "lidbox.meta",
         "lidbox.models",
         "lidbox.schemas",
     ],
