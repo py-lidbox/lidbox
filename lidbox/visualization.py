@@ -1,5 +1,6 @@
 import logging
 import matplotlib.pyplot as plt
+import seaborn as sns
 import numpy as np
 
 
@@ -41,10 +42,55 @@ def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legen
     return fig, ax
 
 
-def draw_spectrogram(spectra, title='', cmap=plt.cm.Blues):
-    fig, ax = plt.subplots()
-    if title:
-        ax.set_title(title)
-    im = ax.imshow(spectra.T[::-1], cmap=cmap)
-    plt.tight_layout()
-    return fig, ax
+def plot_duration_distribution(metadata):
+    sns.set(rc={'figure.figsize': (8, 6)})
+
+    split_names = sorted(metadata.split.unique())
+    label_names = sorted(metadata.label.unique())
+
+    ax = sns.boxplot(
+        x="split",
+        order=split_names,
+        y="duration",
+        hue="label",
+        hue_order=label_names,
+        data=metadata)
+    ax.set_title("Median audio file duration in seconds")
+    plt.show()
+
+    ax = sns.barplot(
+        x="split",
+        order=split_names,
+        y="duration",
+        hue="label",
+        hue_order=label_names,
+        data=metadata,
+        ci=None,
+        estimator=np.sum)
+    ax.set_title("Total amount of audio in seconds")
+    plt.show()
+
+
+def plot_signal(signal, figsize=(6, 0.5), **kwargs):
+    ax = sns.lineplot(data=signal, lw=0.1, **kwargs)
+    ax.set_axis_off()
+    ax.margins(0)
+    plt.gcf().set_size_inches(*figsize)
+    plt.show()
+
+
+def plot_spectrogram(S, cmap="viridis", figsize=None, **kwargs):
+    if figsize is None:
+        figsize = S.shape[0]/50, S.shape[1]/50
+    ax = sns.heatmap(S.T, cbar=False, cmap=cmap, **kwargs)
+    ax.invert_yaxis()
+    ax.set_axis_off()
+    ax.margins(0)
+    plt.gcf().set_size_inches(*figsize)
+    plt.show()
+
+
+def plot_cepstra(X, figsize=None):
+    if not figsize:
+        figsize = (X.shape[0]/50, X.shape[1]/20)
+    plot_spectrogram(X, cmap="RdBu_r", figsize=figsize)
