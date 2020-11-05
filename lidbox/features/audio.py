@@ -30,6 +30,18 @@ def read_mp3(path):
     return signal, tf.cast(rate, tf.int32)
 
 
+def scipy_resample(signal, in_rate, out_rate):
+    new_len = round(len(signal) * float(out_rate) / in_rate)
+    return scipy.signal.resample(signal, new_len)
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
+def resample(signal, in_rate, out_rate):
+    return tf.numpy_function(scipy_resample, [signal, in_rate, out_rate], [tf.float32])
+
+
 @tf.function
 def write_mono_wav(path, signal, sample_rate):
     tf.debugging.assert_rank(signal, 1, "write_wav expects 1-dim mono signals without channel dims.")
@@ -224,22 +236,25 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
     return tf.reshape(vad_decisions, [tf.shape(frames)[0]])
 
 
-# # similar to kaldi mfcc vad but without a context window (for now):
-# # https://github.com/kaldi-asr/kaldi/blob/8ce3a95761e0eb97d95d3db2fcb6b2bfb7ffec5b/src/ivector/voice-activity-detection.cc
-# # TODO something is wrong, this drops almost all frames
-# @tf.function
-# def framewise_mfcc_energy_vad_decisions(wav, spec_kwargs, melspec_kwargs, energy_threshold=5.0, energy_mean_scale=0.5):
-#     tf.debugging.assert_rank(wav.audio, 1, message="Expected a single 1D signal (i.e. one mono audio tensor without explicit channels)")
-#     S = spectrograms(Wav(tf.expand_dims(wav.audio, 0), tf.expand_dims(wav.sample_rate, 0)), **spec_kwargs)
-#     S = melspectrograms(S, sample_rate=wav.sample_rate, **melspec_kwargs)
-#     S = tf.math.log(S + 1e-6)
-#     tf.debugging.assert_all_finite(S, "logmelspectrogram extraction failed, cannot compute mfcc energy vad")
-#     mfcc = tf.signal.mfccs_from_log_mel_spectrograms(S)
-#     log_energy = tf.squeeze(tf.signal.mfccs_from_log_mel_spectrograms(S)[..., 0])
-#     tf.debugging.assert_rank(log_energy, 1, message="Failed to extract 0th MFCC coef")
-#     mean_log_energy = tf.math.reduce_mean(log_energy)
-#     vad_decisions = log_energy > (energy_threshold + energy_mean_scale * mean_log_energy)
-#     return vad_decisions
+def remove_silence(signal, rate, window_ms=10, min_non_speech_ms=300):
+    """
+    Apply framewise_rms_energy_vad_decisions to drop silence.
+    """
+    window_ms = tf.constant(window_ms, tf.int32)
+    window_frames = (window_ms * rate) // 1000
+
+    # Get binary VAD decisions for each 10 ms window
+    vad_1 = framewise_rms_energy_vad_decisions(
+        signal=signal,
+        sample_rate=rate,
+        frame_step_ms=window_ms,
+        min_non_speech_ms=min_non_speech_ms,
+        strength=0.1)
+
+    # Partition the signal into 10 ms windows to match the VAD decisions and filter if VAD == 1
+    windows = tf.signal.frame(signal, window_frames, window_frames)
+    return tf.reshape(windows[vad_1], [-1])
+
 
 # Cannot be a tf.function due to external Python object webrtcvad.Vad
 def numpy_fn_get_webrtcvad_decisions(signal, sample_rate, pcm_data, vad_step, aggressiveness, min_non_speech_frames):
