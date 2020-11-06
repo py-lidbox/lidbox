@@ -9,6 +9,7 @@ import miniaudio
 import numpy as np
 import tensorflow as tf
 import webrtcvad
+import scipy.signal
 
 
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
@@ -22,24 +23,26 @@ def read_wav(path):
 
 def miniaudio_read_mp3(path):
     audio = miniaudio.mp3_read_file_f32(path.decode("utf-8"))
-    return np.array(audio.samples, np.float32), audio.sample_rate
+    return np.array(audio.samples, np.float32).reshape((-1, audio.nchannels)), audio.sample_rate
 
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
 def read_mp3(path):
     signal, rate = tf.numpy_function(miniaudio_read_mp3, [path], [tf.float32, tf.int64])
+    signal = tf.math.reduce_mean(signal, axis=1, keepdims=False)
     return signal, tf.cast(rate, tf.int32)
 
 
 def scipy_resample(signal, in_rate, out_rate):
-    new_len = round(len(signal) * float(out_rate) / in_rate)
-    return scipy.signal.resample(signal, new_len)
+    new_num_samples = round(len(signal) * float(out_rate) / in_rate)
+    return scipy.signal.resample(signal, new_num_samples)
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
 def resample(signal, in_rate, out_rate):
-    return tf.numpy_function(scipy_resample, [signal, in_rate, out_rate], [tf.float32])
+    s = tf.numpy_function(scipy_resample, [signal, in_rate, out_rate], [tf.float32])
+    return tf.reshape(s, [-1])
 
 
 @tf.function
@@ -236,11 +239,15 @@ def framewise_rms_energy_vad_decisions(signal, sample_rate, frame_step_ms, min_n
     return tf.reshape(vad_decisions, [tf.shape(frames)[0]])
 
 
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def remove_silence(signal, rate, window_ms=10, min_non_speech_ms=300):
     """
     Apply framewise_rms_energy_vad_decisions to drop silence.
     """
-    window_ms = tf.constant(window_ms, tf.int32)
     window_frames = (window_ms * rate) // 1000
 
     # Get binary VAD decisions for each 10 ms window
