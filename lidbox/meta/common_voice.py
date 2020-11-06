@@ -1,7 +1,9 @@
 """
 Mozilla Common Voice https://voice.mozilla.org/en/datasets
 """
+import multiprocessing
 import os
+
 import pandas as pd
 
 
@@ -38,9 +40,13 @@ def fix_row(row, corpus_dir):
     return row
 
 
-def load_all(corpus_dir, langs):
+def load_all(corpus_dir, langs, use_multiprocessing=True):
     """
     Load metadata from multiple datasets into a single table with unique utterance ids for every row.
     """
-    return (pd.concat((load(corpus_dir, lang) for lang in langs), verify_integrity=True)
-            .sort_index())
+    if use_multiprocessing:
+        with multiprocessing.Pool(processes=None) as pool:
+            lang_dfs = pool.starmap(load, ((corpus_dir, lang) for lang in langs))
+    else:
+        lang_dfs = (load(corpus_dir, lang) for lang in langs)
+    return (pd.concat(lang_dfs, verify_integrity=True).sort_index())
