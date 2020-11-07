@@ -2,6 +2,7 @@
 Dataset metadata parsing/loading/preprocessing.
 """
 from concurrent.futures import ThreadPoolExecutor
+import collections
 import itertools
 import os
 
@@ -10,13 +11,26 @@ import numpy as np
 import pandas as pd
 
 
+REQUIRED_META_COLUMNS = (
+    "path",
+    "label",
+    "split",
+)
+
+
 def verify_integrity(meta, use_threads=True):
     """
     Check that
-    1. There are no NaN values.
-    2. All paths exist on disk.
-    3. All splits are disjoint by speaker id.
+    1. The metadata table contains all required columns.
+    2. There are no NaN values.
+    3. All audio filepaths exist on disk.
+    4. All splits/buckets are disjoint by speaker id.
+
+    This function throws an exception if verification fails, otherwise completes silently.
     """
+    missing_columns = set(REQUIRED_META_COLUMNS) - set(meta.columns)
+    assert missing_columns == set(), "{} missing columns in metadata: {}".format(len(missing_columns), sorted(missing_columns))
+
     assert not meta.isna().any(axis=None), "NaNs in metadata"
 
     if use_threads:
@@ -91,3 +105,14 @@ def random_oversampling(meta):
         samples.append(sample)
 
     return pd.concat(samples).set_index("id", drop=True, verify_integrity=True)
+
+
+def generate_label2target(meta):
+    """
+    Generate a unique label-to-target mapping,
+    where integer targets are the enumeration of labels in lexicographic order.
+    """
+    label2target = collections.OrderedDict(
+            (l, t) for t, l in enumerate(sorted(meta.label.unique())))
+    meta["target"] = np.array([label2target[l] for l in meta.label], np.int32)
+    return meta, label2target
