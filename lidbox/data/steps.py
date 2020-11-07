@@ -296,42 +296,28 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, copy_noise_files_to_t
                 num_parallel_calls=TF_AUTOTUNE)
 
 
-def augment_by_random_resampling(ds, range):
+def random_signal_speed_change(ds, min, max, flag):
     """
-    Create new samples by resampling signals of every element of ds with randomly chosen sample rate ratio from the given range.
-    E.g.
-        range = [0.8, 1.0]
-        all augmented samples will have signals at speed rate in [0.8, 1.0] of the original signal
-    Requires tensorflow-io >= 0.12.0
+    Randomly change the speed of signals for elements that x[flag] == True.
+    Speed ratios are picked uniformly at random from the range [min, max].
     """
-    logger.info("Augmenting dataset with external TensorFlow IO library by random resampling with a random ratio chosen from %s", repr(range))
-    try:
-        import tensorflow_io as tfio
-    except Exception as e:
-        logger.exception("Unable to import tensorflow-io, skipping augmentation step")
-        return ds
-    tfio_major, tfio_minor = tfio.version.VERSION.split('.')[:2]
-    assert int(tfio_major) == 0 and int(tfio_minor) >= 12, "tfio.version.VERSION is '{}' when at least 0.12.0 is expected".format(tfio.version.VERSION)
-    if int(tfio_minor) == 12:
-        resample_quality = tf.constant(4, tf.int32)
-        tf_resample = lambda *args, name=None: tfio.experimental.audio.resample(*args, resample_quality, name=name)
-    else:
-        tf_resample = tfio.audio.resample
-    sample_rate_ratio_min = tf.constant(range[0], tf.float32)
-    sample_rate_ratio_max = tf.constant(range[1], tf.float32)
-    def _resample_randomly(x):
+    logger.info("Applying random resampling to signals with a random speed ratio chosen uniformly at random from [%.3f, %.3f]", min, max)
+
+    sample_rate_ratio_min = tf.constant(min, tf.float32)
+    sample_rate_ratio_max = tf.constant(max, tf.float32)
+
+    def _resample_copies_randomly(x):
+        if not x[flag]:
+            return x
+
         random_ratio = tf.random.uniform([], sample_rate_ratio_min, sample_rate_ratio_max)
-        sample_rate_in = tf.cast(random_ratio * tf.cast(x["sample_rate"], tf.float32), tf.int64)
-        sample_rate_out = tf.cast(x["sample_rate"], tf.int64)
-        resampled_signal = tf_resample(
-                tf.expand_dims(x["signal"], -1),
-                sample_rate_in,
-                sample_rate_out,
-                name="augment_by_random_resampling")
-        resampled_signal = tf.squeeze(resampled_signal, -1)
-        new_id = tf.strings.join(("augmented", x["id"], "rate", tf.strings.as_string(random_ratio, precision=3)), separator="-")
-        return dict(x, id=new_id, signal=resampled_signal)
-    return ds.map(_resample_randomly, num_parallel_calls=TF_AUTOTUNE)
+        in_rate = tf.cast(random_ratio * tf.cast(x["sample_rate"], tf.float32), tf.int32)
+        out_rate = tf.cast(x["sample_rate"], tf.int32)
+
+        resampled_signal = audio_features.resample(x["signal"], in_rate, out_rate)
+        return dict(x, signal=resampled_signal)
+
+    return ds.map(_resample_copies_randomly, num_parallel_calls=TF_AUTOTUNE)
 
 
 def cache(ds, directory=None, batch_size=1, cache_key=None):
@@ -938,7 +924,6 @@ VALID_STEP_FUNCTIONS = {
     "apply_vad": apply_vad,
     "as_supervised": as_supervised,
     "augment_by_additive_noise": augment_by_additive_noise,
-    "augment_by_random_resampling": augment_by_random_resampling,
     "augment_signals": augment_signals,
     "cache": cache,
     "compute_rms_vad": compute_rms_vad,
@@ -959,6 +944,7 @@ VALID_STEP_FUNCTIONS = {
     "load_audio": load_audio,
     "load_kaldi_data": load_kaldi_data,
     "normalize": normalize,
+    "random_signal_speed_change": random_signal_speed_change,
     "reduce_stats": reduce_stats,
     "remap_keys": remap_keys,
     "repeat_too_short_signals": repeat_too_short_signals,

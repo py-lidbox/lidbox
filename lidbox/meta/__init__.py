@@ -70,7 +70,7 @@ def read_audio_durations(meta, max_threads=os.cpu_count()):
 #TODO check if this could be replaced with some adapter to a library designed for
 # imbalanced datasets that would support custom imbalance metrics/weights like durations in seconds
 # in our case.
-def random_oversampling(meta):
+def random_oversampling(meta, copy_flag="is_copy"):
     """
     Random oversampling by duplicating metadata rows.
 
@@ -82,6 +82,10 @@ def random_oversampling(meta):
     5. Draw samples with replacement from the metadata separately for each label.
     6. Merge samples with rest of the metadata and verify there are no duplicate ids.
     """
+    # Add flag column to distinguish copies and original rows
+    if copy_flag not in meta.columns:
+        meta = meta.assign({copy_flag: False})
+
     durations_by_label = meta[["label", "duration"]].groupby("label")
 
     total_dur = durations_by_label.sum()
@@ -90,21 +94,33 @@ def random_oversampling(meta):
     median_dur = durations_by_label.median()
     sample_sizes = (total_dur_delta / median_dur).astype(np.int32)
 
-    samples = []
+    copies = []
 
-    def update_sample_id(row):
+    def mark_copy(row):
         row["id"] = "{}_copy_{}".format(row["id"], row.name)
+        row[copy_flag] = True
         return row
 
     for label in durations_by_label.groups:
-        sample_size = sample_sizes.loc[label][0]
-        sample = (meta[meta["label"]==label]
-                  .sample(n=sample_size, replace=True)
-                  .reset_index()
-                  .transform(update_sample_id, axis=1))
-        samples.append(sample)
+        if label != target_label:
+            sample_size = sample_sizes.loc[label][0]
+            copy = (meta[meta["label"]==label]
+                      .sample(n=sample_size, replace=True)
+                      .reset_index()
+                      .transform(mark_copy, axis=1))
+            copies.append(copy)
 
-    return pd.concat(samples).set_index("id", drop=True, verify_integrity=True)
+    copied_meta = pd.concat(copies).set_index("id", drop=True)
+    return pd.concat([copied_meta, meta], verify_integrity=True).sort_index()
+
+
+def random_oversampling_on_training_set(meta, split="train"):
+    meta = meta.assign(is_copy=False)
+
+    train = meta[meta["split"]==split]
+    rest = meta[meta["split"]!=split]
+
+    return pd.concat([random_oversampling(train), rest], verify_integrity=True).sort_index()
 
 
 def generate_label2target(meta):

@@ -33,7 +33,7 @@ def read_mp3(path):
 
 
 def scipy_resample(signal, in_rate, out_rate):
-    new_num_samples = round(len(signal) * float(out_rate) / in_rate)
+    new_num_samples = int(len(signal) * out_rate / in_rate)
     return scipy.signal.resample(signal, new_num_samples)
 
 @tf.function(input_signature=[
