@@ -18,7 +18,7 @@ REQUIRED_META_COLUMNS = (
 )
 
 
-def verify_integrity(meta, use_threads=True):
+def verify_integrity(meta, max_threads=os.cpu_count()):
     """
     Check that
     1. The metadata table contains all required columns.
@@ -33,8 +33,8 @@ def verify_integrity(meta, use_threads=True):
 
     assert not meta.isna().any(axis=None), "NaNs in metadata"
 
-    if use_threads:
-        with ThreadPoolExecutor(max_workers=None) as pool:
+    if max_threads > 0:
+        with ThreadPoolExecutor(max_workers=max_threads) as pool:
             num_invalid = sum(int(not ok) for ok in
                               pool.map(os.path.exists, meta.path, chunksize=100))
     else:
@@ -50,14 +50,14 @@ def verify_integrity(meta, use_threads=True):
         assert intersection == set(), "{} and {} have {} speakers in common".format(a, b, len(intersection))
 
 
-def read_audio_durations(meta, use_threads=True):
+def read_audio_durations(meta, max_threads=os.cpu_count()):
     def _get_duration(row):
         id, path = row
         return id, miniaudio.get_file_info(path).duration
 
-    if use_threads:
-        with ThreadPoolExecutor(max_workers=None) as pool:
-            durations = list(pool.map(_get_duration, meta.path.items(), chunksize=100))
+    if max_threads > 0:
+        with ThreadPoolExecutor(max_workers=max_threads) as pool:
+            durations = list(pool.map(_get_duration, meta.path.items(), chunksize=1000))
     else:
         durations = [_get_duration(row) for row in meta.path.items()]
 
