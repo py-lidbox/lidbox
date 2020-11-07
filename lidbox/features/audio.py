@@ -45,12 +45,17 @@ def resample(signal, in_rate, out_rate):
     return tf.reshape(s, [-1])
 
 
+@tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.float32)])
+def dBFS_to_linear(level):
+    return tf.math.pow(10.0, level/20.0)
+
+
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.float32)])
 def peak_normalize(signal, dBFS=0):
     # https://www.hackaudio.com/digital-signal-processing/amplitude/peak-normalization/
-    return tf.math.pow(10.0, dBFS / 20.0) * (signal / tf.reduce_max(tf.abs(signal)))
+    return dBFS_to_linear(dBFS) * (signal / tf.reduce_max(tf.abs(signal)))
 
 
 #TODO use tf convolution
@@ -67,9 +72,11 @@ def random_gaussian_fir_filter(signal, num_coefs=10):
     return tf.reshape(signal, [-1])
 
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[], dtype=tf.string),
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def write_mono_wav(path, signal, sample_rate):
-    tf.debugging.assert_rank(signal, 1, "write_wav expects 1-dim mono signals without channel dims.")
     signal = tf.expand_dims(signal, -1)
     wav = tf.audio.encode_wav(signal, sample_rate)
     tf.io.write_file(path, wav)
@@ -100,9 +107,11 @@ def numpy_snr_mixer(clean, noise, snr):
     clean = clean * scalarclean
     rmsclean = (clean**2).mean()**0.5
     rmsnoise = (noise**2).mean()**0.5
+
     scalarnoise = 10 ** (-25 / 20) /rmsnoise
     noise = noise * scalarnoise
     rmsnoise = (noise**2).mean()**0.5
+
     # Set the noise level for a given SNR
     noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
     noisenewlevel = noise * noisescalar
@@ -110,24 +119,30 @@ def numpy_snr_mixer(clean, noise, snr):
     return clean, noisenewlevel, noisyspeech
 
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32)])
 def snr_mixer(clean, noise, snr):
     """
     TensorFlow version of numpy_snr_mixer.
     """
     tf.debugging.assert_equal(tf.size(clean), tf.size(noise), message="mismatching length for signals clean and noise given to snr mixer")
     # Normalizing to -25 dB FS
-    scalarclean = tf.math.pow(10.0, -25.0/20.0) / root_mean_square(clean)
+    scalarclean = dBFS_to_linear(-25.0) / root_mean_square(clean)
     clean_norm = scalarclean * clean
     rmsclean = root_mean_square(clean_norm)
-    scalarnoise = tf.math.pow(10.0, -25.0/20.0) / root_mean_square(noise)
+
+    scalarnoise = dBFS_to_linear(-25.0) / root_mean_square(noise)
     noise_norm = scalarnoise * noise
     rmsnoise = root_mean_square(noise_norm)
+
     # Set the noise level for a given SNR
-    level = tf.math.pow(10.0, snr / 20.0)
+    level = dBFS_to_linear(snr)
     noisescalar = tf.math.sqrt(rmsclean / level / rmsnoise)
     noisenewlevel = noisescalar * noise_norm
     noisyspeech = clean_norm + noisenewlevel
+
     return clean_norm, noisenewlevel, noisyspeech
 
 
