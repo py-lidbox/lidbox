@@ -529,10 +529,10 @@ def create_signal_chunks(ds, length_ms, step_ms, max_pad_ms=0, deterministic_out
     def chunks_to_elements(chunk, chunk_num, x):
         chunk_num_str = tf.strings.as_string(chunk_num, width=id_str_padding, fill='0')
         chunk_id = tf.strings.join((x["id"], chunk_num_str), separator='-')
-        out = dict(x, signal=tf.reshape(chunk, [-1]), id=chunk_id)
+        s = tf.reshape(chunk, [-1])
+        out = dict(x, signal=s, id=chunk_id)
         if "duration" in x:
-            duration_str = tf.strings.as_string(tf.cast(tf.size(chunk) / x["sample_rate"], tf.float32))
-            out = dict(out, duration=duration_str)
+            out = dict(out, duration=tf.cast(tf.size(s) / x["sample_rate"], tf.float32))
         return out
 
     def chunk_signal_and_flatten(x):

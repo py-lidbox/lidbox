@@ -36,27 +36,21 @@ def verify_integrity(meta, use_threads=True):
         assert intersection == set(), "{} and {} have {} speakers in common".format(a, b, len(intersection))
 
 
-def get_mp3_duration(row):
-    id, path = row
-    return id, miniaudio.mp3_get_file_info(path).duration
-
-def get_wav_duration(row):
-    id, path = row
-    return id, miniaudio.get_file_info(path).duration
-
-def read_audio_durations(meta, filetype=None, use_threads=True):
-    get_duration_fn = get_mp3_duration if filetype == "mp3" else get_wav_duration
+def read_audio_durations(meta, use_threads=True):
+    def _get_duration(row):
+        id, path = row
+        return id, miniaudio.get_file_info(path).duration
 
     if use_threads:
         with ThreadPoolExecutor(max_workers=None) as pool:
-            durations = list(pool.map(get_duration_fn, meta.path.items(), chunksize=100))
+            durations = list(pool.map(_get_duration, meta.path.items(), chunksize=100))
     else:
-        durations = [get_duration_fn(row) for row in meta.path.items()]
+        durations = [_get_duration(row) for row in meta.path.items()]
 
-    assert all(id1 == id2 for (id1, _), id2 in zip(durations, meta.index)), "incorrect order of rows after computing audio durations"
+    #TODO this should be a test case
+    assert len(durations) == len(meta.index) and all(id1 == id2 for (id1, _), id2 in zip(durations, meta.index)), "incorrect order of rows after computing audio durations"
 
-    meta["duration_sec"] = np.array([d for _, d in durations], np.float32)
-    return meta
+    return np.array([d for _, d in durations], np.float32)
 
 
 #TODO check if this could be replaced with some adapter to a library designed for

@@ -120,7 +120,10 @@ class SparseAverageDetectionCost(AverageDetectionCost):
 
 
 if __name__ == "__main__":
+    from time import perf_counter
     tf.config.set_visible_devices([], "GPU")
+
+    # One-hot encoded true classes
     true_positives = tf.constant([
         [1, 0, 0],
         [0, 1, 0],
@@ -131,6 +134,8 @@ if __name__ == "__main__":
         [0, 1, 0],
         [0, 0, 1],
         ], tf.float32)
+
+    # Log-scores, e.g. log softmax from DNN
     predictions = tf.math.log(tf.constant([
         [.1, .2, .9],
         [.9, .2, .0],
@@ -141,12 +146,19 @@ if __name__ == "__main__":
         [.1, .0, .7],
         [.9, .1, .0],
         ], tf.float32))
-    from time import perf_counter
+
+    num_labels = tf.shape(true_positives)[1].numpy()
+    score_thresholds = [tf.math.log(x).numpy() for x in [0.05, 0.4, 0.6, 0.95]]
+
+    print("testing average detection cost")
+
     begin = perf_counter()
-    cavg = AverageDetectionCost(3, [tf.math.log(x).numpy() for x in [0.05, 0.4, 0.6, 0.95]])
+    cavg = AverageDetectionCost(num_labels, score_thresholds)
     cavg.update_state(true_positives, predictions)
     res = cavg.result().numpy()
     end = perf_counter() - begin
+
     print("min cavg: {}, took {:.6f} sec".format(res, end))
+
     cavg.reset_states()
-    assert cavg.result().numpy() == 0.0
+    assert cavg.result().numpy() == 0.0, "result was not 0 after resetting states"

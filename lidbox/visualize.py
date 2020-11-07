@@ -42,31 +42,32 @@ def draw_confusion_matrix(cm, label_names, title='', cmap=plt.cm.Blues, no_legen
     return fig, ax
 
 
+def _categorical_plot_kwargs(metadata):
+    return {
+        "data":      metadata,
+        # x-axis is dataset split/bucket, e.g. train/dev/test
+        "x":         "split",
+        "order":     sorted(metadata.split.unique()),
+        # hue by category/label
+        "hue":       "label",
+        "hue_order": sorted(metadata.label.unique())
+    }
+
+
+def plot_sample_distribution(metadata):
+    ax = sns.countplot(**_categorical_plot_kwargs(metadata))
+    ax.set_title("Total amount of samples")
+    plt.show()
+
+
 def plot_duration_distribution(metadata):
-    sns.set(rc={'figure.figsize': (8, 6)})
+    plot_kwargs = _categorical_plot_kwargs(metadata)
 
-    split_names = sorted(metadata.split.unique())
-    label_names = sorted(metadata.label.unique())
-
-    ax = sns.boxplot(
-        x="split",
-        order=split_names,
-        y="duration",
-        hue="label",
-        hue_order=label_names,
-        data=metadata)
+    ax = sns.boxplot(**plot_kwargs, y="duration")
     ax.set_title("Median audio file duration in seconds")
     plt.show()
 
-    ax = sns.barplot(
-        x="split",
-        order=split_names,
-        y="duration",
-        hue="label",
-        hue_order=label_names,
-        data=metadata,
-        ci=None,
-        estimator=np.sum)
+    ax = sns.barplot(**plot_kwargs, y="duration", ci=None, estimator=np.sum)
     ax.set_title("Total amount of audio in seconds")
     plt.show()
 
