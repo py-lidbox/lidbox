@@ -45,6 +45,28 @@ def resample(signal, in_rate, out_rate):
     return tf.reshape(s, [-1])
 
 
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32)])
+def peak_normalize(signal, dBFS=0):
+    # https://www.hackaudio.com/digital-signal-processing/amplitude/peak-normalization/
+    return tf.math.pow(10.0, dBFS / 20.0) * (signal / tf.reduce_max(tf.abs(signal)))
+
+
+#TODO use tf convolution
+def scipy_lfilter(s, f):
+    return scipy.signal.lfilter(f, 1.0, s).astype(np.float32)
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
+def random_gaussian_fir_filter(signal, num_coefs=10):
+    # https://www.isca-speech.org/archive/Interspeech_2018/abstracts/1047.html
+    fir = tf.random.normal([num_coefs])
+    signal = tf.numpy_function(scipy_lfilter, [signal, fir], [tf.float32])
+    return tf.reshape(signal, [-1])
+
+
 @tf.function
 def write_mono_wav(path, signal, sample_rate):
     tf.debugging.assert_rank(signal, 1, "write_wav expects 1-dim mono signals without channel dims.")
