@@ -40,12 +40,12 @@ def fix_row(row, corpus_dir):
     return row
 
 
-def load_all(corpus_dir, langs, use_multiprocessing=True):
+def load_all(corpus_dir, langs, num_processes=os.cpu_count()):
     """
     Load metadata from multiple datasets into a single table with unique utterance ids for every row.
     """
-    if use_multiprocessing:
-        with multiprocessing.Pool(processes=None) as pool:
+    if num_processes > 0:
+        with multiprocessing.Pool(processes=num_processes) as pool:
             lang_dfs = pool.starmap(load, ((corpus_dir, lang) for lang in langs))
     else:
         lang_dfs = (load(corpus_dir, lang) for lang in langs)
