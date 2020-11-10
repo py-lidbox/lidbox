@@ -65,7 +65,7 @@ def scipy_lfilter(s, f):
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
-def random_gaussian_fir_filter(signal, num_coefs=10):
+def random_gaussian_fir_filter(signal, num_coefs):
     # https://www.isca-speech.org/archive/Interspeech_2018/abstracts/1047.html
     fir = tf.random.normal([num_coefs])
     signal = tf.numpy_function(scipy_lfilter, [signal, fir], [tf.float32])

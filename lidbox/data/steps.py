@@ -327,9 +327,9 @@ def augment_by_additive_noise(ds, noise_datadir, snr_list, copy_noise_files_to_t
                 num_parallel_calls=TF_AUTOTUNE)
 
 
-def random_signal_speed_change(ds, min, max, flag):
+def random_signal_speed_change(ds, min, max, flag=None):
     """
-    Randomly change the speed of signals for elements that x[flag] == True.
+    Randomly change the speed of signals for elements that x[flag] == True or all elements if flag is None.
     Speed ratios are picked uniformly at random from the range [min, max].
     """
     logger.info("Applying random resampling to signals with a random speed ratio chosen uniformly at random from [%.3f, %.3f]", min, max)
@@ -338,7 +338,7 @@ def random_signal_speed_change(ds, min, max, flag):
     sample_rate_ratio_max = tf.constant(max, tf.float32)
 
     def _resample_copies_randomly(x):
-        if not x[flag]:
+        if flag and not x[flag]:
             return x
 
         random_ratio = tf.random.uniform([], sample_rate_ratio_min, sample_rate_ratio_max)
@@ -349,6 +349,22 @@ def random_signal_speed_change(ds, min, max, flag):
         return dict(x, signal=resampled_signal)
 
     return ds.map(_resample_copies_randomly, num_parallel_calls=TF_AUTOTUNE)
+
+
+def random_signal_fir_filtering(ds, num_coefs=10, flag=None):
+    """
+    Apply FIR filters with random, normally distributed coefficients on signals for elements that x[flag] == True or all elements if flag is None.
+    """
+    logger.info("Applying random FIR filters of size %d on signals", num_coefs)
+
+    num_coefs = tf.constant(num_coefs, tf.int32)
+
+    def _apply_random_filter(x):
+        if flag and not x[flag]:
+            return x
+        return dict(x, signal=audio_features.random_gaussian_fir_filter(x["signal"], num_coefs))
+
+    return ds.map(_apply_random_filter, num_parallel_calls=TF_AUTOTUNE)
 
 
 def cache(ds, directory=None, batch_size=1, cache_key=None):
@@ -1023,6 +1039,7 @@ VALID_STEP_FUNCTIONS = {
     "load_audio": load_audio,
     "load_kaldi_data": load_kaldi_data,
     "normalize": normalize,
+    "random_signal_fir_filtering": random_signal_fir_filtering,
     "random_signal_speed_change": random_signal_speed_change,
     "reduce_stats": reduce_stats,
     "remap_keys": remap_keys,
