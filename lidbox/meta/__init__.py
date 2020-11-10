@@ -70,7 +70,7 @@ def read_audio_durations(meta, max_threads=os.cpu_count()):
 #TODO check if this could be replaced with some adapter to a library designed for
 # imbalanced datasets that would support custom imbalance metrics/weights like durations in seconds
 # in our case.
-def random_oversampling(meta, copy_flag="is_copy"):
+def random_oversampling(meta, copy_flag="is_copy", random_state=None):
     """
     Random oversampling by duplicating metadata rows.
 
@@ -105,7 +105,7 @@ def random_oversampling(meta, copy_flag="is_copy"):
         if label != target_label:
             sample_size = sample_sizes.loc[label][0]
             copy = (meta[meta["label"]==label]
-                      .sample(n=sample_size, replace=True)
+                      .sample(n=sample_size, replace=True, random_state=random_state)
                       .reset_index()
                       .transform(mark_copy, axis=1))
             copies.append(copy)
