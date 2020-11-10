@@ -97,3 +97,16 @@ def plot_cepstra(X, figsize=None):
     if not figsize:
         figsize = (X.shape[0]/50, X.shape[1]/20)
     plot_spectrogram(X, cmap="RdBu_r", figsize=figsize)
+
+
+def plot_embedding_vector(v, cmap="RdBu_r", figsize=None):
+    ax = sns.heatmap(np.expand_dims(v, -1).T, cbar=False, cmap=cmap)
+    ax.invert_yaxis()
+    ax.set_axis_off()
+    ax.margins(0)
+
+    if figsize is None:
+        figsize = (v.size / 100, 1)
+
+    plt.gcf().set_size_inches(*figsize)
+    plt.show()
