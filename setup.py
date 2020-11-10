@@ -29,7 +29,7 @@ setuptools.setup(
         "lidbox",
         "lidbox.data",
         "lidbox.e2e",
-        "lidbox.embeddings",
+        "lidbox.embed",
         "lidbox.features",
         "lidbox.meta",
         "lidbox.models",

@@ -264,7 +264,7 @@ def extract_embeddings_as_numpy_data(split2ds, labels):
 
 
 def fit_embedding_classifier(split2ds, split2meta, labels, config):
-    import lidbox.embeddings.sklearn_utils
+    import lidbox.embed.sklearn_utils
 
     split2numpy_ds, target2label = extract_embeddings_as_numpy_data(split2ds, labels)
     all_labels = set(labels)
@@ -281,14 +281,14 @@ def fit_embedding_classifier(split2ds, split2meta, labels, config):
         logger.error("Unknown model key '%s' for training embeddings.", model_key)
         return []
 
-    sklearn_objs = lidbox.embeddings.sklearn_utils.fit_classifier(
+    sklearn_objs = lidbox.embed.sklearn_utils.fit_classifier(
             train_data, test_data, labels, config, target2label, Classifier, **model_kwargs)
-    joblib_dir = lidbox.embeddings.sklearn_utils.pipeline_to_disk(config, sklearn_objs)
+    joblib_dir = lidbox.embed.sklearn_utils.pipeline_to_disk(config, sklearn_objs)
     logger.info("Wrote trained classification pipeline to '%s'", joblib_dir)
 
 
 def predict_with_embedding_classifier(split2ds, split2meta, labels, config, data_conf):
-    import lidbox.embeddings.sklearn_utils
+    import lidbox.embed.sklearn_utils
 
     all_labels = set(labels)
     split_key = data_conf["split"]
@@ -296,8 +296,8 @@ def predict_with_embedding_classifier(split2ds, split2meta, labels, config, data
             {split_key: split2ds[split_key]}, labels)
     predict_input = split2numpy_ds[split_key]
 
-    sklearn_objs = lidbox.embeddings.sklearn_utils.pipeline_from_disk(config)
-    predictions = lidbox.embeddings.sklearn_utils.predict_with_trained_classifier(
+    sklearn_objs = lidbox.embed.sklearn_utils.pipeline_from_disk(config)
+    predictions = lidbox.embed.sklearn_utils.predict_with_trained_classifier(
             predict_input, config, target2label, sklearn_objs)
 
     utt2prediction = list(zip(predict_input["ids"], predictions))
