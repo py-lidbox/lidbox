@@ -38,6 +38,9 @@ def merge_chunk_predictions(chunk_predictions, merge_fn=np.mean):
 
 
 def classification_report(true_sparse, pred_dense, label2target, dense2sparse_fn=None, num_cavg_thresholds=100):
+    """
+    Compute classification metrics on a given vector of true labels (sparse) and predicted scores (dense/onehot).
+    """
     if dense2sparse_fn is None:
         dense2sparse_fn = lambda pred: pred.argmax(axis=1)
     pred_sparse = dense2sparse_fn(pred_dense)
@@ -82,11 +85,15 @@ def classification_report(true_sparse, pred_dense, label2target, dense2sparse_fn
     return report
 
 
-# TODO
-# 1. load metadata
-# 2. merge, preprocess, update, prepare, meta
-# 3. create tf.data.Dataset
-# 4. build pipeline
-# 5. train model
-# 6. serialize model
-# 7. compute metrics
+def evaluate_testset_with_model(model, test_ds, test_meta, lang2target):
+    """
+    Utility for calling predict_with_model followed by classification_report.
+    """
+    utt2pred = predict_with_model(model, test_ds)
+    test_meta = test_meta.join(utt2pred, how="outer")
+    assert not test_meta.isna().any(axis=None), "Failed to join predictions from test_ds with given test_meta dataframe: set of utterance ids is not equal"
+
+    true_sparse = test_meta.target.to_numpy(np.int32)
+    pred_dense = np.stack(test_meta.prediction)
+
+    return classification_report(true_sparse, pred_dense, lang2target)

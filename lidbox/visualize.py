@@ -1,7 +1,6 @@
-import logging
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
+import seaborn as sns
 
 
 # Modified from:
@@ -60,15 +59,18 @@ def plot_sample_distribution(metadata):
     plt.show()
 
 
-def plot_duration_distribution(metadata):
+def plot_duration_distribution(metadata, figsize=(8, 6)):
     plot_kwargs = _categorical_plot_kwargs(metadata)
 
     ax = sns.boxplot(**plot_kwargs, y="duration")
+    ax.legend(loc="upper right")
     ax.set_title("Median audio file duration in seconds")
     plt.show()
 
     ax = sns.barplot(**plot_kwargs, y="duration", ci=None, estimator=np.sum)
+    ax.legend(loc="upper right")
     ax.set_title("Total amount of audio in seconds")
+    plt.gcf().set_size_inches(*figsize)
     plt.show()
 
 
