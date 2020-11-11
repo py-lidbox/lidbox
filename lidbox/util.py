@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import sklearn.metrics
 import sklearn.preprocessing
+import tensorflow as tf
 
 import lidbox.metrics
 
@@ -13,16 +14,13 @@ def predict_with_model(model, ds):
     """
     Map callable model over all batches in ds, predicting values for each element at key 'input'.
     """
-    ids = []
-    predictions = []
-
-    for x in ds.as_numpy_iterator():
-        ids.extend(id.decode("utf-8") for id in x["id"])
-        predictions.extend(p.numpy() for p in model(x["input"], training=False))
+    predict_fn = lambda x: (x["id"], model(x["input"], training=False))
+    pred_ds = ds.map(predict_fn).unbatch()
+    predictions = [(id.decode("utf-8"), pred) for id, pred in pred_ds.as_numpy_iterator()]
 
     return (pd.DataFrame.from_dict({
-                "id": ids,
-                "prediction": predictions})
+                "id": (id for id, _ in predictions),
+                "prediction": (pred for _, pred in predictions)})
             .set_index("id", drop=True, verify_integrity=True)
             .sort_index())
 
@@ -89,7 +87,8 @@ def evaluate_testset_with_model(model, test_ds, test_meta, lang2target):
     """
     Utility for calling predict_with_model followed by classification_report.
     """
-    utt2pred = predict_with_model(model, test_ds)
+    with tf.device("GPU"):
+        utt2pred = predict_with_model(model, test_ds)
     test_meta = test_meta.join(utt2pred, how="outer")
     assert not test_meta.isna().any(axis=None), "Failed to join predictions from test_ds with given test_meta dataframe: set of utterance ids is not equal"
 
