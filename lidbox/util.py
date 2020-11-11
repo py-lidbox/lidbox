@@ -96,3 +96,11 @@ def evaluate_testset_with_model(model, test_ds, test_meta, lang2target):
     pred_dense = np.stack(test_meta.prediction)
 
     return classification_report(true_sparse, pred_dense, lang2target)
+
+
+def model2function(model):
+    model_input = model.inputs[0]
+    model_fn = tf.function(
+            lambda x: model(x, training=False),
+            input_signature=[tf.TensorSpec(model_input.shape, model_input.dtype)])
+    return model_fn.get_concrete_function()
