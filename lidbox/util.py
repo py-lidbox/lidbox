@@ -14,13 +14,17 @@ def predict_with_model(model, ds):
     """
     Map callable model over all batches in ds, predicting values for each element at key 'input'.
     """
-    predict_fn = lambda x: (x["id"], model(x["input"], training=False))
-    pred_ds = ds.map(predict_fn).unbatch()
-    predictions = [(id.decode("utf-8"), pred) for id, pred in pred_ds.as_numpy_iterator()]
+    def predict_fn(x):
+        with tf.device("GPU"):
+            return x["id"], model(x["input"], training=False)
 
-    return (pd.DataFrame.from_dict({
-                "id": (id for id, _ in predictions),
-                "prediction": (pred for _, pred in predictions)})
+    ids = []
+    predictions = []
+    for id, pred in ds.map(predict_fn).unbatch().as_numpy_iterator():
+        ids.append(id.decode("utf-8"))
+        predictions.append(pred)
+
+    return (pd.DataFrame.from_dict({"id": ids, "prediction": predictions})
             .set_index("id", drop=True, verify_integrity=True)
             .sort_index())
 
@@ -87,8 +91,7 @@ def evaluate_testset_with_model(model, test_ds, test_meta, lang2target):
     """
     Utility for calling predict_with_model followed by classification_report.
     """
-    with tf.device("GPU"):
-        utt2pred = predict_with_model(model, test_ds)
+    utt2pred = predict_with_model(model, test_ds)
     test_meta = test_meta.join(utt2pred, how="outer")
     assert not test_meta.isna().any(axis=None), "Failed to join predictions from test_ds with given test_meta dataframe: set of utterance ids is not equal"
 
