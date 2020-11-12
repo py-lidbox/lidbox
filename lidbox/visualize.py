@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+import pandas as pd
 import seaborn as sns
 
 
@@ -110,3 +112,21 @@ def plot_embedding_vector(v, cmap="RdBu_r", figsize=None):
 
     plt.gcf().set_size_inches(*figsize)
     plt.show()
+
+
+def draw_3d_pca_scatterplot(pca_data_3d, data_labels):
+    df = pd.DataFrame.from_dict({
+        "x": pca_data_3d[:,0],
+        "y": pca_data_3d[:,1],
+        "z": pca_data_3d[:,2],
+        "label": data_labels,
+    })
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+
+    for label, group in df.groupby("label"):
+        ax.scatter(group.x, group.y, group.z, label=label)
+
+    ax.legend()
+    return fig, ax
