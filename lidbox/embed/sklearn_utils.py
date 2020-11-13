@@ -23,8 +23,13 @@ categorical_cmap = colorcet.glasbey_category10
 
 
 class PLDA(PLDAClassifier):
+
+    def fit(self, X, y, n_components=None):
+        self.fit_model(X, y, n_principal_components=n_components)
+
     def transform(self, X):
         return self.model.transform(X, from_space='D', to_space='U_model')
+
     def __str__(self):
         return "PLDA: {:d} -> {:d} -> {:d} -> {:d} (PCA preprocessing with {} coefs)".format(
                 *[self.model.get_dimensionality(space) for space in ("D", "X", "U", "U_model")],
@@ -124,7 +129,7 @@ def fit_plda(train, test, n_components=None):
                 train["X"].shape,
                 train["y"].shape)
     plda = PLDA()
-    plda.fit_model(train["X"], train["y"], n_principal_components=n_components)
+    plda.fit(train["X"], train["y"], n_principal_components=n_components)
     logger.info(
             "Done: %s\n  accuracy %.3f\n  categorical crossentropy %.3f",
             plda,
