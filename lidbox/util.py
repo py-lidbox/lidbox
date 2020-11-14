@@ -10,17 +10,21 @@ import tensorflow as tf
 import lidbox.metrics
 
 
-def predict_with_model(model, ds):
+TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+
+def predict_with_model(model, ds, predict_fn=None):
     """
     Map callable model over all batches in ds, predicting values for each element at key 'input'.
     """
-    def predict_fn(x):
-        with tf.device("GPU"):
-            return x["id"], model(x["input"], training=False)
+    if predict_fn is None:
+        def predict_fn(x):
+            with tf.device("GPU"):
+                return x["id"], model(x["input"], training=False)
 
     ids = []
     predictions = []
-    for id, pred in ds.map(predict_fn).unbatch().as_numpy_iterator():
+    for id, pred in ds.map(predict_fn, num_parallel_calls=TF_AUTOTUNE).unbatch().as_numpy_iterator():
         ids.append(id.decode("utf-8"))
         predictions.append(pred)
 
