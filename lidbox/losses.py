@@ -12,7 +12,7 @@ class SparseAngularProximity(tf.keras.losses.Loss):
         super().__init__(name=name, **kwargs)
         tf.debugging.assert_greater_equal(N, 1, message="Must have at least 1 class")
         tf.debugging.assert_greater_equal(D, N, message="Language vector dimension cannot be less than number of classes")
-        self.N = tf.constant(N, tf.float32)
+        self.N = tf.constant(N, tf.int32)
         self.c_T = tf.transpose(tf.math.l2_normalize(tf.one_hot(tf.range(N), D), axis=1))
 
     def call(self, y_true_sparse, y_pred):
@@ -20,10 +20,15 @@ class SparseAngularProximity(tf.keras.losses.Loss):
         Compute loss for a batch of true labels (shape [batch_size, 1]) and predicted language vectors (shape [batch_size, D]).
         """
         y_pred = tf.convert_to_tensor(y_pred)
-        offsets = self.theta(y_pred)
-        offsets_for_true = tf.gather(offsets, y_true_sparse, batch_dims=1)
-        offset_sum = tf.math.reduce_sum(offsets, axis=1)
-        L_l = tf.math.sigmoid((self.N + 1)*offsets_for_true - offset_sum)
+        # offsets between predictions and all reference directions
+        theta_l_prime = self.theta(y_pred)
+        # offset for true directions
+        theta_l = tf.gather(theta_l_prime, y_true_sparse, batch_dims=1)
+        # equation 3
+        deltas = tf.expand_dims(theta_l, -1) - theta_l_prime
+        sigmoids = tf.math.sigmoid(deltas)
+        mask = tf.one_hot(y_true_sparse, self.N, on_value=0.0, off_value=1.0)
+        L_l = tf.math.reduce_sum(mask*sigmoids, axis=1)
         return L_l
 
     def theta(self, z):
@@ -33,8 +38,7 @@ class SparseAngularProximity(tf.keras.losses.Loss):
         Highest probability language hypothesis is obtained by taking the argmin of the angular offsets (equation 2).
         """
         c_dot_zT = tf.tensordot(z, self.c_T, axes=1, name="AP.theta.dot")
-        th = tf.math.acos(c_dot_zT, name="AP.theta.acos")
-        return th
+        return tf.math.acos(c_dot_zT, name="AP.theta.acos")
 
     def predict(self, z):
         return -self.theta(z)
