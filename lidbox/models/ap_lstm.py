@@ -14,16 +14,21 @@ from tensorflow.keras.layers import (
     Input,
     LSTM,
     Multiply,
+    SpatialDropout1D,
 )
 from tensorflow.keras.models import Model
 import tensorflow as tf
 
 
-def create(input_shape, num_outputs, num_lstm_units=62, alpha1=0.5, alpha2=0.5):
+def create(input_shape, num_outputs, num_lstm_units=62, alpha1=1.0, alpha2=1.0, channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
 
+    x = inputs
+    if channel_dropout_rate > 0:
+        x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout")(x)
+
     lstm_1 = LSTM(num_lstm_units, return_sequences=True, name="lstm_1")
-    blstm_1 = Bidirectional(lstm_1, merge_mode="concat", name="blstm_1")(inputs)
+    blstm_1 = Bidirectional(lstm_1, merge_mode="concat", name="blstm_1")(x)
     lstm_2 = LSTM(num_lstm_units, return_sequences=True, name="lstm_2")
     blstm_2 = Bidirectional(lstm_2, merge_mode="concat", name="blstm_2")(blstm_1)
 

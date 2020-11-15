@@ -6,13 +6,13 @@ class SparseAngularProximity(tf.keras.losses.Loss):
     Angular proximity loss function as described by Gelly, G., Gauvain, J. (2017) Spoken Language Identification Using LSTM-Based Angular Proximity. Proc. Interspeech 2017, 2566-2570, DOI: 10.21437/Interspeech.2017-1334.
     URL: https://www.isca-speech.org/archive/Interspeech_2017/pdfs/1334.PDF
 
-    NOTE: should be only called with sparse true labels from range [0, N) and language vectors of shape [batch_size, D].
+    NOTE: should only be called with sparse true labels from range [0, N) and language vectors of shape [batch_size, D].
     """
     def __init__(self, N, D, name="AP", **kwargs):
         super().__init__(name=name, **kwargs)
         tf.debugging.assert_greater_equal(N, 1, message="Must have at least 1 class")
         tf.debugging.assert_greater_equal(D, N, message="Language vector dimension cannot be less than number of classes")
-        self.N = N
+        self.N = tf.constant(N, tf.float32)
         self.c_T = tf.transpose(tf.math.l2_normalize(tf.one_hot(tf.range(N), D), axis=1))
 
     def call(self, y_true_sparse, y_pred):
@@ -27,6 +27,11 @@ class SparseAngularProximity(tf.keras.losses.Loss):
         return L_l
 
     def theta(self, z):
+        """
+        Compute angular offset (equation 1 in paper) between given language vector z and all reference directions.
+        Returns a vector [batch_size, N] of angular offsets for all classes.
+        Highest probability language hypothesis is obtained by taking the argmin of the angular offsets (equation 2).
+        """
         c_dot_zT = tf.tensordot(z, self.c_T, axes=1, name="AP.theta.dot")
         th = tf.math.acos(c_dot_zT, name="AP.theta.acos")
         return th

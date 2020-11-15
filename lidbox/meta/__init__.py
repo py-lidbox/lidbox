@@ -114,13 +114,13 @@ def random_oversampling(meta, copy_flag="is_copy", random_state=None):
     return pd.concat([copied_meta, meta], verify_integrity=True).sort_index()
 
 
-def random_oversampling_on_training_set(meta, split="train"):
+def random_oversampling_on_split(meta, split):
     meta = meta.assign(is_copy=False)
 
-    train = meta[meta["split"]==split]
+    sampled = meta[meta["split"]==split]
     rest = meta[meta["split"]!=split]
 
-    return pd.concat([random_oversampling(train), rest], verify_integrity=True).sort_index()
+    return pd.concat([random_oversampling(sampled), rest], verify_integrity=True).sort_index()
 
 
 def generate_label2target(meta):
