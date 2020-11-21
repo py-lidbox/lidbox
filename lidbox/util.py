@@ -13,6 +13,12 @@ import lidbox.metrics
 TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
+def predictions_to_dataframe(ids, predictions):
+    return (pd.DataFrame.from_dict({"id": ids, "prediction": predictions})
+            .set_index("id", drop=True, verify_integrity=True)
+            .sort_index())
+
+
 def predict_with_model(model, ds, predict_fn=None):
     """
     Map callable model over all batches in ds, predicting values for each element at key 'input'.
@@ -28,19 +34,26 @@ def predict_with_model(model, ds, predict_fn=None):
         ids.append(id.decode("utf-8"))
         predictions.append(pred)
 
-    return (pd.DataFrame.from_dict({"id": ids, "prediction": predictions})
-            .set_index("id", drop=True, verify_integrity=True)
-            .sort_index())
+    return predictions_to_dataframe(ids, predictions)
 
 
 def chunk_parent_id(chunk_id):
     return chunk_id.rsplit('-', 1)[0]
 
+def stack_and_average(v):
+    return np.stack(v).mean(axis=0)
 
-def merge_chunk_predictions(chunk_predictions, merge_fn=np.mean):
-    return (chunk_predictions
-            .groupby(chunk_parent_id)
-            .agg(lambda row: merge_fn(np.array(row), axis=0)))
+def merge_chunk_predictions(chunk_predictions, merge_rows_fn=None):
+    if merge_rows_fn is None:
+        merge_rows_fn = stack_and_average
+
+    ids = []
+    predictions = []
+    for id, rows in chunk_predictions.groupby(chunk_parent_id):
+        ids.append(id)
+        predictions.append(merge_rows_fn(rows.prediction.values))
+
+    return predictions_to_dataframe(ids, predictions)
 
 
 def classification_report(true_sparse, pred_dense, label2target, dense2sparse_fn=None, num_cavg_thresholds=100):
