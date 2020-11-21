@@ -9,14 +9,18 @@ class SparseAngularProximity(tf.keras.losses.Loss):
     NOTE: should only be called with sparse true labels from range [0, N) and language vectors of shape [batch_size, D].
     NOTE: delta_weight is not in the paper
     """
-    def __init__(self, N, D, delta_weight=5.0, name="AP", **kwargs):
+    def __init__(self, N, D, delta_weight=1.0, name="AP", **kwargs):
         super().__init__(name=name, **kwargs)
         tf.debugging.assert_greater_equal(N, 1, message="Must have at least 1 class")
         tf.debugging.assert_greater_equal(D, N, message="Language vector dimension cannot be less than number of classes")
         tf.debugging.assert_positive(delta_weight, message="Non-positive delta weight would cause correct classifications to have larger loss values than incorrect classifications.")
+
         self.delta_weight = tf.constant(delta_weight, tf.float32)
-        self.N = tf.constant(N, tf.int32)
+        # Generate reference directions as one-hot encoding of classes -> all are orthogonal
         self.c_T = tf.transpose(tf.math.l2_normalize(tf.one_hot(tf.range(N), D), axis=1))
+        # Generate inverse one-hot encoding for masking out sigmoids in equation 3 for l == l_prime pairs
+        # I.e. all ones except for diagonal of zeros
+        self.zero_mask = tf.one_hot(tf.range(N), N, on_value=0.0, off_value=1.0)
 
     def call(self, y_true_sparse, y_pred):
         """
@@ -31,8 +35,8 @@ class SparseAngularProximity(tf.keras.losses.Loss):
         deltas = tf.expand_dims(theta_l, -1) - theta_l_prime
         sigmoids = tf.math.sigmoid(self.delta_weight * deltas)
         # mask out all sigmoids computed on deltas where l == l_prime
-        mask = tf.one_hot(y_true_sparse, self.N, on_value=0.0, off_value=1.0)
-        L_l = tf.math.reduce_sum(mask*sigmoids, axis=1)
+        mask = tf.gather(self.zero_mask, y_true_sparse, batch_dims=0)
+        L_l = tf.math.reduce_sum(mask * sigmoids, axis=1)
         return L_l
 
     def theta(self, z):
