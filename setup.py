@@ -28,21 +28,16 @@ setuptools.setup(
     packages=[
         "lidbox",
         "lidbox.data",
-        "lidbox.e2e",
         "lidbox.embed",
         "lidbox.features",
         "lidbox.meta",
         "lidbox.models",
-        "lidbox.schemas",
     ],
-    package_data={
-        "lidbox.schemas": ["*.yaml"]
-    },
-    entry_points={
-        "console_scripts": [
-            "lidbox = lidbox.__main__:main",
-        ],
-    },
+    # entry_points={
+    #     "console_scripts": [
+    #         "lidbox = lidbox.__main__:main",
+    #     ],
+    # },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
