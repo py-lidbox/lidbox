@@ -2,7 +2,7 @@ name: CI tests
 
 on:
   push:
-    branches: rewrite
+    branches: master
 
 jobs:
   unit-test:
