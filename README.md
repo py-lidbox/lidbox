@@ -3,7 +3,7 @@
 * Spoken language identification (LId) out of the box using TensorFlow.
 * [Models](./lidbox/models) implemented with [`tf.keras`](https://www.tensorflow.org/api_docs/python/tf/keras).
 * Metadata handling with [pandas `DataFrames`](https://pandas.pydata.org/docs/reference/frame.html).
-* High-performance, parallel preprocessing pipelines with `[tf.data`](https://www.tensorflow.org/api_docs/python/tf/data)
+* High-performance, parallel preprocessing pipelines with [`tf.data`](https://www.tensorflow.org/api_docs/python/tf/data)
 * Simple spectral and cepstral feature extraction on the GPU with [`tf.signal`](https://www.tensorflow.org/api_docs/python/tf/signal).
 * Average detection cost (`C_avg`) [implemented](./lidbox/metrics.py) as a `tf.keras.metrics.Metric` subclass.
 * Angular proximity loss [implemented](./lidbox/losses.py) as a `tf.keras.losses.Loss` subclass.
