@@ -23,19 +23,25 @@ def as_embedding_extractor(keras_model):
     return tf.keras.models.Model(inputs=keras_model.inputs, outputs=fc.output)
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
+def create(input_shape, num_outputs, output_activation="log_softmax", channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
+
     x = inputs
     if channel_dropout_rate > 0:
         x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout_{:.2f}".format(channel_dropout_rate))(x)
+
     x = Bidirectional(GRU(512, return_sequences=True), merge_mode="concat", name="BGRU_1")(x)
     x = Bidirectional(GRU(512), merge_mode="concat", name="BGRU_2")(x)
     x = BatchNormalization(name="BGRU_2_bn")(x)
+
     x = Dense(1024, activation="relu", name="fc_relu_1")(x)
     x = BatchNormalization(name="fc_relu_1_bn")(x)
+
     x = Dense(1024, activation="relu", name="fc_relu_2")(x)
     x = BatchNormalization(name="fc_relu_2_bn")(x)
+
     outputs = Dense(num_outputs, activation=None, name="output")(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
+
     return Model(inputs=inputs, outputs=outputs, name="BGRU")

@@ -66,8 +66,9 @@ class DenseBlock(Layer):
         return cls(**config)
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", L=2, H=512):
+def create(input_shape, num_outputs, output_activation="log_softmax", L=2, H=512):
     inputs = Input(shape=input_shape, name="input")
+
     x = inputs
     attention_outputs = []
     for level in range(1, L + 1):
@@ -77,6 +78,7 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", L=2, H=512
         att_output = Attention(num_outputs, name="attention{}".format(level))(x)
         attention_outputs.append(att_output)
     concat = Concatenate(name="attention_concat")(attention_outputs)
+
     outputs = Dense(num_outputs, name="outputs")(concat)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)

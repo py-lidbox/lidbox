@@ -19,8 +19,9 @@ from .xvector import (
 )
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax"):
+def create(input_shape, num_outputs, output_activation="log_softmax"):
     inputs = Input(shape=input_shape, name="input")
+
     x = FrameLayer(512, 5, 1, name="frame1")(inputs)
     x = FrameLayer(512, 1, 1, name="frame2")(x)
     x = FrameLayer(512, 3, 2, name="frame3")(x)
@@ -31,9 +32,11 @@ def loader(input_shape, num_outputs, output_activation="log_softmax"):
     x = FrameLayer(512, 1, 1, name="frame8")(x)
     x = FrameLayer(512, 1, 1, name="frame9")(x)
     x = FrameLayer(1500, 1, 1, name="frame10")(x)
+
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
     x = SegmentLayer(512, name="segment1")(x)
     x = SegmentLayer(512, name="segment2")(x)
+
     outputs = Dense(num_outputs, name="output", activation=None)(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)

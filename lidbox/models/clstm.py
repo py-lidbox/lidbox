@@ -42,11 +42,12 @@ def frequency_attention(H, d_a=64, d_f=16):
     return H_weighted
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", use_attention=False, use_conv2d=False, use_lstm=False):
+def create(input_shape, num_outputs, output_activation="log_softmax", use_attention=False, use_conv2d=False, use_lstm=False):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
     x = GaussianNoise(stddev=0.01, name="input_noise")(x)
     x = Dropout(rate=0.4, noise_shape=(None, 1, input_shape[1]), name="channel_dropout")(x)
+
     if use_conv2d:
         x = Reshape((input_shape[0] or -1, input_shape[1], 1), name="reshape_to_image")(x)
         x = Conv2D(128, (3, 9), (1, 6), activation=None, padding="same", name="conv2d_1")(x)
@@ -57,19 +58,24 @@ def loader(input_shape, num_outputs, output_activation="log_softmax", use_attent
         x = Activation("relu", name="conv2d_2_relu")(x)
         # x = Reshape((x.shape[1] or -1, x.shape[2] * x.shape[3]), name="flatten_image_channels")(x)
         x = tf.math.reduce_max(x, axis=2, name="maxpool_image_channels")
+
     x = FrameLayer(512, 5, 1, name="frame1")(x)
     x = FrameLayer(512, 3, 2, name="frame2")(x)
     x = FrameLayer(512, 3, 3, name="frame3")(x)
     if use_lstm:
         x = LSTM(512, name="lstm", return_sequences=True)(x)
+
     x = FrameLayer(512, 1, 1, name="frame4")(x)
     x = FrameLayer(1500, 1, 1, name="frame5")(x)
     if use_attention:
         x = frequency_attention(x, d_f=60)
+
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
+
     x = SegmentLayer(512, name="segment1")(x)
     x = SegmentLayer(512, name="segment2")(x)
     outputs = Dense(num_outputs, name="output", activation=None)(x)
+
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
     return Model(inputs=inputs, outputs=outputs, name="CLSTM")

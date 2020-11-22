@@ -21,7 +21,7 @@ from tensorflow.keras import Model
 import tensorflow as tf
 
 
-def loader(input_shape, num_outputs, output_activation="softmax", weight_decay=0.001):
+def create(input_shape, num_outputs, output_activation="softmax", weight_decay=0.001):
     inputs = Input(shape=input_shape, name="input")
     images = Reshape((*input_shape, 1), name="expand_channel_dim")(inputs)
     images = Permute((2, 1, 3), name="freq_bins_first")(images)

@@ -34,6 +34,7 @@ def FrameLayer(inputs, filters, kernel_size, stride, name="frame", activation="r
         x = Dropout(rate=dropout_rate, name="{}_dropout".format(name))(x)
     return x
 
+
 def SegmentLayer(inputs, units, name="segment", activation="relu", dropout_rate=None):
     """Batch normalized dense layer"""
     x = Dense(units, name="{}_dense".format(name), activation=None)(inputs)
@@ -43,19 +44,24 @@ def SegmentLayer(inputs, units, name="segment", activation="relu", dropout_rate=
         x = Dropout(rate=dropout_rate, name="{}_dropout".format(name))(x)
     return x
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", dropout_rate=None):
+
+def create(input_shape, num_outputs, output_activation="log_softmax", dropout_rate=None):
     inputs = Input(shape=input_shape, name="input")
     x = inputs
+
     x = FrameLayer(x, 512, 5, 1, name="frame1", dropout_rate=dropout_rate)
     x = FrameLayer(x, 512, 3, 2, name="frame2", dropout_rate=dropout_rate)
     x = FrameLayer(x, 512, 3, 3, name="frame3", dropout_rate=dropout_rate)
     x = FrameLayer(x, 512, 1, 1, name="frame4")
     x = FrameLayer(x, 1500, 1, 1, name="frame5")
+
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
+
     x = SegmentLayer(x, 512, name="segment1")
     x = SegmentLayer(x, 512, name="segment2")
-    x = Dense(num_outputs, name="output", activation=None)(x)
-    outputs = x
+
+    outputs = Dense(num_outputs, name="output", activation=None)(x)
     if output_activation:
         outputs = Activation(getattr(tf.nn, output_activation), name=str(output_activation))(outputs)
+
     return Model(inputs=inputs, outputs=outputs, name="x-vector-javascript")

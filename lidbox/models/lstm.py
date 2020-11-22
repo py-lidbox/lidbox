@@ -11,7 +11,7 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 
-def loader(input_shape, num_outputs, output_activation="log_softmax", num_units=1024):
+def create(input_shape, num_outputs, output_activation="log_softmax", num_units=1024):
     inputs = Input(shape=input_shape, name="input")
     lstm = LSTM(num_units, name="lstm")(inputs)
     outputs = Dense(num_outputs, name="output", activation=None)(lstm)
