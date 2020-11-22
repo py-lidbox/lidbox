@@ -1,2 +1,4 @@
 pytest
-tox
+-e .
+librosa
+tensorflow ~= 2.3.0

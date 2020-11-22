@@ -92,7 +92,6 @@ def plot_spectrogram(S, cmap="viridis", figsize=None, **kwargs):
     ax.set_axis_off()
     ax.margins(0)
     plt.gcf().set_size_inches(*figsize)
-    plt.show()
 
 
 def plot_cepstra(X, figsize=None):

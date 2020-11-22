@@ -146,7 +146,9 @@ def snr_mixer(clean, noise, snr):
     return clean_norm, noisenewlevel, noisyspeech
 
 
-@tf.function
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)])
 def fft_frequencies(sample_rate, n_fft):
     # Equal to librosa.core.fft_frequencies
     begin = 0.0
