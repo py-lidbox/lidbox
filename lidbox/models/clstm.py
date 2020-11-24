@@ -20,9 +20,9 @@ from tensorflow.keras.layers import (
     Reshape,
 )
 from .xvector import (
-    FrameLayer,
+    frame_layer,
     GlobalMeanStddevPooling1D,
-    SegmentLayer,
+    segment_layer,
 )
 from tensorflow.keras.models import Model
 import tensorflow as tf
@@ -59,21 +59,21 @@ def create(input_shape, num_outputs, output_activation="log_softmax", use_attent
         # x = Reshape((x.shape[1] or -1, x.shape[2] * x.shape[3]), name="flatten_image_channels")(x)
         x = tf.math.reduce_max(x, axis=2, name="maxpool_image_channels")
 
-    x = FrameLayer(512, 5, 1, name="frame1")(x)
-    x = FrameLayer(512, 3, 2, name="frame2")(x)
-    x = FrameLayer(512, 3, 3, name="frame3")(x)
+    x = frame_layer(512, 5, 1, name="frame1")(x)
+    x = frame_layer(512, 3, 2, name="frame2")(x)
+    x = frame_layer(512, 3, 3, name="frame3")(x)
     if use_lstm:
         x = LSTM(512, name="lstm", return_sequences=True)(x)
 
-    x = FrameLayer(512, 1, 1, name="frame4")(x)
-    x = FrameLayer(1500, 1, 1, name="frame5")(x)
+    x = frame_layer(512, 1, 1, name="frame4")(x)
+    x = frame_layer(1500, 1, 1, name="frame5")(x)
     if use_attention:
         x = frequency_attention(x, d_f=60)
 
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
 
-    x = SegmentLayer(512, name="segment1")(x)
-    x = SegmentLayer(512, name="segment2")(x)
+    x = segment_layer(512, name="segment1")(x)
+    x = segment_layer(512, name="segment2")(x)
     outputs = Dense(num_outputs, name="output", activation=None)(x)
 
     if output_activation:

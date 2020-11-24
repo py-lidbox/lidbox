@@ -13,9 +13,9 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 from .xvector import (
-    FrameLayer,
+    frame_layer,
     GlobalMeanStddevPooling1D,
-    SegmentLayer,
+    segment_layer,
     as_embedding_extractor,
 )
 from .xvector_2d import FrameLayer2D
@@ -39,15 +39,15 @@ def create(input_shape, num_outputs, output_activation="log_softmax", channel_dr
     rows, cols, channels = x.shape[1:]
     conv2d_output = Reshape((rows or -1, cols * channels), name="flatten_channels")(x)
     x = Concatenate(axis=2, name="conv2d_skip")([conv2d_input, conv2d_output])
-    x = FrameLayer(512, 5, 1, name="frame1")(x)
-    x = FrameLayer(512, 3, 2, name="frame2")(x)
-    x = FrameLayer(512, 3, 3, name="frame3")(x)
-    x = FrameLayer(512, 1, 1, name="frame4")(x)
-    x = FrameLayer(1500, 1, 1, name="frame5")(x)
+    x = frame_layer(512, 5, 1, name="frame1")(x)
+    x = frame_layer(512, 3, 2, name="frame2")(x)
+    x = frame_layer(512, 3, 3, name="frame3")(x)
+    x = frame_layer(512, 1, 1, name="frame4")(x)
+    x = frame_layer(1500, 1, 1, name="frame5")(x)
 
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
-    x = SegmentLayer(512, name="segment1")(x)
-    x = SegmentLayer(512, name="segment2")(x)
+    x = segment_layer(512, name="segment1")(x)
+    x = segment_layer(512, name="segment2")(x)
 
     outputs = Dense(num_outputs, name="output", activation=None)(x)
     if output_activation:

@@ -2,3 +2,4 @@ pytest
 -e .
 librosa
 tensorflow ~= 2.3.0
+hypothesis ~= 5.41.3

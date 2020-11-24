@@ -35,6 +35,14 @@ class GlobalMeanStddevPooling1D(Layer):
         return tf.concat((means, stddevs), axis=TIME_AXIS)
 
 
+def frame_layer(filters, kernel_size, strides, padding="causal", activation="relu", name="frame"):
+    return Conv1D(filters, kernel_size, strides, padding=padding, activation=activation, name=name)
+
+
+def segment_layer(units, activation="relu", name="segment"):
+    return Dense(units, activation=activation, name=name)
+
+
 def create(input_shape, num_outputs, channel_dropout_rate=0, name="x-vector"):
     inputs = Input(shape=input_shape, name="input")
 
@@ -42,17 +50,16 @@ def create(input_shape, num_outputs, channel_dropout_rate=0, name="x-vector"):
     if channel_dropout_rate > 0:
         x = SpatialDropout1D(channel_dropout_rate, name="channel_dropout")(x)
 
-    conv_conf = dict(padding="causal", activation="relu")
-    x = Conv1D(512,  5, 1, **conv_conf, name="frame1")(x)
-    x = Conv1D(512,  3, 2, **conv_conf, name="frame2")(x)
-    x = Conv1D(512,  3, 3, **conv_conf, name="frame3")(x)
-    x = Conv1D(512,  1, 1, **conv_conf, name="frame4")(x)
-    x = Conv1D(1500, 1, 1, **conv_conf, name="frame5")(x)
+    x = frame_layer(512,  5, 1, name="frame1")(x)
+    x = frame_layer(512,  3, 2, name="frame2")(x)
+    x = frame_layer(512,  3, 3, name="frame3")(x)
+    x = frame_layer(512,  1, 1, name="frame4")(x)
+    x = frame_layer(1500, 1, 1, name="frame5")(x)
 
     x = GlobalMeanStddevPooling1D(name="stats_pooling")(x)
 
-    x = Dense(512, activation="relu", name="segment1")(x)
-    x = Dense(512, activation="relu", name="segment2")(x)
+    x = segment_layer(512, name="segment1")(x)
+    x = segment_layer(512, name="segment2")(x)
 
     x = Dense(num_outputs, activation=None, name="outputs")(x)
     outputs = Activation(tf.nn.log_softmax, name="log_softmax")(x)
@@ -61,6 +68,6 @@ def create(input_shape, num_outputs, channel_dropout_rate=0, name="x-vector"):
 
 
 def as_embedding_extractor(m):
-    segment_layer = m.get_layer(name="segment1")
-    segment_layer.activation = None
-    return Model(inputs=m.inputs, outputs=segment_layer.output)
+    l = m.get_layer(name="segment1")
+    l.activation = None
+    return Model(inputs=m.inputs, outputs=l.output)

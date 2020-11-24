@@ -20,7 +20,7 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 
-def create(input_shape, num_outputs, num_lstm_units=62, alpha1=1.0, alpha2=1.0, channel_dropout_rate=0):
+def create(input_shape, num_lstm_units=62, alpha1=1.0, alpha2=1.0, channel_dropout_rate=0):
     inputs = Input(shape=input_shape, name="input")
 
     x = inputs
