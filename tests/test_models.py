@@ -20,8 +20,6 @@ from lidbox.models import (
     xvector_2d,
     xvector_extended,
     xvector_freq_attention,
-    xvector_mobilenet,
-    xvector_resnet,
 )
 
 import pytest
@@ -122,13 +120,3 @@ class TestModels(tf.test.TestCase):
            num_outputs=integers(min_value=1, max_value=100))
     def test_xvector_freq_attention(self, **kw):
         _assert_valid_model_output(xvector_freq_attention, **kw)
-
-    @given(x=spectrograms(),
-           num_outputs=integers(min_value=1, max_value=100))
-    def test_xvector_mobilenet(self, **kw):
-        _assert_valid_model_output(xvector_mobilenet, **kw)
-
-    @given(x=spectrograms(),
-           num_outputs=integers(min_value=1, max_value=100))
-    def test_xvector_resnet(self, **kw):
-        _assert_valid_model_output(xvector_resnet, **kw)
