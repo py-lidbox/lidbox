@@ -1,15 +1,9 @@
 """
 Unit tests for lidbox.models.
 """
-from datetime import timedelta
-
-import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis.strategies import integers
 from lidbox.testutil import spectrograms
-
-import numpy as np
-import tensorflow as tf
 
 from lidbox.models import (
     ap_lstm,
@@ -30,6 +24,10 @@ from lidbox.models import (
     xvector_resnet,
 )
 
+import pytest
+import numpy as np
+import tensorflow as tf
+
 
 def _assert_valid_model_output(module, x, num_outputs, **create_kw):
     m = module.create(x.shape[1:], num_outputs, **create_kw)
@@ -49,7 +47,6 @@ class TestModels(tf.test.TestCase):
 
     @given(x=spectrograms(),
            num_lstm_units=integers(min_value=10, max_value=500))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_ap_lstm(self, x, num_lstm_units):
         m = ap_lstm.create(x.shape[1:], num_lstm_units=num_lstm_units)
         for t in (False, True):
@@ -59,44 +56,37 @@ class TestModels(tf.test.TestCase):
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_bi_gru(self, **kw):
         _assert_valid_model_output(bi_gru, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_clstm(self, **kw):
         _assert_valid_model_output(clstm, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_cnn(self, **kw):
         _assert_valid_model_output(cnn, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_convnet_extractor(self, **kw):
         _assert_valid_model_output(convnet_extractor, **kw)
 
     @given(x=spectrograms(min_shape=(1, 32, 32)),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_crnn(self, **kw):
         _assert_valid_model_output(crnn, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_dnn(self, **kw):
         _assert_valid_model_output(dnn, **kw)
 
     @given(x=spectrograms(max_shape=(64, 100, 128)),
            num_outputs=integers(min_value=1, max_value=100),
            num_units=integers(min_value=1, max_value=2000))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_lstm(self, **kw):
         _assert_valid_model_output(lstm, **kw)
 
@@ -104,49 +94,41 @@ class TestModels(tf.test.TestCase):
            num_outputs=integers(min_value=1, max_value=100),
            L=integers(min_value=2, max_value=20),
            H=integers(min_value=8, max_value=512))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_multilevel_attention(self, **kw):
         _assert_valid_model_output(multilevel_attention, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100),
            embedding_dim=integers(min_value=2, max_value=2000))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_spherespeaker(self, **kw):
         _assert_valid_model_output(spherespeaker, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_xvector(self, **kw):
         _assert_valid_model_output(xvector, **kw)
 
     @given(x=spectrograms(min_shape=(1, 1, 23)),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_xvector_2d(self, **kw):
         _assert_valid_model_output(xvector_2d, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_xvector_extended(self, **kw):
         _assert_valid_model_output(xvector_extended, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_xvector_freq_attention(self, **kw):
         _assert_valid_model_output(xvector_freq_attention, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=2000))
     def test_xvector_mobilenet(self, **kw):
         _assert_valid_model_output(xvector_mobilenet, **kw)
 
     @given(x=spectrograms(),
            num_outputs=integers(min_value=1, max_value=100))
-    @settings(max_examples=10, deadline=timedelta(milliseconds=4000))
     def test_xvector_resnet(self, **kw):
         _assert_valid_model_output(xvector_resnet, **kw)

@@ -27,7 +27,7 @@ def noisy_sinewave(freq, sample_rate, duration):
 
 
 @composite
-def spectrograms(draw, min_shape=(1, 1, 1), max_shape=(64, 1000, 128)):
+def spectrograms(draw, min_shape=(1, 1, 1), max_shape=(10, 400, 100)):
     shape = []
     for dim_min, dim_max in zip(min_shape, max_shape):
         dim_size = draw(integers(min_value=dim_min, max_value=dim_max))
