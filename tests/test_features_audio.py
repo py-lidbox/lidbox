@@ -24,7 +24,7 @@ audiofiles = [
 audiofiles = [os.path.join("tests", "audio", f) for f in audiofiles]
 
 
-class TestFeaturesAudio:
+class TestFeaturesAudio(tf.test.TestCase):
 
     def test_read_wav(self):
         for path in audiofiles:

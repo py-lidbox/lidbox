@@ -9,7 +9,7 @@ import tensorflow as tf
 import lidbox.features as features
 
 
-class TestFeatures:
+class TestFeatures(tf.test.TestCase):
 
     def test_feature_scaling(self):
         for rank in range(1, 5):
