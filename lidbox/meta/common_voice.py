@@ -17,9 +17,7 @@ def load(corpus_dir, lang, usecols=("client_id", "path", "sentence")):
     split_dfs = []
 
     for split in SPLIT_NAMES:
-        df = pd.read_csv(os.path.join(corpus_dir, lang, split + ".tsv"), sep='\t', usecols=usecols)
-        df = df.assign(label=lang, split=split, id='')
-        df = df.transform(lambda row: fix_row(row, corpus_dir), axis=1)
+        df = load_split(corpus_dir, lang, split, usecols=usecols)
         split_dfs.append(df)
 
     # Concatenate all split dataframes into a single table,
@@ -28,6 +26,13 @@ def load(corpus_dir, lang, usecols=("client_id", "path", "sentence")):
     return (pd.concat(split_dfs)
             .set_index("id", drop=True, verify_integrity=True)
             .sort_index())
+
+
+def load_split(corpus_dir, lang, split, usecols):
+    df = pd.read_csv(os.path.join(corpus_dir, lang, split + ".tsv"), sep='\t', usecols=usecols)
+    df = df.assign(label=lang, split=split, id='')
+    df = df.transform(lambda row: fix_row(row, corpus_dir), axis=1)
+    return df
 
 
 def fix_row(row, corpus_dir):
@@ -50,3 +55,17 @@ def load_all(corpus_dir, langs, num_processes=os.cpu_count()):
     else:
         lang_dfs = (load(corpus_dir, lang) for lang in langs)
     return (pd.concat(lang_dfs, verify_integrity=True).sort_index())
+
+
+def load_all_validated_data(meta, corpus_dir, lang):
+    """
+    1. Load all validated metadata from validated.tsv.
+    2. Merge it with the existing metadata as new training data.
+    3. Drop all duplicate rows (by id) and return the resulting table.
+    """
+    validated = load_split(corpus_dir, lang, "validated", ("client_id", "path"))
+    validated["split"] = "train"
+    return (pd.concat([meta.reset_index(), validated])
+            .drop_duplicates(subset=["id"])
+            .set_index("id", drop=True, verify_integrity=True)
+            .sort_index())
