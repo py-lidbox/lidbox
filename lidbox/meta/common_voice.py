@@ -8,16 +8,17 @@ import pandas as pd
 
 
 SPLIT_NAMES = ("train", "dev", "test")
+USE_COLUMNS = ("client_id", "path", "sentence")
 
 
-def load(corpus_dir, lang, usecols=("client_id", "path", "sentence")):
+def load(corpus_dir, lang, usecols=USE_COLUMNS):
     """
     Load metadata tsv-files of a Common Voice dataset from disk into a single pandas.DataFrame.
     """
     split_dfs = []
 
     for split in SPLIT_NAMES:
-        df = load_split(corpus_dir, lang, split, usecols=usecols)
+        df = load_split(corpus_dir, lang, split, usecols)
         split_dfs.append(df)
 
     # Concatenate all split dataframes into a single table,
@@ -45,25 +46,25 @@ def fix_row(row, corpus_dir):
     return row
 
 
-def load_all(corpus_dir, langs, num_processes=os.cpu_count()):
+def load_all(corpus_dir, langs, usecols=USE_COLUMNS, num_processes=os.cpu_count()):
     """
     Load metadata from multiple datasets into a single table with unique utterance ids for every row.
     """
     if num_processes > 0:
         with multiprocessing.Pool(processes=num_processes) as pool:
-            lang_dfs = pool.starmap(load, ((corpus_dir, lang) for lang in langs))
+            lang_dfs = pool.starmap(load, ((corpus_dir, lang, usecols) for lang in langs))
     else:
-        lang_dfs = (load(corpus_dir, lang) for lang in langs)
+        lang_dfs = (load(corpus_dir, lang, usecols) for lang in langs)
     return (pd.concat(lang_dfs, verify_integrity=True).sort_index())
 
 
-def load_all_validated_data(meta, corpus_dir, lang):
+def load_all_validated_data(meta, corpus_dir, lang, usecols=USE_COLUMNS):
     """
     1. Load all validated metadata from validated.tsv.
     2. Merge it with the existing metadata as new training data.
     3. Drop all duplicate rows (by id) and return the resulting table.
     """
-    validated = load_split(corpus_dir, lang, "validated", ("client_id", "path"))
+    validated = load_split(corpus_dir, lang, "validated", usecols)
     validated["split"] = "train"
     return (pd.concat([meta.reset_index(), validated])
             .drop_duplicates(subset=["id"])
