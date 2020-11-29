@@ -178,6 +178,33 @@ def ms_to_frames(sample_rate, ms):
     return tf.cast(tf.cast(sample_rate, tf.float32) * 1e-3 * tf.cast(ms, tf.float32), tf.int32)
 
 
+def blackman_window(window_length, periodic=True, alpha=0.16, dtype=tf.float32):
+    """
+    Cosine-sum Blackman-window.
+
+    References:
+    * https://en.wikipedia.org/wiki/Window_function#Blackman_window
+    * https://github.com/tensorflow/tensorflow/blob/v2.3.1/tensorflow/python/ops/signal/window_ops.py#L203
+    """
+    tf.debugging.assert_greater(window_length, 1, "unit length window not supported")
+
+    a0 = (1 - alpha) / 2
+    a1 = 1 / 2
+    a2 = alpha / 2
+
+    periodic = tf.cast(periodic, tf.int32)
+    even = 1 - tf.math.mod(window_length, 2)
+
+    n = tf.cast(window_length + periodic * even - 1, dtype=dtype)
+    count = tf.range(0, window_length, dtype=dtype)
+    cos_arg_a1 = tf.constant(2 * np.pi, dtype=dtype) * count / n
+    cos_arg_a2 = tf.constant(4 * np.pi, dtype=dtype) * count / n
+
+    return tf.cast(
+        a0 - a1 * tf.math.cos(cos_arg_a1) + a2 * tf.math.cos(cos_arg_a2),
+        dtype=dtype)
+
+
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32),
