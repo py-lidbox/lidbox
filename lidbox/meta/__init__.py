@@ -86,11 +86,12 @@ def random_oversampling(meta, copy_flag="is_copy", random_state=None):
     if copy_flag not in meta.columns:
         meta = meta.assign({copy_flag: False})
 
-    durations_by_label = meta[["label", "duration"]].groupby("label")
+    durations_by_label = meta.astype({"duration": "float"})[["label", "duration"]].groupby("label")
 
     total_dur = durations_by_label.sum()
     target_label = total_dur.idxmax()[0]
     total_dur_delta = total_dur.loc[target_label] - total_dur
+
     median_dur = durations_by_label.median()
     sample_sizes = (total_dur_delta / median_dur).astype(np.int32)
 
@@ -116,11 +117,45 @@ def random_oversampling(meta, copy_flag="is_copy", random_state=None):
 
 def random_oversampling_on_split(meta, split):
     meta = meta.assign(is_copy=False)
-
     sampled = meta[meta["split"]==split]
     rest = meta[meta["split"]!=split]
-
     return pd.concat([random_oversampling(sampled), rest], verify_integrity=True).sort_index()
+
+
+def random_undersampling(meta, target_label, random_state=None):
+    """
+    Random undersampling by removing metadata rows.
+
+    Procedure:
+    """
+    durations_by_label = meta.astype({"duration": "float"})[["label", "duration"]].groupby("label")
+
+    total_dur = durations_by_label.sum()
+    median_dur = durations_by_label.median()
+    target_dur = total_dur.loc[target_label].duration
+
+    samples = []
+
+    for label in durations_by_label.groups:
+        label_dur = total_dur.loc[label].duration
+        if label_dur > target_dur:
+            sample_size = (target_dur / median_dur.loc[label].duration).astype(np.int32)
+            label_meta = meta[meta["label"]==label]
+            assert sample_size <= len(label_meta), "sample size {} is larger than population {}".format(sample_size, len(label_meta))
+            sample = (label_meta
+                      .sample(n=sample_size, replace=False, random_state=random_state)
+                      .reset_index())
+            samples.append(sample)
+
+    sampled_meta = pd.concat(samples).set_index("id", drop=True)
+    unsampled_meta = meta[~meta["label"].isin(sampled_meta["label"])]
+    return pd.concat([sampled_meta, unsampled_meta], verify_integrity=True).sort_index()
+
+
+def random_undersampling_on_split(meta, split, target_label):
+    sampled = meta[meta["split"]==split]
+    rest = meta[meta["split"]!=split]
+    return pd.concat([random_undersampling(sampled, target_label), rest], verify_integrity=True).sort_index()
 
 
 def generate_label2target(meta):
