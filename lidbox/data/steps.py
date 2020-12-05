@@ -414,7 +414,6 @@ def validate_cache(dataframe, path, cache_key):
             json.dump(values, outfile, indent=2)
 
 
-
 def compute_rms_vad(ds, strength, vad_frame_length_ms, min_non_speech_length_ms=0):
     """
     Compute root mean square based voice activity detection.
