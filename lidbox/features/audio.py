@@ -11,6 +11,8 @@ import tensorflow as tf
 import webrtcvad
 import scipy.signal
 
+from . import mel_ops
+
 
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.string)])
 def read_wav(path):
@@ -40,9 +42,9 @@ def scipy_resample(signal, in_rate, out_rate):
     tf.TensorSpec(shape=[None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
-def resample(signal, in_rate, out_rate):
+def pyfunc_resample(signal, in_rate, out_rate):
     s = tf.numpy_function(scipy_resample, [signal, in_rate, out_rate], [tf.float32])
-    return tf.reshape(s, [-1])
+    return tf.reshape(s, [-1]), out_rate
 
 
 @tf.function(input_signature=[tf.TensorSpec(shape=[], dtype=tf.float32)])
@@ -165,10 +167,19 @@ def log10(x):
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.float32),
-    tf.TensorSpec(shape=[], dtype=tf.float32)])
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+])
 def power_to_db(S, amin=1e-10, top_db=80.0):
     db_spectrogram = 20.0 * (log10(tf.math.maximum(amin, S)) - log10(tf.math.maximum(amin, tf.math.reduce_max(S))))
     return tf.math.maximum(db_spectrogram, tf.math.reduce_max(db_spectrogram) - top_db)
+
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+])
+def db_to_power(S):
+    return tf.math.pow(10.0, S / 20.0)
+
 
 
 @tf.function(input_signature=[
@@ -211,14 +222,21 @@ def blackman_window(window_length, periodic=True, alpha=0.16, dtype=tf.float32):
     tf.TensorSpec(shape=[], dtype=tf.int32),
     tf.TensorSpec(shape=[], dtype=tf.int32),
     tf.TensorSpec(shape=[], dtype=tf.float32),
-    tf.TensorSpec(shape=[], dtype=tf.float32),
-    tf.TensorSpec(shape=[], dtype=tf.float32),
     tf.TensorSpec(shape=[], dtype=tf.int32)])
-def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, power=2.0, fmin=0.0, fmax=8000.0, fft_length=512):
+def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, power=2.0, fft_length=512):
     frame_length = ms_to_frames(sample_rate, frame_length_ms)
     frame_step = ms_to_frames(sample_rate, frame_step_ms)
     S = tf.signal.stft(signals, frame_length, frame_step, fft_length=fft_length)
-    S = tf.math.pow(tf.math.abs(S), power)
+    return tf.math.pow(tf.math.abs(S), power)
+
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32)])
+def drop_frequency_bins(S, sample_rate, fft_length, fmin, fmax):
     # Drop all fft bins that are outside the given [fmin, fmax] band
     fft_freqs = fft_frequencies(sample_rate=sample_rate, n_fft=fft_length)
     # With default [fmin, fmax] of [0, 8000] this will contain only 'True's
@@ -226,15 +244,21 @@ def spectrograms(signals, sample_rate, frame_length_ms=25, frame_step_ms=10, pow
     return tf.boolean_mask(S, bins_in_band, axis=2)
 
 
-def linear_to_mel(S, sample_rate, num_mel_bins=40, fmin=0.0, fmax=8000.0):
-    tf.debugging.assert_rank(S, 3, message="Expected a batch of spectrograms")
-    mel_weights = tf.signal.linear_to_mel_weight_matrix(
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.int32),
+    tf.TensorSpec(shape=[], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.float32)])
+def linear_to_mel(spectrograms, sample_rate, num_mel_bins=40, fmin=0.0, fmax=8000.0):
+    # mel_weights = tf.signal.linear_to_mel_weight_matrix(
+    mel_weights = mel_ops.linear_to_mel_weight_matrix(
         num_mel_bins=num_mel_bins,
-        num_spectrogram_bins=tf.shape(S)[2],
+        num_spectrogram_bins=tf.shape(spectrograms)[2],
         sample_rate=sample_rate,
         lower_edge_hertz=fmin,
         upper_edge_hertz=fmax)
-    return tf.tensordot(S, mel_weights, 1)
+    return tf.tensordot(spectrograms, mel_weights, 1)
 
 
 @tf.function(input_signature=[
