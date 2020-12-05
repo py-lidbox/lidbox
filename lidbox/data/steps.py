@@ -995,6 +995,43 @@ def load_kaldi_data(ds, shape):
     return ds.map(_load_ark)
 
 
+def unstable_reduce_features_mean_variance(ds, axis=0, key="input"):
+    """
+    Compute mean and variance over whole dataset using a naive summation algorithm.
+    Becomes more unstable as the number of elements increase.
+
+    https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Two-pass_algorithm
+    """
+    def _feature_sums(x):
+        return tf.math.reduce_sum(x, axis=axis, keepdims=True)
+
+    first = next(ds.take(1).as_numpy_iterator())
+    accumulator_shape = tf.shape(_feature_sums(first[key]))
+
+    def _accumulate_count_and_sum(acc, x):
+        return (acc[0] + tf.cast(tf.shape(x[key])[axis], tf.int64),
+                acc[1] + _feature_sums(tf.cast(x[key], tf.float64)))
+
+    num_frames, sums1 = ds.reduce(
+            (tf.constant(0, tf.int64),
+             tf.zeros(accumulator_shape, tf.float64)),
+            _accumulate_count_and_sum)
+    means = sums1 / tf.cast(num_frames, tf.float64)
+
+    assert num_frames.numpy() > 1, "cannot compute variances on dataset that has {} frames, must be greater than 1".format(num_frames.numpy())
+
+    def _accumulate_square_mean_diff_sum(acc, x):
+        diff = tf.cast(x[key], tf.float64) - means
+        return acc + _feature_sums(tf.math.square(diff))
+
+    sums2 = ds.reduce(
+            tf.zeros(accumulator_shape, tf.float64),
+            _accumulate_square_mean_diff_sum)
+    variances = sums2 / tf.cast(num_frames - 1, tf.float64)
+
+    return num_frames, means, variances
+
+
 def write_to_kaldi_files(ds, output_dir, element_key="input"):
     """
     For every element of ds, write the value at key element_key into utt2feat.scp and utt2feat.ark files to directory output_dir.
@@ -1046,6 +1083,7 @@ VALID_STEP_FUNCTIONS = {
     "repeat_too_short_signals": repeat_too_short_signals,
     "show_all_elements": show_all_elements,
     "shuffle": shuffle,
+    "unstable_reduce_features_mean_variance": unstable_reduce_features_mean_variance,
     "write_to_kaldi_files": write_to_kaldi_files,
 }
 

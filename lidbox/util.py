@@ -8,6 +8,7 @@ import sklearn.preprocessing
 import tensorflow as tf
 
 import lidbox.metrics
+import lidbox.data.steps
 
 
 TF_AUTOTUNE = tf.data.experimental.AUTOTUNE
@@ -124,3 +125,22 @@ def model2function(model):
             lambda x: model(x, training=False),
             input_signature=[tf.TensorSpec(model_input.shape, model_input.dtype)])
     return model_fn.get_concrete_function()
+
+
+def standard_scaler(dataset, axis=0, key="input"):
+    """
+    Compute mean and variance on axis for every x[key] tensor for every element x in the given dataset.
+    Return a standard scaler function that can be applied on tf.data.Datasets.
+    """
+    _, means, variances = lidbox.data.steps.unstable_reduce_features_mean_variance(
+            dataset, axis=axis, key=key)
+    stddevs = tf.math.sqrt(tf.math.maximum(1e-9, variances))
+
+    def scale_dataset(ds):
+        def _scale_element(x):
+            scaled = tf.cast(x[key], tf.float64) - means
+            scaled = tf.math.divide_no_nan(scaled, stddevs)
+            return dict(x, **{key: tf.cast(scaled, x[key].dtype)})
+        return ds.map(_scale_element, num_parallel_calls=TF_AUTOTUNE)
+
+    return scale_dataset
