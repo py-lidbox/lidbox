@@ -11,16 +11,24 @@ def feature_scaling(X, min, max, axis=None):
 
 @tf.function(input_signature=[
     tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
-    tf.TensorSpec(shape=[], dtype=tf.int32),
-    tf.TensorSpec(shape=[], dtype=tf.bool)])
-def cmvn(X, axis=1, normalize_variance=True):
+    tf.TensorSpec(shape=[], dtype=tf.int32)
+    ])
+def cmn(X, axis=1):
+    """
+    Center means of batches of features X over given axis.
+    """
+    return X - tf.math.reduce_mean(X, axis=axis, keepdims=True)
+
+@tf.function(input_signature=[
+    tf.TensorSpec(shape=[None, None, None], dtype=tf.float32),
+    tf.TensorSpec(shape=[], dtype=tf.int32)
+    ])
+def cmvn(X, axis=1):
     """
     Standardize batches of features X over given axis, i.e. center means to zero and variances to one.
-    If normalize_variance is False, only means are centered.
     """
-    output = X - tf.math.reduce_mean(X, axis=axis, keepdims=True)
-    if normalize_variance:
-        output = tf.math.divide_no_nan(output, tf.math.reduce_std(X, axis=axis, keepdims=True))
+    output = cmn(X, axis=axis)
+    output = tf.math.divide_no_nan(output, tf.math.reduce_std(X, axis=axis, keepdims=True))
     return output
 
 
@@ -37,7 +45,10 @@ def window_normalization(X, axis=1, window_len=-1, normalize_variance=True):
     output = tf.identity(X)
     if window_len == -1 or tf.shape(X)[1] <= window_len:
         # All frames of X fit inside one window, no need for sliding window
-        output = cmvn(X, axis=axis, normalize_variance=normalize_variance)
+        if normalize_variance:
+            output = cmvn(X, axis=axis)
+        else:
+            output = cmn(X, axis=axis)
     else:
         # Pad boundaries by reflecting at most half of the window contents from X, e.g.
         # Left pad [              X              ] right pad
