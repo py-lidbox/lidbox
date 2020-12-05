@@ -31,8 +31,8 @@ def _assert_valid_model_output(module, x, num_outputs, **create_kw):
     m = module.create(x.shape[1:], num_outputs, **create_kw)
     for t in (False, True):
         y = m(x, training=t).numpy()
-        assert not np.isnan(y).any()
-        assert y.shape == (x.shape[0], num_outputs)
+        assert not np.isnan(y).any(), "model output contained NaNs"
+        assert y.shape == (x.shape[0], num_outputs), "model output has unexpected shape"
 
 
 class TestModels(tf.test.TestCase):

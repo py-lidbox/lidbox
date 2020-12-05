@@ -43,8 +43,9 @@ class TestFeaturesAudio(tf.test.TestCase):
 
     def test_resample(self):
         for path in audiofiles:
-            s1, r = audio.read_wav(path)
-            s2 = audio.resample(s1, r, 2*r)
+            s1, r1 = audio.read_wav(path)
+            s2, r2 = audio.pyfunc_resample(s1, r1, 2*r1)
+            assert r2 == 2*r1
             assert not np.isnan(s2.numpy()).any(), "NaNs after resampling"
             assert len(s2.shape) == len(s1.shape), "signal shape changed after resampling"
             assert s2.shape[0] == 2*s1.shape[0], "unexpected signal length after resampling"

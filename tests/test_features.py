@@ -32,11 +32,11 @@ class TestFeatures(tf.test.TestCase):
                 delta = np.random.uniform(1, 10**delta_magnitude)
                 x = np.random.uniform(-delta, delta, size=np.random.randint(1, 20, size=rank))
                 for axis in range(rank):
-                    y_m = features.cmvn(x, axis=axis, normalize_variance=False).numpy()
+                    y_m = features.cmn(x, axis=axis).numpy()
                     assert not np.isnan(y_m).any()
                     assert y_m.shape == x.shape
                     assert np.abs(y_m.mean(axis=axis)).max() < 1
-                    y_mv = features.cmvn(x, axis=axis, normalize_variance=True).numpy()
+                    y_mv = features.cmvn(x, axis=axis).numpy()
                     assert not np.isnan(y_mv).any()
                     assert y_mv.shape == x.shape
                     assert np.abs(y_mv.mean(axis=axis)).max() < 0.1
