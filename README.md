@@ -33,14 +33,14 @@
 
 Python 3.7 or 3.8 is required.
 
-### Most recent version from PyPI
-```
-python3 -m pip install lidbox
-```
-
 ### From source
 ```
 python3 -m pip install https://github.com/py-lidbox/lidbox/archive/master.zip
+```
+
+### Most recent version from PyPI
+```
+python3 -m pip install 'lidbox==1.0.0rc0'
 ```
 
 ### TensorFlow
