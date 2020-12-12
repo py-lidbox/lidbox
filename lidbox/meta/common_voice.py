@@ -61,10 +61,16 @@ def load_all(corpus_dir, langs, usecols=USE_COLUMNS, num_processes=os.cpu_count(
 def load_all_validated_data(meta, corpus_dir, lang, usecols=USE_COLUMNS):
     """
     1. Load all validated metadata from validated.tsv.
-    2. Merge it with the existing metadata as new training data.
-    3. Drop all duplicate rows (by id) and return the resulting table.
+    2. Drop all rows that have test or validation set speaker ids.
+    3. Merge it with the existing metadata as new training data.
+    4. Drop all duplicate rows (by id).
     """
     validated = load_split(corpus_dir, lang, "validated", usecols)
+
+    # Drop all new samples by speakers who are already in the test or validation set
+    existing_nontrain_speakers = meta[meta["split"]!="train"].client_id.unique()
+    validated = validated[~validated["client_id"].isin(existing_nontrain_speakers)]
+
     validated["split"] = "train"
     return (pd.concat([meta.reset_index(), validated])
             .drop_duplicates(subset=["id"])
