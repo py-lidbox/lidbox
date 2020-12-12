@@ -346,7 +346,7 @@ def random_signal_speed_change(ds, min, max, flag=None):
         in_rate = tf.cast(random_ratio * tf.cast(x["sample_rate"], tf.float32), tf.int32)
         out_rate = tf.cast(x["sample_rate"], tf.int32)
 
-        resampled_signal = audio_features.resample(x["signal"], in_rate, out_rate)
+        resampled_signal, _ = audio_features.pyfunc_resample(x["signal"], in_rate, out_rate)
         return dict(x, signal=resampled_signal)
 
     return ds.map(_resample_copies_randomly, num_parallel_calls=TF_AUTOTUNE)
